@@ -10,6 +10,11 @@ adversarially verified by a second Opus agent instructed to refute the dossier
 to `approved` remains a human (Brad) decision.** This report exists to make each
 flip a ~1-minute check of the cited evidence, not an open-ended research task.
 
+> **2026-07-09 update:** the 19 entries still `pending_review` were independently
+> re-verified against live sources and triaged into sign-off-ready / ambiguous /
+> exclude, with copy-paste `licenses.toml` blocks for the approvals — see
+> **"Triage 2026-07-09"** at the end of this file.
+
 ## Summary
 
 | recommendation | n |
@@ -854,3 +859,409 @@ WHAT A HUMAN MUST DECIDE (single question): Is Seattle's custom Open Data ToU �
 - Verifier summary: The dossier's core claim is verified against primary sources and its exclude recommendation stands. Extracting the actual PDF (via pdftotext) confirms the evidence quote word-for-word under a header literally titled "RESTRICTIONS ON USE": "Ada County GIS data is for personal and business use in accordance with Idaho Code 31-875. This data may not be resold or further redistributed." Crucially, the same document's shapefile inventory explicitly lists "ROADCENTERLINES — Street centerlines (FKA ADACTL)" as an Assessor-maintained layer, so the restriction governs this exact dataset by name — a tighter nexus than the dossier's folder-placement inference. The ACHD-hosted service JSON (correct path: Assessor/roadcenterline/MapServer, singular) has an empty copyrightText and no licenseInfo, providing no affirmative redistribution grant, and an independent search surfaced no CC0/CC-BY/PDDL/ODbL/public-domain license anywhere in the ACHD/Ada County ecosystem for this layer. An explicit "may not be resold or further redistributed" clause directly conflicts with publishing a derived bridge table (even ID-only), so the dataset cannot ship. Recommend exclude; confidence raised to 0.9 because the operative clause is now verbatim-verified and the dataset is named in the governing document.
 
 </details>
+
+---
+
+# Triage 2026-07-09 — independent re-verification of the 19 pending datasets
+
+Pre-sign-off triage. Every `status = "pending_review"` entry in
+`datasets/licenses.toml` was **independently re-verified against live sources on
+2026-07-09** (five parallel web-verification agents, ~150 tool calls; every
+operative quote below was seen first-hand in a fetch this session unless
+explicitly flagged as snippet/proxy-recovered). Each approve recommendation
+survived a fresh **adversarial hunt** — alternate terms pages, dataset-level
+metadata overriding portal defaults, portal-ToS-vs-data-license conflation,
+national open-data-law nuances — and the hunts are recorded per dataset below.
+
+Policy applied (Brad, 2026-07-09): the bridge-table gate needs plain
+redistribution-of-IDs rights; **share-alike is screened with ODbL as the
+compatibility bar** (roughly-ODbL-compatible = acceptable); geometry
+redistribution is noted separately to pre-seed the upcoming default-deny
+`geometry_status` gate and does **not** gate the bridge recommendation.
+
+**Statuses in `licenses.toml` remain untouched — every flip is Brad's call.**
+The toml blocks below are drafted so an approval is copy-paste.
+
+## Summary
+
+| bucket | n | datasets |
+|---|---|---|
+| **Sign-off ready (approve)** | 6 | us_philadelphia_sidewalks, sg_singapore_footpaths, de_berlin_roads, hk_hongkong_roads, sg_singapore_roads, ch_grand_geneva_cycle_schema |
+| **Genuinely ambiguous** | 5 | br_sao_paulo_roads, au_sydney_roads, us_fort_collins_sidewalks, us_austin_sidewalks, us_fort_collins_streets |
+| **Recommend exclude** | 8 | in_mumbai_streets, ae_abudhabi_roads, jp_tokyo_emergency_roads, fr_france_winter_hiking_traces, us_ada_county_roads, us_gwinnett_roads, us_frisco_roads, us_frisco_trails |
+
+## 1. Sign-off ready — ranked by impact (target segments), work top-down
+
+| # | dataset | target segs | license | one-line evidence |
+|---|---|---|---|---|
+| 1 | us_philadelphia_sidewalks | 204,760 | DVRPC Data License (custom, attribution-only) | Dataset-level Use Constraints "Unrestricted: can be shared internally and externally without data sharing agreement"; full license text read — credit + no-updates + accuracy obligations only, no redistribution/derivative/SA/NC bar |
+| 2 | sg_singapore_footpaths | 109,960 | Singapore Open Data Licence v1.0 | LTA DataMall landing page: "Use of LTA's datasets and APIs on DataMall constitutes acceptance of the Singapore Open Data Licence" — resolves the SODL-vs-website-ToU conflict in SODL's favor |
+| 3 | de_berlin_roads | 43,369 | dl-de/by-2.0 (safe posture) | Fetched Esri DE item (the actual source) declares dl-de/by-2.0 + credit "Geoportal Berlin / Detailnetz"; official Berlin records say dl-de/zero-2.0 — attributing under by-2.0 satisfies both |
+| 4 | hk_hongkong_roads | 36,107 | DATA.GOV.HK Terms and Conditions of Use | Portal terms grant "browse, download, distribute, reproduce… for both commercial and non-commercial purposes on a free-of-charge basis"; FAQ: "Except re-sale of the data, there is no restriction on the uses of the data" |
+| 5 | sg_singapore_roads | 15,319 | Singapore Open Data Licence v1.0 | Same portal-level SODL acceptance statement as #2; SODL grants distribute/modify/adapt of "the datasets, or any derived analyses" commercially or not |
+| 6 | ch_grand_geneva_cycle_schema | 2,055 | SITG open terms, tier "A - Accès libre" | Layer catalog page confirms tier A (commercial use "Oui"); identical terms already human-approved 2026-07-06 for two sibling SITG datasets |
+
+### 1.1 us_philadelphia_sidewalks (204,760 segs)
+
+**Re-verified 2026-07-09:** `catalog.dvrpc.org/dataset/dvrpc-pedestrian-network` live —
+Use Constraints = "Unrestricted: can be shared internally and externally without
+data sharing agreement" (dataset-level), License = "No License Provided".
+`catalog.dvrpc.org/dvrpc_data_license.html` live — **full text read verbatim**: a
+warranty/liability disclaimer plus exactly three recipient obligations ("will
+credit DVRPC as the source when this data is utilized in analyses, maps,
+publications, reports, presentations, and/or other resources and materials"; "are
+not entitled to any file revisions, updates, corrections or new releases"; "are
+responsible for understanding the accuracy limitations"). **No redistribution
+prohibition, no derivative bar, no share-alike, no non-commercial term.**
+FeatureServer copyrightText empty; no licenseInfo.
+
+**Adversarial hunt (empty):** searched `dvrpc.org/policies/` and the ArcGIS portal
+item for a newer/named license or an overriding restriction — none (only a
+credit-encouraged "Digital Data Disclaimer"). The 2026-07-06 panel's residual
+("is 'shared externally' a redistribution grant for a derived ID table?") is
+answered yes for the plain-ID gate: an explicit external-sharing grant with only
+attribution attached covers an ID-only cross-reference a fortiori. Optional
+belt-and-suspenders: one-line confirmation to mruane@dvrpc.org (listed contact).
+
+```toml
+[datasets.us_philadelphia_sidewalks]
+display_name = "Philadelphia Sidewalks"
+status = "approved"
+license = "DVRPC Data License (custom, attribution-only; dataset-level use constraint: \"Unrestricted: can be shared internally and externally without data sharing agreement\")"
+attribution = "Pedestrian network data courtesy of the Delaware Valley Regional Planning Commission (DVRPC), catalog.dvrpc.org (Bucks, Chester, Delaware, Montgomery counties & City of Philadelphia). DVRPC is credited as the source per the DVRPC Data License; data provided as-is without warranty."
+likely_license = "DVRPC Data License (custom, attribution-only)"
+license_url = "https://catalog.dvrpc.org/dvrpc_data_license.html"
+source_url = "https://arcgis.dvrpc.org/portal/rest/services/Transportation/pedestriannetwork_lines/FeatureServer/0"
+panel_recommendation = "needs_human"
+panel_confidence = 0.82
+panel_reviewed_at = "2026-07-06"
+note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): full DVRPC Data License text read verbatim — warranty disclaimer + credit/no-updates/accuracy obligations only; no redistribution, derivative, share-alike, or NC term. Dataset-level Use Constraints: 'Unrestricted: can be shared internally and externally without data sharing agreement'. Hunt for newer/named DVRPC license found none. Optional: confirm derived-table reading with mruane@dvrpc.org."
+```
+
+### 1.2 sg_singapore_footpaths (109,960 segs)
+
+**Re-verified 2026-07-09:** SODL v1.0 page live with the grant verbatim ("use,
+access, download, copy, distribute, transmit, modify and adapt the datasets, or
+any derived analyses or applications, whether commercially or non-commercially";
+worldwide/perpetual/royalty-free; conspicuous-notice attribution required; no
+share-alike/NC). The 2026-07-06 blocker (static-data.html footer links only the
+restrictive website Term of Use) is **resolved by new evidence**: the DataMall
+landing page (`datamall.lta.gov.sg/content/datamall/en.html`) states — LTA's own
+portal-level declaration, no static-vs-API distinction — "**Use of LTA's datasets
+and APIs on DataMall constitutes acceptance of the Singapore Open Data
+Licence**", and the API/SDK ToS repeats "Use of the datasets is governed by the
+Singapore Open Data Licence". The restrictive website ToU defines its "Contents"
+as "the information, trade and service marks and software programs" (Clause 3) —
+site-content boilerplate, with the more specific SODL governing datasets;
+data.gov.sg mirrors LTA datasets under the national Open Data Licence.
+
+**Adversarial hunt:** searched for any footpath-specific instrument or SODL
+override — none exists (no per-dataset license page). The only adverse document
+is the generic website ToU, scoped as above. Residual 1-minute check for Brad:
+eyeball the landing-page sentence.
+
+```toml
+[datasets.sg_singapore_footpaths]
+display_name = "LTA Singapore Footpaths"
+status = "approved"
+license = "Singapore Open Data Licence v1.0"
+attribution = "Contains information from the LTA Footpath dataset accessed on 2026-02-03 from LTA DataMall (https://datamall.lta.gov.sg), made available under the terms of the Singapore Open Data Licence version 1.0 (https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html)."
+likely_license = "Singapore Open Data Licence v1.0"
+license_url = "https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html"
+source_url = "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/Footpath.zip"
+panel_recommendation = "needs_human"
+panel_confidence = 0.6
+panel_reviewed_at = "2026-07-06"
+note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): SODL-vs-website-ToU conflict resolved by LTA's DataMall landing page — 'Use of LTA's datasets and APIs on DataMall constitutes acceptance of the Singapore Open Data Licence' (no static-vs-API distinction) — plus the API/SDK ToS ('Use of the datasets is governed by the Singapore Open Data Licence'). The restrictive website Term of Use protects site 'Contents' (Clause 3: information, marks, software). SODL: distribute/modify/adapt of datasets and derived analyses, commercial or not; conspicuous attribution notice required (rendered in the published artifact). Downstream Sub-Licensee clause noted: our users need their own LTA licence for the RAW dataset."
+```
+
+### 1.3 de_berlin_roads (43,369 segs)
+
+**Re-verified 2026-07-09:** the actual source item
+(`arcgis.com/sharing/rest/content/items/94bd52bffeef412daee37565fce745e2`,
+"Straßennetz - Berlin", owner esri_DE_content) live — licenseInfo declares
+"Datenlizenz Deutschland - Namensnennung - Version 2.0" with
+accessInformation/credit "Geoportal Berlin / Detailnetz". Official Berlin records
+(`daten.berlin.de` Detailnetz WFS entry AND `gdi.berlin.de` GeoNetwork:
+"Für die Nutzung der Daten ist die Datenlizenz Deutschland - Zero - Version 2.0
+anzuwenden") both say **dl-de/zero-2.0**. Both variants permit
+copy/redistribute/modify incl. commercial and coexist with ODbL. **Posture:
+treat as the stricter dl-de/by-2.0 and attribute — satisfies both licenses
+simultaneously**, so the by-vs-zero conflict no longer needs resolving before
+shipping.
+
+**Adversarial hunt (empty):** hunted an Esri Deutschland terms overlay on
+services2.arcgis.com content — Esri's item-terms doc says the content owner's
+declared license governs; the generic ArcGIS Online ToU covers Esri-owned
+commercial content, not an open-data item carrying its own dl-de license. No
+dl-de-overriding restriction found.
+
+```toml
+[datasets.de_berlin_roads]
+display_name = "Berlin Detailnetz"
+status = "approved"
+license = "dl-de/by-2.0 (Datenlizenz Deutschland - Namensnennung - Version 2.0)"
+attribution = "Datenquelle: Geoportal Berlin / Detailnetz (Land Berlin, Senatsverwaltung fuer Mobilitaet, Verkehr, Klimaschutz und Umwelt), lizenziert unter Datenlizenz Deutschland - Namensnennung - Version 2.0 (dl-de/by-2.0, https://www.govdata.de/dl-de/by-2-0)."
+likely_license = "dl-de/by-2.0 per the fetched Esri DE item; official Berlin portal records list dl-de/zero-2.0 — by-2.0-with-attribution posture satisfies both"
+license_url = "https://www.govdata.de/dl-de/by-2-0"
+source_url = "https://services2.arcgis.com/jUpNdisbWqRpMo35/arcgis/rest/services/Stra%C3%9Fennetz_Berlin/FeatureServer/2"
+panel_recommendation = "needs_human"
+panel_confidence = 0.88
+panel_reviewed_at = "2026-07-06"
+note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): stricter-variant posture. The fetched Esri DE ArcGIS item (94bd52bffeef412daee37565fce745e2) declares dl-de/by-2.0 with mandatory credit 'Geoportal Berlin / Detailnetz'; official Berlin records (daten.berlin.de, gdi.berlin.de GeoNetwork) say dl-de/zero-2.0. Both permit extraction/redistribution/derivatives + ODbL coexistence; attributing under by-2.0 satisfies both, so the conflict is moot for shipping. Hunt for an Esri DE terms overlay found none (item license governs)."
+```
+
+### 1.4 hk_hongkong_roads (36,107 segs)
+
+**Re-verified 2026-07-09:** `data.gov.hk/en/terms-and-conditions` live, grant
+verbatim: "You are allowed to browse, download, distribute, reproduce, hyperlink
+to, and print the Data for both commercial and non-commercial purposes on a
+free-of-charge basis", conditioned on identifying the source, acknowledging the
+Government's IP ownership, and attributing "the Government, the Relevant
+Organisations and DATA.GOV.HK". Dataset page (Road Network 2nd Generation,
+Transport Department) carries no per-dataset override. The panel's derivative-
+silence concern is resolved by the DATA.GOV.HK FAQ: "**Except re-sale of the
+data, there is no restriction on the uses of the data** so long as the users
+comply with the respective Terms and Conditions" — an ID-only bridge table is a
+free reproduction/extraction squarely inside "distribute/reproduce"; we do not
+re-sell.
+
+**Adversarial hunt (empty of blockers):** hunted a per-dataset license, a
+re-sale-beyond-FAQ clause, and a derivative bar — none. **One term Brad's flip
+explicitly accepts:** the indemnity clause ("You shall indemnify the Government
+and the Relevant Organisations against any allegations or claims of
+infringement… in relation to your use, reproduction and/or distribution of the
+Data"). Non-copyleft; HK SAR governing law.
+
+```toml
+[datasets.hk_hongkong_roads]
+display_name = "Hong Kong Transport Dept Roads"
+status = "approved"
+license = "DATA.GOV.HK Terms and Conditions of Use (portal-wide open terms: attribution + IP acknowledgement required; re-sale prohibited; indemnity clause)"
+attribution = "Contains information from the \"Road Network (2nd Generation)\" dataset provided by the Transport Department of the Government of the Hong Kong Special Administrative Region, obtained via DATA.GOV.HK and used under the DATA.GOV.HK Terms and Conditions of Use. Intellectual property rights in the Data are owned by the Government of the HKSAR."
+likely_license = "DATA.GOV.HK Terms and Conditions of Use (custom open terms, attribution required, re-sale prohibited)"
+license_url = "https://data.gov.hk/en/terms-and-conditions"
+source_url = "https://static.data.gov.hk/td/road-network-v2/RdNet_IRNP.gdb.zip"
+panel_recommendation = "needs_human"
+panel_confidence = 0.82
+panel_reviewed_at = "2026-07-06"
+note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): grant re-verified verbatim (distribute/reproduce, commercial + non-commercial, free of charge, attribution + IP acknowledgement). Derivative-silence resolved by the DATA.GOV.HK FAQ: 'Except re-sale of the data, there is no restriction on the uses of the data'. We do not re-sell. APPROVAL ACCEPTS THE INDEMNITY CLAUSE (indemnify the Government against third-party IP claims arising from our use/reproduction/distribution); HK SAR governing law. No per-dataset override on the Road Network (2nd Generation) page."
+```
+
+### 1.5 sg_singapore_roads (15,319 segs)
+
+Same instruments and resolution as sg_singapore_footpaths (§1.2): SODL v1.0
+grant re-verified verbatim; the DataMall landing-page acceptance statement plus
+the API/SDK ToS bind LTA's DataMall datasets (static geospatial zips included)
+to SODL; the restrictive website ToU is site-content boilerplate. static-data.html
+confirmed listing RoadSectionLine (SHP). Note the published target IDs are
+synthetic geometry-hash ids derived from LTA geometry (see datasets yaml) — a
+"derived analysis", expressly distributable under SODL.
+
+```toml
+[datasets.sg_singapore_roads]
+display_name = "LTA Singapore Roads"
+status = "approved"
+license = "Singapore Open Data Licence v1.0"
+attribution = "Contains information from LTA DataMall (Road Section Line) accessed on 2026-02-08 from https://datamall.lta.gov.sg which is made available under the terms of the Singapore Open Data Licence version 1.0 (https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html)."
+likely_license = "Singapore Open Data Licence v1.0"
+license_url = "https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html"
+source_url = "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/RoadSectionLine.zip"
+panel_recommendation = "needs_human"
+panel_confidence = 0.8
+panel_reviewed_at = "2026-07-06"
+note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): same resolution as sg_singapore_footpaths — LTA's DataMall landing page ('Use of LTA's datasets and APIs on DataMall constitutes acceptance of the Singapore Open Data Licence') + API/SDK ToS bind the static geospatial zips to SODL; the restrictive website Term of Use protects site 'Contents' (information/marks/software). SODL grants distribute/modify/adapt of datasets and derived analyses, commercial or not; conspicuous attribution notice required. Published ids are synthetic geometry-hash ids (a 'derived analysis', expressly distributable)."
+```
+
+### 1.6 ch_grand_geneva_cycle_schema (2,055 segs)
+
+**Re-verified 2026-07-09:** SITG terms page live — tier "Accès libre" answers
+"Oui" for download/API, private AND commercial use; attribution clause verbatim
+("La mention de la source des données est requise lors de leur réutilisation").
+The AGGLO_SCHEMA_CYCLABLE catalog entry confirms tier **"A - Accès libre"** at
+both cantonal and federal levels (not "usage privé"), owner Département du
+territoire (Grand Genève project direction).
+
+**Adversarial hunt (empty):** because Grand Genève is cross-border, specifically
+hunted a French / third-party rights reservation on this layer's metadata — none;
+the CH/F attribute is a geographic tag, and ownership/licensing sit with the
+State of Geneva under the GLCT agglomeration convention. Precedent: identical
+terms human-approved 2026-07-06 for ch_geneva_hiking_routes and
+ch_geneva_pedestrian_network.
+
+```toml
+[datasets.ch_grand_geneva_cycle_schema]
+display_name = "Grand Geneva Cycle Schema"
+status = "approved"
+license = "SITG Open Data — \"Accès libre\" (tier A, fully open; custom attribution-only terms, equivalent to opendata.swiss \"Open use. Must provide the source.\")"
+attribution = "Source : Infrastructure cantonale de données géographiques (ICDG) — Système d'information du territoire à Genève (SITG), dataset « Agglo – Schéma cyclable » (AGGLO_SCHEMA_CYCLABLE), État de Genève / Grand Genève, extrait en date du 2026-02-14."
+likely_license = "SITG open geodata terms — tier A \"Accès libre\" (attribution-only)"
+license_url = "https://sitg.ge.ch/ressources/conditions-utilisation-donnees"
+source_url = "https://vector.sitg.ge.ch/arcgis/rest/services/Hosted/AGGLO_SCHEMA_CYCLABLE/FeatureServer/0"
+panel_recommendation = "needs_human"
+panel_confidence = 0.72
+panel_reviewed_at = "2026-07-06"
+note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): tier 'A - Accès libre' re-confirmed on the layer's catalog page (commercial use 'Oui'); mandatory source mention reproduced in attribution. Cross-border hunt for a French/Grand Genève third-party rights reservation found none (ownership with the State of Geneva under the GLCT convention). Same terms as the two SITG datasets human-approved 2026-07-06."
+```
+
+## 2. Genuinely ambiguous — one question each (ranked by impact)
+
+### 2.1 br_sao_paulo_roads (212,264 segs) — lean: approve via isolation only
+
+License re-verified live: GeoSampa is **CC-BY-SA-4.0** portal-wide ("A licença
+Creative Commons Attribution Share-Alike 4.0 (CC-BY-SA-4.0) permite a livre
+utilização e reprodução das informações… e manutenção de licença semelhante");
+WFS GetCapabilities shows `AccessConstraints = NONE`, no per-layer override for
+`classificacao_viaria_cet`. **The share-alike screen does NOT clear this one:**
+fetched `creativecommons.org/compatiblelicenses` — the only BY-SA-compatible
+licenses are **Free Art License 1.3 and GPLv3; ODbL is not on the list**, and no
+BY-SA↔ODbL compatibility declaration exists in either direction. So a BY-SA
+adaptation can never be relicensed ODbL, while ODbL requires derivative databases
+under ODbL — a merged artifact cannot satisfy both.
+
+Publishing architecture matters here: `factory publish` emits per-dataset
+`dataset=<name>/bridge.parquet` files **and** a unified `all_bridges.parquet`
+(src/crosswalk/factory/publish.py). Standalone per-dataset publication under
+CC-BY-SA-4.0 beside (not merged with) ODbL data is a defensible
+"collection/mere aggregation"; inclusion in the combined table is not.
+
+**Question for Brad:** publish the São Paulo bridge as a standalone
+CC-BY-SA-4.0-labeled artifact **excluded from `all_bridges.parquet`** (small
+publisher change: per-dataset license-aware exclusion from the unified table)?
+If yes → approvable; if the pipeline must keep every published dataset in the
+unified table → keep pending/exclude. Lean: worth the publisher change given
+212K segments (largest pending dataset). Contact for a compatibility ruling:
+geosampa@prefeitura.sp.gov.br.
+
+### 2.2 au_sydney_roads (178,227 segs) — lean: approve after one browser check
+
+CC-BY confirmed at dataset level on four mirrors (TfNSW Open Data Hub CKAN:
+`license_id: cc-by` fetched live; data.nsw.gov.au; data.gov.au; researchdata.edu.au),
+and the publisher copyright policy (spatial.nsw.gov.au/copyright, search-recovered:
+"all Spatial Services material… is licensed under the Creative Commons Attribution
+4.0 licence", with web-services data "subject to a Creative Commons Attribution By
+Licence" plus a DCS-attribution term) pins **CC BY 4.0**. The 2026-07-06
+on-selling concern is now localized: the clause ("on-selling, or on-supplying, or
+sub-licensing products in any form") lives in the **SIX Maps product-portal terms**
+(maps.six.nsw.gov.au coreTerms.html, fetched live, contains no CC statement) — a
+different channel from the open-data Spatial Collaboration Portal serving
+FeatureServer/5 (whose endpoint carries empty copyrightText/licenseInfo).
+
+**Question for Brad:** the Spatial Collaboration Portal's own ToS is
+Cloudflare-403 to bots — open `portal.spatial.nsw.gov.au`'s terms in a browser
+and confirm no SIX-Maps-style on-supplying term is attached to the CC-BY
+web-service exports. Lean: approve — CC BY 4.0's no-additional-restrictions term
+(§2(a)(5)(B)) controls for genuinely CC-BY data, and every candidate CC-BY
+version permits our use. Draft attribution if approved: "© State of New South
+Wales (Spatial Services, Department of Customer Service NSW) / Transport for
+NSW — contains Road Segment data, licensed under CC BY 4.0."
+
+### 2.3 us_fort_collins_sidewalks (38,714 segs) — lean: exclude unless email confirms
+
+Re-verified: FeatureServer copyrightText empty, no licenseInfo; no named license
+anywhere on Fort Collins surfaces; the only permission signal is ArcGIS Hub
+boilerplate ("Anyone can use open data from the City of Fort Collins - GIS Open
+Data at no cost… download raw data and share their insights… build new
+applications" — snippet-recovered, Hub is a JS SPA), against an item disclaimer
+stating the data "were developed for use by the City of Fort Collins for its
+internal purposes only". Colorado CORA is access-only, not a reuse license.
+
+**Question for Brad:** does the city intend the Hub "use at no cost / download /
+build applications" statement as an affirmative **redistribution** grant? One
+email to gis@fcgov.com resolves it. Lean: exclude absent written confirmation —
+the language is consumption-framed and contradicted by the internal-purposes
+disclaimer.
+
+### 2.4 us_austin_sidewalks (11,945 segs) — lean: approve (with source re-anchor)
+
+The public-domain conclusion strengthened: operative terms recovered verbatim
+("COA data available through Data.AustinTexas.gov is offered free and without
+restriction… not subject to copyright protection… These datasets are in the
+Public Domain and provided without restriction"); the ArcGIS org (0L95CJ0VTaxqcmED,
+owner PWD_Publisher) confirmed as the City of Austin Public Works Dept; the
+Sidewalks dataset confirmed on data.austintexas.gov (pc5y-5bpw, no license
+override). **But the adversarial hunt was not empty:** the fetched ArcGIS item's
+licenseInfo carries "Reproduction is not allowed without permission from Public
+Works - Public Information Office" — stock Esri boilerplate directly conflicting
+with the city-wide public-domain policy. (Also: the austintexas.gov terms page
+404s post-redesign; the Socrata story is JS-only — terms verified via the OSM
+wiki's reproduction, accepted by that license-strict community.)
+
+**Question for Brad:** accept that the city's public-domain declaration overrides
+the item-level "reproduction not allowed" boilerplate (a PD work has no copyright
+for the clause to operate on) — ideally re-anchoring the license citation (and
+eventually the fetch) to the data.austintexas.gov Sidewalks dataset pc5y-5bpw so
+the boilerplate never enters the chain of title? Lean: approve with the
+re-anchor.
+
+### 2.5 us_fort_collins_streets (10,994 segs) — lean: exclude unless email confirms
+
+Identical posture to §2.3 (same city, same surfaces): item
+f6380ef587ac4e54aaf988b15d8d1746 licenseInfo re-verified verbatim as the pure
+liability/hold-harmless disclaimer ("internal purposes only… AS IS, WITH ALL
+FAULTS"); no affirmative grant found anywhere. Same single question (one
+gis@fcgov.com email covers both Fort Collins datasets); same lean.
+
+## 3. Recommend exclude — blocking evidence (one sentence each)
+
+| dataset | blocking evidence (re-verified live 2026-07-09 unless noted) |
+|---|---|
+| **jp_tokyo_emergency_roads** | KSJ N10 remains on the 非商用 tier (「非商用目的のみでの利用（ただし複製物の再配布を除く）」 — non-commercial only, redistribution of copies excluded, DB redistribution needs MLIT approval); the CC-BY migration MLIT is rolling out (e.g. N13 roads → CC BY 4.0 from April 2026) does not cover N10. |
+| **fr_france_winter_hiking_traces** | Upstream github.com/skitourenguru/Routes licenses the France routes CC BY-ND 4.0 (Fondation Petzl / Skitourenguru) and adds "The usage of this data for private non-commercial purposes is allowed. All other usage is prohibited. In particular its not allowed to create derivates"; IGN's GéoPlateforme distribution declares no overriding license. |
+| **us_ada_county_roads** | The Assessor GIS User Guide's "RESTRICTIONS ON USE" ("This data may not be resold or further redistributed") names ROADCENTERLINES, and the ACHD-hosted layer is literally the Assessor's table (layer description "Assessor.SDE.roadctl") — Assessor data merely hosted by ACHD, with Idaho Code 31-875 a fee/cost-recovery statute, not an open grant. |
+| **us_gwinnett_roads** | No affirmative grant (Hub item licenseInfo/accessInformation null, re-verified), Georgia O.C.G.A. §50-29-2 (verbatim) requires county GIS contracts to "Restrict the duplication and resale of the services and products provided," and the county's GIS Data License Agreement §5.1 prohibits distribution — no default reuse right exists to fall back on. |
+| **us_frisco_roads** | No affirmative grant anywhere (Texas PIA is an access statute, not a reuse license) and the service asserts copyright ("copyrightText: City of Frisco GIS"), cutting against any implied dedication. |
+| **us_frisco_trails** | Same portal/terms as us_frisco_roads (Trail layer copyrightText empty, service-level "City of Frisco GIS"); no reuse grant, PIA access-only. |
+| **in_mumbai_streets** | Still zero license anywhere on the BMC FeatureServer (empty copyrightText/description, no licenseInfo — re-verified), no BMC open-data portal exists, and GODL-India/NDSAP apply to central/state government agencies, not automatically to a municipal corporation → default all-rights-reserved; rescue path: written permission from BMC's Centre for GIS & IT. |
+| **ae_abudhabi_roads** | As sourced, the AD-SDI endpoint publishes no license; the plausible rescue (data.abudhabi Transportation theme under the permissive UAE open-data license — "can be reused, modified, and redistributed", attribution + non-misrepresentation) is unverified: the license page is WAF-blocked and same-layer identity unconfirmed; exclude unless re-sourced from the licensed portal with the identical layer confirmed. |
+
+## 4. Geometry-redistribution pre-seed (for the upcoming `geometry_status` gate)
+
+Noted per dataset, **not** gating the bridge recommendation above.
+
+| dataset | geometry redistribution | operative clause |
+|---|---|---|
+| us_philadelphia_sidewalks | clearly permitted (w/ DVRPC credit) | "Unrestricted: can be shared internally and externally" covers the data file itself |
+| sg_singapore_footpaths | clearly permitted | SODL grants distribute/modify/adapt of the datasets, attribution-only |
+| sg_singapore_roads | clearly permitted | same SODL grant |
+| de_berlin_roads | clearly permitted | dl-de/by-2.0 grants copy/distribute/make-available/modify incl. commercial (zero-2.0 even freer) |
+| hk_hongkong_roads | clearly permitted | verbatim snapshot = "reproduce/distribute", expressly granted free of charge (attribution + IP acknowledgement; no re-sale) |
+| ch_grand_geneva_cycle_schema | clearly permitted (w/ source mention) | tier A: download/API + commercial reuse "Oui", mandatory source mention |
+| au_sydney_roads | permitted under CC BY 4.0 | pending the same SCP-ToS browser check as the bridge (bulk geometry is where an on-supplying clause would bite) |
+| br_sao_paulo_roads | permitted, share-alike strings attached | "livre utilização e reprodução" — but snapshot must itself carry CC-BY-SA-4.0 |
+| us_austin_sidewalks | permitted (public domain) | route the snapshot from the PD data.austintexas.gov dataset to bypass the ArcGIS item's "reproduction not allowed" boilerplate |
+| us_fort_collins_sidewalks | unclear → leaning not | no grant; "internal purposes only" disclaimer |
+| us_fort_collins_streets | unclear → leaning not | same |
+| us_frisco_roads | unclear → leaning not | download permitted "for general purposes"; no republication grant; city asserts copyright |
+| us_frisco_trails | unclear → leaning not | same |
+| us_gwinnett_roads | clearly not | license agreement §5.1 prohibits distribution; §50-29-2 mandates restricting duplication/resale |
+| in_mumbai_streets | clearly not | no grant of any kind → default all-rights-reserved |
+| ae_abudhabi_roads | unclear | no grant as sourced; UAE open-data license would permit "copy, reproduce and communicate to the public… in any format" if re-sourced |
+| jp_tokyo_emergency_roads | clearly not | 「複製物の再配布を除く」 + DB redistribution needs MLIT approval |
+| fr_france_winter_hiking_traces | clearly not | "All other usage is prohibited" beyond private non-commercial |
+| us_ada_county_roads | clearly not | "may not be resold or further redistributed" |
+
+## 5. Verification log
+
+- Method: five parallel read-only web-verification agents (SG/HK/AU; US
+  no-license municipals; Austin/Philly/Ada; Europe; BR/IN/AE/JP), each
+  re-fetching the claimed license URLs, confirming the 2026-07-06 evidence
+  quotes, hunting missed terms, and running adversarial hunts on any approve.
+- Fetch failures + workarounds (flagged inline above): spatial.nsw.gov.au /
+  data.nsw.gov.au Cloudflare-403 (CKAN API + snippets used);
+  portal.spatial.nsw.gov.au ToS unreadable to bots (the §2.2 browser check);
+  data.abudhabi WAF-blocked; austintexas.gov terms page 404 post-redesign (OSM
+  wiki reproduction used); Gwinnett license PDF live but not text-extractable in
+  this environment (prior verbatim extraction + parallel-county template
+  corroboration); web.archive.org unreachable from this environment.
+- Datasets whose 2026-07-06 dossier was materially **changed** by re-verification:
+  sg_singapore_roads / sg_singapore_footpaths (landing-page SODL acceptance
+  statement found → approve), hk_hongkong_roads (FAQ resolves derivative
+  silence → approve), de_berlin_roads (stricter-variant posture makes the
+  by/zero conflict moot → approve), us_philadelphia_sidewalks (full license text
+  read → approve), us_austin_sidewalks (new adverse item-level boilerplate
+  found → ambiguous, lean approve), us_frisco_roads / us_frisco_trails /
+  us_gwinnett_roads (needs_human → exclude: no grant + affirmative
+  copyright/statutory restriction), in_mumbai_streets / ae_abudhabi_roads
+  (needs_human → exclude as sourced), br_sao_paulo_roads (share-alike screen
+  applied: ODbL confirmed NOT BY-SA-compatible → isolation question).
