@@ -1117,6 +1117,26 @@ def test_recover_labeled_groups_classifies():
     assert rec["target_group_ids"] == ["gA"]
 
 
+def test_recover_labeled_groups_tie_breaks_to_smallest_group_id():
+    """#354/#367: when a label's edge overlaps two current groups equally, the
+    winner must be the lexicographically smallest group_id — deterministically,
+    not by hash-seed-dependent set iteration order. The single shared edge
+    yields count 1 in each group (a genuine 2-way tie); 'g_aaa' must win over
+    'g_zzz' regardless of the group list order below."""
+    shared_edge = {"ref_id": R1, "target_id": T1}
+    # groups deliberately listed largest-id-first so a non-sorted max() would
+    # be free to return 'g_zzz' under some hash seeds.
+    groups = [
+        {"group_id": "g_zzz", "edges": [shared_edge]},
+        {"group_id": "g_aaa", "edges": [shared_edge]},
+    ]
+    human_df = pd.DataFrame([{"group_id": "h_tie", "selected_edges": json.dumps([shared_edge])}])
+    rec = recover_labeled_groups(groups, human_df)
+    # single edge fully contained in the chosen group -> clean recovery
+    assert ("h_tie", "g_aaa") in rec["clean"]
+    assert all(gid != "g_zzz" for _, gid in rec["clean"])
+
+
 def test_recover_labeled_groups_set_label_not_misread_as_empty():
     """A SET label (empty selected_edges but membership in ref_ids/target_ids)
     is a MATCH assertion: it must recover by membership overlap into the 'set'

@@ -294,7 +294,12 @@ def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
                 for gid in seg_groups.get(s, ()):
                     cnt_s[gid] += 1
             if cnt_s:
-                set_recovered.append((hgid, max(cnt_s, key=cnt_s.get)))
+                # #354: sort candidates before max() so a count tie breaks on
+                # the lexicographically smallest group_id, not dict/set
+                # iteration order (hash-seed-dependent for str keys — the
+                # source of the ±15 row/process wobble without
+                # PYTHONHASHSEED=0 pinned).
+                set_recovered.append((hgid, max(sorted(cnt_s), key=cnt_s.get)))
             else:
                 set_lost.append(hgid)
             continue
@@ -309,7 +314,10 @@ def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
         if not cnt:
             lost.append(hgid)
             continue
-        best_gid = max(cnt, key=cnt.get)
+        # #354: sort before max() for a deterministic tie-break (smallest
+        # group_id wins on a count tie) instead of hash-order-dependent dict
+        # iteration.
+        best_gid = max(sorted(cnt), key=cnt.get)
         if cnt[best_gid] == len(hes):
             clean.append((hgid, best_gid))
         else:
@@ -546,7 +554,9 @@ def _map_set_labels_to_groups(
                 counts[gid] += 1
         if not counts:
             continue
-        best = max(counts, key=counts.get)
+        # Same deterministic tie-break as recover_labeled_groups (#354): sort
+        # before max() so ties resolve to the smallest group_id.
+        best = max(sorted(counts), key=counts.get)
         mapping[hgid] = hgid if counts.get(hgid, 0) > 0 else best
     return mapping
 
