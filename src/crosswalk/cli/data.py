@@ -3003,3 +3003,180 @@ def stitch_reinterpret_sets(
         console.print(f"\n[cyan]Dry run: {grand_total} label(s) would be reinterpreted.[/cyan]")
     else:
         console.print(f"\n[green]Reinterpreted {grand_total} label(s) total.[/green]")
+
+
+@data_app.command("stitch-rekey")
+def stitch_rekey(
+    dataset: str = typer.Argument(
+        ...,
+        help="Dataset ID to rekey stitching labels for (e.g., us_boston_streets)",
+    ),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Rekey the clean (1:1) bucket through the label store and write the "
+        "audit log. Default: dry-run — print the full plan, write nothing.",
+    ),
+    allow_partial: bool = typer.Option(
+        False,
+        "--allow-partial",
+        help="Proceed (exit 0 / apply the clean bucket) even when the "
+        "collision-refused bucket is non-empty.",
+    ),
+    sidecar: Path | None = typer.Option(
+        None,
+        "--sidecar",
+        help="Groups sidecar JSON to rekey against "
+        "(default: data/output/{dataset}_groups.json from the last stitch run)",
+    ),
+    labels_dir: Path | None = typer.Option(
+        None,
+        "--labels-dir",
+        help="Stitching labels root (default: labels/stitching)",
+    ),
+):
+    """Rekey drifted stitching labels onto the CURRENT sidecar grouping (#374/#375).
+
+    Stitching labels are keyed by group_id = hash of the exact ref/target id
+    set, so every optimizer re-grouping strands labels (Boston: ~74% stale,
+    zero lost). This classifies every label against the current groups sidecar:
+
+    \b
+      unchanged          group_id still current — no action
+      clean (1:1)        drifted, maps to exactly one unoccupied group — SAFE
+      merge union/conflict  N->1: optimizer merged old components — REVIEW
+      split              1->N: edges span current groups — REVIEW
+      set                membership-semantics labels — REVIEW (never auto)
+      collision-refused  target group_id already labeled — REFUSED (exit 1)
+      lost/empty         unrecoverable
+
+    DRY-RUN by default (prints the plan, writes nothing). --apply rekeys ONLY
+    the clean bucket via the store API and appends the old->new join table to
+    labels/stitching/dataset={id}/rekey_log.csv. Exits nonzero if anything is
+    collision-refused unless --allow-partial; a refused apply writes nothing.
+
+    Examples:
+        crosswalk data stitch-rekey us_boston_streets            # dry-run plan
+        crosswalk data stitch-rekey us_boston_streets --apply    # rekey clean 1:1
+    """
+    import json
+
+    from ..filenames import PROJECT_ROOT, bridge_filename, groups_sidecar_path
+    from ..labeling.stitch_rekey import apply_clean_rekey, build_rekey_plan
+    from ..labeling.stitching_store import DEFAULT_STITCHING_DIR, StitchingLabelStore
+
+    sidecar_path = sidecar or groups_sidecar_path(
+        PROJECT_ROOT / "data" / "output" / bridge_filename(dataset)
+    )
+    if not sidecar_path.exists():
+        console.print(
+            f"[red]No groups sidecar at {sidecar_path} — "
+            f"run `crosswalk stitch {dataset}` first.[/red]"
+        )
+        raise typer.Exit(1)
+    groups = json.loads(sidecar_path.read_text()).get("groups", [])
+
+    store = StitchingLabelStore(dataset, labels_dir=labels_dir or DEFAULT_STITCHING_DIR)
+    labels = store.load(dataset)
+    if labels.empty:
+        console.print(f"[yellow]No stitching labels for {dataset}.[/yellow]")
+        raise typer.Exit(0)
+
+    plan = build_rekey_plan(groups, labels, dataset)
+    counts = plan.counts()
+
+    console.print(f"\n[bold]=== stitch-rekey plan for {dataset} ===[/bold]")
+    console.print(f"labels: {plan.n_labels}  |  current sidecar groups: {plan.n_current_groups}")
+    console.print(f"  unchanged  (group_id already current):     {counts['unchanged']}")
+    console.print(f"  [green]clean 1:1  (rekeyable via --apply):        {counts['clean']}[/green]")
+    console.print(
+        f"  [yellow]merge N->1 (union proposal -> REVIEW):     {counts['merge_union']}[/yellow]"
+    )
+    console.print(
+        f"  [yellow]merge N->1 (conflicting -> REVIEW):        {counts['merge_conflict']}[/yellow]"
+    )
+    console.print(
+        f"  [yellow]split 1->N (boundary changed -> REVIEW):   {counts['split']}[/yellow]"
+    )
+    console.print(
+        f"  [yellow]set        (membership -> REVIEW):         {counts['set_review']}[/yellow]"
+    )
+    console.print(
+        f"  [red]collision-REFUSED:                         {counts['collision_refused']}[/red]"
+    )
+    console.print(
+        f"  lost / empty-unrecoverable / set-lost:     "
+        f"{counts['lost']} / {counts['empty_unrecoverable']} / {counts['set_lost']}"
+    )
+
+    if plan.clean:
+        console.print("\n[green]clean 1:1 rekeys (applied with --apply):[/green]")
+        for m in plan.clean:
+            console.print(f"  {m.old_group_id}  ->  {m.new_group_id}  [{m.labeler}]")
+    for title, cases in (
+        ("merge N->1, union-eligible (send to /stitching-review)", plan.merge_union),
+        ("merge N->1, CONFLICTING scopes (send to /stitching-review)", plan.merge_conflict),
+    ):
+        if cases:
+            console.print(f"\n[yellow]{title}:[/yellow]")
+            for c in cases:
+                detail = (
+                    f"union of {len(c.union_edges)} edges"
+                    if not c.shared_segments
+                    else f"{len(c.shared_segments)} shared segment(s) adjudicated twice"
+                )
+                console.print(f"  {' + '.join(c.old_group_ids)}  ->  {c.new_group_id}  ({detail})")
+    if plan.split:
+        console.print("\n[yellow]split 1->N (send to /stitching-review):[/yellow]")
+        for s in plan.split:
+            console.print(
+                f"  {s.old_group_id}: {s.n_edges_in_best}/{s.n_edges_total} edges in "
+                f"largest current group {s.best_group_id}"
+            )
+    if plan.set_review:
+        console.print(
+            "\n[yellow]set-semantics labels (membership report; never auto-applied):[/yellow]"
+        )
+        for sc in plan.set_review:
+            console.print(
+                f"  {sc.old_group_id}: {sc.n_members_in_dominant}/{sc.n_members_total} members "
+                f"in dominant group {sc.dominant_group_id} "
+                f"(members span {sc.n_groups_spanned} current group(s))"
+            )
+    if plan.collision_refused:
+        console.print("\n[red]collision-REFUSED (would create duplicate group_id rows):[/red]")
+        for c in plan.collision_refused:
+            console.print(f"  {' + '.join(c.old_group_ids)}  ->  {c.new_group_id}: {c.reason}")
+    for title, gids in (
+        ("lost (edges no longer in any current group)", plan.lost),
+        ("empty reject-all, unrecoverable (group_id gone)", plan.empty_unrecoverable),
+        ("set-lost (members in no current group)", plan.set_lost),
+    ):
+        if gids:
+            console.print(f"\n{title}: {', '.join(gids)}")
+
+    if plan.has_refusals and not allow_partial:
+        if apply:
+            console.print(
+                "\n[red]REFUSED: collision bucket is non-empty — nothing was written. "
+                "Resolve the collisions in /stitching-review or re-run with "
+                "--allow-partial to apply the clean bucket anyway.[/red]"
+            )
+        else:
+            console.print(
+                "\n[red]collision bucket is non-empty (exit 1); "
+                "pass --allow-partial to proceed.[/red]"
+            )
+        raise typer.Exit(1)
+
+    if not apply:
+        console.print(
+            "\n[cyan](dry-run — nothing written. Re-run with --apply to rekey the clean bucket.)[/cyan]"
+        )
+        return
+
+    n = apply_clean_rekey(store, plan, sidecar=str(sidecar_path))
+    console.print(
+        f"\n[green]Applied: rekeyed {n} clean label(s); audit trail appended to "
+        f"{store.partition_path / 'rekey_log.csv'} (backup at {store.csv_path}.bak).[/green]"
+    )
