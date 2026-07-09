@@ -986,6 +986,55 @@ class TestSelectStitchingBatchGating:
 
 
 # ---------------------------------------------------------------------------
+# select_stitching_batch — over-backstop exclusion (panel-wave size gate)
+# ---------------------------------------------------------------------------
+
+
+class TestSelectStitchingBatchBackstop:
+    def _grp(self, gid, n_edges):
+        triples = [(f"r{gid}{j}", f"t{gid}{j}", 0.9) for j in range(n_edges)]
+        edges = [_edge(r, t, c) for r, t, c in triples]
+        return _make_group(gid, edges, [_alt(triples)])
+
+    def test_over_backstop_excluded_even_as_largest(self):
+        # The monster is the single largest group — the Tier-1 always-include
+        # rule must not resurrect it when a cap is set.
+        groups = [self._grp("monster", 50), self._grp("mid", 12), self._grp("small", 2)]
+        result = select_stitching_batch(groups, set(), k=3, max_candidate_edges=40)
+        ids = {g["group_id"] for g in result}
+        assert ids == {"mid", "small"}
+        # The largest ELIGIBLE group takes the Tier-1 slot instead.
+        mid = next(g for g in result if g["group_id"] == "mid")
+        assert mid["review_tier"] == "large"
+
+    def test_no_cap_keeps_monster_eligible(self):
+        # Default (None) preserves the old behavior — the human review queue
+        # relies on it so size-gated panel failures stay reviewable.
+        groups = [self._grp("monster", 50), self._grp("small", 2)]
+        result = select_stitching_batch(groups, set(), k=2)
+        assert {g["group_id"] for g in result} == {"monster", "small"}
+
+    def test_cap_is_strictly_greater_than(self):
+        # A group exactly AT the cap is still exportable, hence still eligible.
+        groups = [self._grp("at_cap", 40), self._grp("small", 2)]
+        result = select_stitching_batch(groups, set(), k=2, max_candidate_edges=40)
+        assert {g["group_id"] for g in result} == {"at_cap", "small"}
+
+    def test_prefers_sidecar_n_edges_field(self):
+        # The count mirrors the export gate: a sidecar ``n_edges`` field wins
+        # over len(edges), so selection and export agree on a group's size.
+        g = self._grp("hidden_monster", 2)
+        g["n_edges"] = 100
+        groups = [g, self._grp("small", 2)]
+        result = select_stitching_batch(groups, set(), k=2, max_candidate_edges=40)
+        assert {grp["group_id"] for grp in result} == {"small"}
+
+    def test_all_over_backstop_yields_empty(self):
+        groups = [self._grp("m1", 41), self._grp("m2", 60)]
+        assert select_stitching_batch(groups, set(), k=2, max_candidate_edges=40) == []
+
+
+# ---------------------------------------------------------------------------
 # panel_routing — human-queue panel-failure gate
 # ---------------------------------------------------------------------------
 
@@ -1043,6 +1092,141 @@ class TestPanelRouting:
         from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
 
         assert panel_failed_group_ids("nope", tmp_path / "batches") == set()
+
+
+# ---------------------------------------------------------------------------
+# panel_routing — read-time size-gate overlay (export-backstop routing void)
+# ---------------------------------------------------------------------------
+
+
+class TestPanelRoutingSizeGate:
+    """Over-backstop auto_accepts must surface as panel failures, not vanish.
+
+    The export backstop blocks any verdict on an over-backstop group from
+    minting a label, so a historical wave's unanimous auto_accept on one was in
+    a void: not in the human queue (routing != human_review) and not exported.
+    The overlay in latest_panel_consensus rewrites such rows to their EFFECTIVE
+    routing (human_review / size_gated) without touching the on-disk CSV.
+    """
+
+    @property
+    def _backstop(self):
+        from crosswalk.config import settings
+
+        return settings.stitch_export_backstop_max_edges
+
+    def _write_wave(self, batch_dir, rows, meta_edges=None, mtime=None):
+        """Write a consensus.csv (+ per-group metadata.yaml n_edges_full)."""
+        import csv as _csv
+
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        cpath = batch_dir / "consensus.csv"
+        fields = ["group_id", "routing", "route_reason", "minority", "consensus", "choice"]
+        with open(cpath, "w", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=fields)
+            w.writeheader()
+            for row in rows:
+                w.writerow({k: row.get(k, "") for k in fields})
+        for gid, n in (meta_edges or {}).items():
+            gdir = batch_dir / gid
+            gdir.mkdir(exist_ok=True)
+            (gdir / "metadata.yaml").write_text(f"group_id: {gid}\nn_edges_full: {n}\n")
+        if mtime is not None:
+            import os
+
+            os.utime(cpath, (mtime, mtime))
+
+    def test_over_backstop_auto_accept_becomes_panel_failure(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import (
+            latest_panel_routing,
+            panel_failed_group_ids,
+        )
+
+        root = tmp_path / "batches"
+        self._write_wave(
+            root / "ds_a",
+            [{"group_id": "monster", "routing": "auto_accept", "route_reason": "unanimous"}],
+            meta_edges={"monster": self._backstop + 1},
+            mtime=1000,
+        )
+        assert latest_panel_routing("ds_a", root)["monster"] == "human_review"
+        assert panel_failed_group_ids("ds_a", root) == {"monster"}
+
+    def test_overlay_attaches_size_gated_reason(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import attach_panel_route_reasons
+
+        root = tmp_path / "batches"
+        self._write_wave(
+            root / "ds_a",
+            [{"group_id": "monster", "routing": "auto_accept", "route_reason": "unanimous"}],
+            meta_edges={"monster": self._backstop + 1},
+            mtime=1000,
+        )
+        groups = [{"group_id": "monster"}]
+        assert attach_panel_route_reasons(groups, "ds_a", root) == 1
+        assert groups[0]["panel_route_reason"] == "size_gated"
+        assert groups[0]["panel_route_reason_human"] == (
+            "over the size gate — too large to auto-accept"
+        )
+
+    def test_at_and_under_backstop_auto_accepts_unchanged(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import (
+            latest_panel_routing,
+            panel_failed_group_ids,
+        )
+
+        root = tmp_path / "batches"
+        self._write_wave(
+            root / "ds_a",
+            [
+                {"group_id": "at_cap", "routing": "auto_accept", "route_reason": "unanimous"},
+                {"group_id": "small", "routing": "auto_accept", "route_reason": "unanimous"},
+            ],
+            meta_edges={"at_cap": self._backstop, "small": 3},
+            mtime=1000,
+        )
+        routing = latest_panel_routing("ds_a", root)
+        assert routing == {"at_cap": "auto_accept", "small": "auto_accept"}
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_missing_pack_metadata_leaves_row_untouched(self, tmp_path):
+        # No metadata.yaml -> no size evidence -> conservative old behavior.
+        from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
+
+        root = tmp_path / "batches"
+        self._write_wave(
+            root / "ds_a",
+            [{"group_id": "g1", "routing": "auto_accept", "route_reason": "unanimous"}],
+            meta_edges=None,
+            mtime=1000,
+        )
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_human_review_rows_keep_specific_reason(self, tmp_path):
+        # The overlay only rewrites auto_accepts: an over-backstop dissent row
+        # already routes to a human and its reason stays the (more useful) one.
+        from crosswalk.agent_labeling.panel_routing import (
+            latest_panel_consensus,
+            panel_failed_group_ids,
+        )
+
+        root = tmp_path / "batches"
+        self._write_wave(
+            root / "ds_a",
+            [
+                {
+                    "group_id": "monster",
+                    "routing": "human_review",
+                    "route_reason": "dissent:codex=B",
+                    "minority": "codex=B",
+                }
+            ],
+            meta_edges={"monster": self._backstop + 1},
+            mtime=1000,
+        )
+        assert panel_failed_group_ids("ds_a", root) == {"monster"}
+        row = latest_panel_consensus("ds_a", root)["monster"]
+        assert row["route_reason"] == "dissent:codex=B"
 
 
 # ---------------------------------------------------------------------------

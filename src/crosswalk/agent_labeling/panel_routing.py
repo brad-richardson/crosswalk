@@ -19,6 +19,20 @@ the newest wave's routing wins on conflict; the dir name breaks ties). That
 mirrors the precedence-ordered merge used by the label exporter
 (:func:`stitch_export._merge_consensus`) without requiring the caller to know
 the wave order.
+
+Size-gate overlay: the export path has a hard backstop
+(``settings.stitch_export_backstop_max_edges``) — no verdict on a group whose
+candidate-edge count exceeds it can ever mint a label. An ``auto_accept``
+verdict on such a group would therefore vanish: not in the human queue (it did
+not route to ``human_review``) and blocked at export. :func:`compute_consensus
+<stitch_runner.compute_consensus>` now demotes those verdicts at vote time, and
+this module applies the SAME gate when reading historical waves (rows stamped
+before the gate existed), so past monster votes surface in the human queue with
+``route_reason="size_gated"`` instead of disappearing. Groups the panel NEVER
+voted on stay out of the queue even when over-backstop: batch selection no
+longer feeds them to panel waves, and reviewing a monster whole is exactly what
+the #367 Mode-B decomposition flow is being built to avoid (``--include-unvoted``
+remains the manual escape).
 """
 
 from __future__ import annotations
@@ -29,6 +43,9 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+import yaml
+
+from ..config import settings
 from ..filenames import PROJECT_ROOT
 
 
@@ -89,6 +106,11 @@ REASON_ALL_ABSTAINED = "all_abstained"
 #: include a cross-mode (pedestrian/vehicular/bike) pair. Value kept as the
 #: historical on-disk spelling stamped by the gate since it shipped.
 REASON_CLASS_MISMATCH = "class-mismatch"
+#: Size gate demoted a verdict on a group whose candidate-edge count exceeds
+#: the export backstop (``settings.stitch_export_backstop_max_edges``): no
+#: verdict on such a group can mint a label, so it always needs a human.
+#: Same spelling as the legacy phase-2 size gate's stamp.
+REASON_SIZE_GATED = "size_gated"
 
 #: Legacy phase-2 stamps that merely echo the ``consensus`` column ("majority",
 #: "none"). They carry strictly less information than what the row's own
@@ -171,8 +193,10 @@ def humanize_route_reason(code: str) -> str:
         REASON_NO_MAJORITY: "panel split — no majority choice",
         REASON_ALL_ABSTAINED: "all panelists abstained",
         REASON_CLASS_MISMATCH: "cross-mode edge (e.g. footway↔road) blocked auto-accept",
-        # Legacy phase-2 size gate (not derivable from the row's columns).
-        "size_gated": "over the size gate — too large to auto-accept",
+        # Size gate: stamped by compute_consensus (and the read-time overlay in
+        # latest_panel_consensus) on over-backstop groups; also the legacy
+        # phase-2 gate's spelling.
+        REASON_SIZE_GATED: "over the size gate — too large to auto-accept",
     }
     if code in fixed:
         return fixed[code]
@@ -191,6 +215,40 @@ def humanize_route_reason(code: str) -> str:
         return f"only {n} valid vote{'' if n == '1' else 's'} — below quorum"
     # Legacy/unknown codes (e.g. phase-2's "majority") pass through readably.
     return code.replace("_", " ")
+
+
+def candidate_edge_count(meta: Mapping) -> int | None:
+    """A group's candidate-edge count from its evidence-pack metadata.
+
+    ``n_edges_full`` is the group's full candidate-edge count
+    (:func:`stitch_evidence.build_metadata` stamps it on every pack; it always
+    equals ``n_edges_rendered`` post-clipping-fix, which serves as the
+    fallback). Returns ``None`` when neither is present — size gating is then
+    skipped for the group.
+    """
+    n = _int_or_none(meta.get("n_edges_full"))
+    if n is None:
+        n = _int_or_none(meta.get("n_edges_rendered"))
+    return n
+
+
+def _pack_candidate_edge_count(batch_dir: Path, group_id: str) -> int | None:
+    """Candidate-edge count of a voted group, read from its evidence pack.
+
+    Returns ``None`` when the pack's ``metadata.yaml`` is missing or
+    unparseable (e.g. a batch dir kept only for its CSVs) — callers treat that
+    as "no size evidence" and leave the row's routing untouched.
+    """
+    meta_path = batch_dir / group_id / "metadata.yaml"
+    if not meta_path.is_file():
+        return None
+    try:
+        meta = yaml.safe_load(meta_path.read_text())
+    except (yaml.YAMLError, OSError, UnicodeDecodeError):
+        return None
+    if not isinstance(meta, Mapping):
+        return None
+    return candidate_edge_count(meta)
 
 
 def _dataset_batch_dirs(dataset: str, batches_root: Path) -> list[Path]:
@@ -224,8 +282,18 @@ def latest_panel_consensus(
     Later waves (by consensus mtime) overwrite earlier ones. Returns an empty
     dict when the dataset has no panel batches. Rows with a blank group_id are
     skipped.
+
+    Size-gate overlay (see module docstring): an ``auto_accept`` row on a group
+    whose candidate-edge count exceeds the export backstop is returned with its
+    EFFECTIVE routing — ``human_review`` / ``route_reason="size_gated"`` (the
+    same code :func:`stitch_runner.compute_consensus` stamps going forward).
+    The export backstop blocks such a verdict from ever minting a label, so
+    treating it as accepted would let it vanish, reviewed by no one. The
+    on-disk CSV is never modified; rows whose evidence pack is missing are left
+    untouched (no size evidence).
     """
     rows: dict[str, dict] = {}
+    origins: dict[str, Path] = {}
     for batch_dir in _dataset_batch_dirs(dataset, batches_root):
         with open(batch_dir / "consensus.csv", newline="") as fh:
             for row in csv.DictReader(fh):
@@ -233,6 +301,16 @@ def latest_panel_consensus(
                 if not gid:
                     continue
                 rows[gid] = row
+                origins[gid] = batch_dir
+
+    backstop = settings.stitch_export_backstop_max_edges
+    for gid, row in rows.items():
+        if str(row.get("routing", "") or "").strip() != ROUTING_AUTO_ACCEPT:
+            continue  # already human-routed; keep the (more specific) reason
+        n_edges = _pack_candidate_edge_count(origins[gid], gid)
+        if n_edges is not None and n_edges > backstop:
+            row["routing"] = ROUTING_HUMAN_REVIEW
+            row["route_reason"] = REASON_SIZE_GATED
     return rows
 
 

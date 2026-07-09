@@ -465,6 +465,68 @@ def test_class_gate_disabled_without_edge_classes():
 
 
 # ---------------------------------------------------------------------------
+# Consensus: size gate (export-backstop routing void, #322/#330 follow-up)
+# ---------------------------------------------------------------------------
+
+
+def _unanimous_votes():
+    es = frozenset({(R1, T1)})
+    return [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "A", es)]
+
+
+def _backstop():
+    from crosswalk.config import settings
+
+    return settings.stitch_export_backstop_max_edges
+
+
+def test_size_gate_demotes_over_backstop_unanimous():
+    # A unanimous verdict on a group over the export backstop can never mint a
+    # label; it must route to a human instead of vanishing in the void.
+    c = sr.compute_consensus(_unanimous_votes(), n_candidate_edges=_backstop() + 1)
+    assert c.consensus == "unanimous"
+    assert c.routing == "human_review"
+    assert c.route_reason == "size_gated"
+
+
+def test_size_gate_passes_at_and_under_backstop():
+    # The gate is strictly ">" — a group AT the backstop is still exportable.
+    for n in (_backstop(), 1):
+        c = sr.compute_consensus(_unanimous_votes(), n_candidate_edges=n)
+        assert c.routing == "auto_accept"
+        assert c.route_reason == "unanimous"
+
+
+def test_size_gate_disabled_without_count():
+    # Backward-compat: no n_candidate_edges -> gate is a no-op.
+    c = sr.compute_consensus(_unanimous_votes(), n_candidate_edges=None)
+    assert c.routing == "auto_accept"
+    assert c.route_reason == "unanimous"
+
+
+def test_size_gate_only_affects_auto_accept():
+    # A dissent verdict on an over-backstop group already routes to a human;
+    # its reason keeps the (more specific) vote outcome.
+    es = frozenset({(R1, T1)})
+    votes = [_vote("claude", "A", es), _vote("codex", "A", es), _vote("agy", "B")]
+    c = sr.compute_consensus(votes, n_candidate_edges=_backstop() + 1)
+    assert c.routing == "human_review"
+    assert c.route_reason == "dissent:agy=B"
+
+
+def test_size_gate_wins_over_class_gate():
+    # When both gates would demote, the structural export block is the
+    # decisive fact — size_gated wins.
+    c = sr.compute_consensus(
+        _unanimous_votes(),
+        edge_classes=[("footway", "residential")],
+        n_candidate_edges=_backstop() + 1,
+    )
+    assert c.routing == "human_review"
+    assert c.route_reason == "size_gated"
+
+
+# ---------------------------------------------------------------------------
 # Runner: retry-once + abstention (mocked subprocess)
 # ---------------------------------------------------------------------------
 
@@ -1817,6 +1879,43 @@ def test_run_batch_resume_skips_completed_groups(tmp_path, monkeypatch):
     # Final output carries BOTH groups.
     assert set(cons_df["group_id"]) == {"g1", "g2"}
     assert set(votes_df["group_id"]) == {"g1", "g2"}
+
+
+def test_run_batch_size_gates_over_backstop_group(tmp_path, monkeypatch):
+    """A unanimous vote on an over-backstop pack routes human_review/size_gated.
+
+    This closes the routing void: before the gate, such a verdict was
+    auto_accept (so never in the human queue) yet blocked at export by the
+    backstop — it vanished, reviewed by no one.
+    """
+    import yaml
+
+    from crosswalk.config import settings
+
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    d = _write_min_pack(batch_dir, "g1")
+    # Inflate the pack's candidate-edge count over the export backstop.
+    meta = yaml.safe_load((d / "metadata.yaml").read_text())
+    meta["n_edges_full"] = settings.stitch_export_backstop_max_edges + 1
+    (d / "metadata.yaml").write_text(yaml.safe_dump(meta))
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    panel = [
+        sr.ProviderSpec("claude", "m"),
+        sr.ProviderSpec("codex", "m"),
+        sr.ProviderSpec("agy", "m"),
+    ]
+
+    _votes_df, cons_df = sr.run_batch(batch_dir, panel=panel)
+    row = cons_df.iloc[0]
+    assert row["consensus"] == "unanimous"  # the vote outcome is preserved
+    assert row["routing"] == "human_review"  # ...but it must reach a human
+    assert row["route_reason"] == "size_gated"
 
 
 def _breaker_panel_and_invokers(monkeypatch, failing_invoker):
