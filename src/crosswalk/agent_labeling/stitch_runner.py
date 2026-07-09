@@ -28,7 +28,14 @@ import pandas as pd
 import yaml
 from loguru import logger
 
-from .panel_routing import REASON_ALL_ABSTAINED, REASON_CLASS_MISMATCH, derive_route_reason
+from ..config import settings
+from .panel_routing import (
+    REASON_ALL_ABSTAINED,
+    REASON_CLASS_MISMATCH,
+    REASON_SIZE_GATED,
+    candidate_edge_count,
+    derive_route_reason,
+)
 
 # OSError errnos that are deterministic for a fixed command: retrying identically
 # fails identically, so they hard-fail immediately rather than consuming the
@@ -1086,18 +1093,34 @@ class Consensus:
 def compute_consensus(
     votes: list[Vote],
     edge_classes: list[tuple[str | None, str | None]] | None = None,
+    n_candidate_edges: int | None = None,
 ) -> Consensus:
     """Apply the 3/3, 2/3, else routing rule over a group's votes.
 
     Abstentions do not count toward agreement. Only unanimous agreement among
     all (>=3) valid votes auto-accepts; everything else routes to human review.
 
+    Size gate: when ``n_candidate_edges`` (the group's candidate-edge count) is
+    supplied and exceeds the export backstop
+    (``settings.stitch_export_backstop_max_edges``), an otherwise-auto-accept
+    verdict is demoted to ``human_review`` with ``route_reason="size_gated"``.
+    No verdict on such a group can ever mint a label — ``stitch_export``
+    enforces the backstop on the candidate count on both its structural gate
+    and its legacy no-structure-fields fallback — so letting it auto-accept
+    would make it vanish: not in the human queue, not exported, reviewed by
+    no one. Non-auto-accept outcomes
+    already route to a human and keep their (more specific) reason, so every
+    over-backstop group ends up ``human_review`` regardless of vote outcome.
+    ``None`` disables the gate (callers without size metadata get the pre-gate
+    behavior).
+
     Class-consistency gate: when ``edge_classes`` (the (ref_class, target_class)
     pairs of the *chosen* edge set) is supplied, an otherwise-auto-accept
     verdict whose chosen edges include a cross-mode pedestrian↔vehicular edge is
     demoted to ``human_review`` with ``route_reason="class-mismatch"``. Passing
     no ``edge_classes`` disables the gate (callers without class metadata get
-    the pre-gate behavior).
+    the pre-gate behavior). The size gate runs first: when both would demote,
+    the structural export block is the decisive fact and its reason wins.
     """
     group_id = votes[0].group_id if votes else ""
     valid = [v for v in votes if v.choice != "ABSTAIN"]
@@ -1142,6 +1165,18 @@ def compute_consensus(
     else:
         consensus = "none"
         routing = "human_review"
+
+    # Size gate: demote an auto-accept on a group whose candidate-edge count
+    # exceeds the export backstop — its verdict can never export, so it must
+    # land in the human queue instead of vanishing. Runs before the class gate
+    # so the structural export block's reason wins when both would demote.
+    if (
+        routing == "auto_accept"
+        and n_candidate_edges is not None
+        and n_candidate_edges > settings.stitch_export_backstop_max_edges
+    ):
+        routing = "human_review"
+        route_reason = REASON_SIZE_GATED
 
     # Class-consistency gate: demote an auto-accept whose chosen edge set
     # contains a cross-mode pedestrian↔vehicular edge. An empty list means
@@ -1379,10 +1414,18 @@ def run_batch(
         # Derive the chosen edge set's classes so the class-consistency gate can
         # demote cross-mode auto-accepts. compute_consensus is pure, so a first
         # (gate-less) call gives the chosen edge_set to look up classes for.
-        ref_class, tgt_class = _segment_class_maps(_load_group_context(gdir)[2])
+        # The pack metadata also carries the group's candidate-edge count for
+        # the size gate (an over-backstop group's verdict can never export, so
+        # it must route to a human instead of vanishing).
+        meta = _load_group_context(gdir)[2]
+        ref_class, tgt_class = _segment_class_maps(meta)
         base = compute_consensus(votes)
         edge_classes = _edge_classes_for(base.edge_set, ref_class, tgt_class)
-        cons = compute_consensus(votes, edge_classes=edge_classes)
+        cons = compute_consensus(
+            votes,
+            edge_classes=edge_classes,
+            n_candidate_edges=candidate_edge_count(meta),
+        )
         consensus_out.append(_consensus_row(cons))
         logger.info(
             f"  -> {cons.consensus} choice={cons.choice} routing={cons.routing} "

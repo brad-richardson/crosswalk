@@ -913,6 +913,15 @@ def generate_stitch_batch(
         help="Top-K organic alternatives per group (default: 8; two whole-group "
         "seed options are appended on top)",
     ),
+    include_oversize: bool = typer.Option(
+        False,
+        "--include-oversize",
+        help="Calibration escape hatch: keep groups over the export backstop "
+        "(stitch_export_backstop_max_edges candidate edges) eligible for tier "
+        "selection. Default excludes them — no panel verdict on an over-backstop "
+        "group can ever export, so production waves must not burn quota on them "
+        "(their verdicts route to human review via the size gate).",
+    ),
 ):
     """Generate evidence packs for agent stitching-group labeling.
 
@@ -933,6 +942,7 @@ def generate_stitch_batch(
     import json
 
     from ..agent_labeling.stitch_evidence import generate_stitch_evidence
+    from ..config import settings
     from ..filenames import (
         PROJECT_ROOT,
         bridge_filename,
@@ -940,7 +950,10 @@ def generate_stitch_batch(
     )
     from ..labeling.stitching_store import StitchingLabelStore
     from ..matching.alternatives import generate_top_k_alternatives
-    from ..matching.batch_selection import select_stitching_batch
+    from ..matching.batch_selection import (
+        group_candidate_edge_count,
+        select_stitching_batch,
+    )
 
     out_root = PROJECT_ROOT / "data" / "output"
     bridge_path = out_root / bridge_filename(dataset)
@@ -1012,7 +1025,29 @@ def generate_stitch_batch(
                 k=k_alternatives,
             )
         reviewed = StitchingLabelStore(dataset).get_reviewed_group_ids(dataset)
-        selected = select_stitching_batch(groups, reviewed, k=batch_size)
+        # Panel waves exclude over-backstop groups by default: the export
+        # backstop blocks any verdict on them from minting a label, so
+        # selecting them (the old Tier-1 rule ALWAYS took the single largest
+        # group) burned quota on 50-570 KB prompts for unexportable verdicts.
+        # --include-oversize restores them for deliberate calibration waves.
+        max_candidate = None if include_oversize else settings.stitch_export_backstop_max_edges
+        if max_candidate is not None:
+            n_over = sum(
+                1
+                for g in groups
+                if g.get("group_id") not in reviewed
+                and group_candidate_edge_count(g) > max_candidate
+            )
+            if n_over:
+                console.print(
+                    f"[yellow]Excluding {n_over} over-backstop group(s) "
+                    f"(> {max_candidate} candidate edges) from wave selection — "
+                    f"their verdicts cannot export; pass --include-oversize for a "
+                    f"deliberate calibration wave[/yellow]"
+                )
+        selected = select_stitching_batch(
+            groups, reviewed, k=batch_size, max_candidate_edges=max_candidate
+        )
 
     if not selected:
         console.print("[red]No groups selected[/red]")

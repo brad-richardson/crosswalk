@@ -34,6 +34,19 @@ TIER_CLEAR_FRAC = 0.2
 BORDERLINE_MIN_SCORE = 0.2
 
 
+def group_candidate_edge_count(group: dict) -> int:
+    """A group's candidate-edge count, as the export backstop counts it.
+
+    Mirrors ``stitch_export``'s size gate: prefer the sidecar's ``n_edges``
+    field, falling back to ``len(edges)`` for groups without it.
+    """
+    n = group.get("n_edges")
+    try:
+        return int(n)
+    except (TypeError, ValueError):
+        return len(group.get("edges", []))
+
+
 def _pair_confidence_map(alternative: dict) -> dict[tuple, float]:
     """Map each ``(ref_id, target_id)`` edge of an alternative to its confidence."""
     out: dict[tuple, float] = {}
@@ -89,6 +102,7 @@ def select_stitching_batch(
     reviewed_group_ids: set[str],
     k: int = 15,
     candidate_group_ids: set[str] | None = None,
+    max_candidate_edges: int | None = None,
 ) -> list[dict]:
     """Select a curated batch of groups for stitching review.
 
@@ -110,6 +124,16 @@ def select_stitching_batch(
             groups that FAILED the agent panel (routed to ``human_review``); pass
             ``None`` to score every unreviewed group (the panel-feed / legacy
             sampling behavior).
+        max_candidate_edges: When provided, groups with MORE candidate edges
+            than this (see ``group_candidate_edge_count``) are excluded from
+            selection — including the Tier-1 largest-group rule — and the count
+            of exclusions is logged. Panel-feed selection passes the export
+            backstop (``settings.stitch_export_backstop_max_edges``): the panel
+            structurally cannot mint labels for over-backstop groups, so
+            selecting them burns quota for nothing. Pass ``None`` (default) for
+            no size exclusion — the HUMAN review queue must keep over-backstop
+            (size-gated) groups eligible, since that queue is exactly where
+            their panel verdicts get adjudicated.
 
     Returns:
         List of group dicts selected for review, ordered by review value,
@@ -117,6 +141,7 @@ def select_stitching_batch(
     """
     # Score each unreviewed group
     scored_groups: list[dict] = []
+    n_over_backstop = 0
     for group in groups:
         gid = group.get("group_id", "")
         if gid in reviewed_group_ids:
@@ -126,6 +151,15 @@ def select_stitching_batch(
         # eligible. Panel-feed / legacy sampling passes None to consider every
         # unreviewed group.
         if candidate_group_ids is not None and gid not in candidate_group_ids:
+            continue
+        # Size exclusion (panel feed): over-backstop groups are unexportable,
+        # so a panel wave must not spend quota on them. Counted and logged
+        # below so the exclusion is never silent.
+        if (
+            max_candidate_edges is not None
+            and group_candidate_edge_count(group) > max_candidate_edges
+        ):
+            n_over_backstop += 1
             continue
 
         # Score on ORGANIC alternatives only: whole-group seed options
@@ -166,6 +200,13 @@ def select_stitching_batch(
                 "_low_conf_score": low_conf_score,
                 "_review_value": review_value,
             }
+        )
+
+    if n_over_backstop:
+        logger.info(
+            f"Excluded {n_over_backstop} over-backstop group(s) "
+            f"(> {max_candidate_edges} candidate edges) from selection: no panel "
+            f"verdict on them can export past the backstop"
         )
 
     if not scored_groups:

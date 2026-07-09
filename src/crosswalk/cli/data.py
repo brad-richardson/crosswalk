@@ -2237,6 +2237,17 @@ def _generate_stitch_batch_for_dataset(
     # so stale votes on ids that no longer exist (re-segmentation) are
     # dropped. Passing this allow-list to select_stitching_batch confines the
     # tier sampling to panel failures.
+    #
+    # Over-backstop (size-gated) groups: a VOTED over-backstop group is in
+    # panel_failed_group_ids (compute_consensus's size gate for new waves; the
+    # panel_routing read-time overlay for historical ones), so it enters this
+    # queue like any other panel failure — which is why no max_candidate_edges
+    # cap is passed to select_stitching_batch here. NEVER-VOTED over-backstop
+    # groups deliberately stay out: panel waves no longer select them (nothing
+    # they produce can export), so per the #322 panel-failure gate they carry
+    # no verdict to adjudicate, and reviewing a monster whole is what the #367
+    # Mode-B decomposition flow is being built to replace. --include-unvoted
+    # remains the manual escape.
     candidate_ids: set[str] | None = None
     if not include_unvoted:
         sidecar_ids = {g.get("group_id") for g in groups}
