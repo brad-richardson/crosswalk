@@ -311,6 +311,38 @@ def _render_publish_summary(report, target_desc: str) -> None:
     )
 
 
+def _render_targets_publish_summary(report, target_desc: str) -> None:
+    """Render the target-snapshot publish staging summary (published + excluded)."""
+    table = Table(title=f"Publish staging targets ({report.staging_dir})", show_lines=False)
+    table.add_column("dataset", style="cyan", no_wrap=True)
+    table.add_column("status")
+    table.add_column("snapshot")
+    table.add_column("size", justify="right")
+    table.add_column("provenance")
+    table.add_column("license / reason")
+    for d in sorted(report.datasets, key=lambda x: x.dataset):
+        if d.published:
+            size_mb = f"{d.size_bytes / 1e6:.2f} MB" if d.size_bytes else "-"
+            lic = (d.license or {}).get("license") or "-"
+            table.add_row(
+                d.dataset,
+                "[green]published[/green]",
+                d.snapshot or "-",
+                size_mb,
+                d.provenance_from or "-",
+                str(lic),
+            )
+        else:
+            table.add_row(
+                d.dataset, "[yellow]excluded[/yellow]", "", "", "", str(d.reason or "excluded")
+            )
+    console.print(table)
+    console.print(
+        f"[blue]{report.n_published} published, {report.n_excluded} excluded "
+        f"(pending review); target={target_desc}[/blue]"
+    )
+
+
 @factory_app.command()
 def publish(
     datasets: list[str] = typer.Argument(
@@ -329,6 +361,18 @@ def publish(
     release: list[str] = typer.Option(
         None, "--release", help="Restrict to these release(s) (repeatable; default: all present)."
     ),
+    targets: bool = typer.Option(
+        False,
+        "--targets",
+        help="Publish TARGET dataset snapshots (data/raw/<name>_v1.0.parquet) under the "
+        "R2 'targets/' prefix, instead of bridge tables under 'bridges/'.",
+    ),
+    raw_dir: Path = typer.Option(
+        None,
+        "--raw-dir",
+        help="Raw-data dir to publish target snapshots from (default: "
+        "data/raw). Only used with --targets.",
+    ),
     target_dir: Path = typer.Option(
         None, "--target-dir", help="Publish to a LOCAL directory (no credentials). Omit for R2."
     ),
@@ -338,7 +382,10 @@ def publish(
         help="Build the staging tree + report what WOULD upload, without syncing (default: on).",
     ),
     force: bool = typer.Option(
-        False, "--force", "-f", help="Overwrite an already-published (immutable) release."
+        False,
+        "--force",
+        "-f",
+        help="Overwrite an already-published (immutable) release/snapshot.",
     ),
     site_url: str = typer.Option(
         None, "--site-url", help="Public base URL used in the credibility page query examples."
@@ -346,21 +393,31 @@ def publish(
     staging_dir: Path = typer.Option(
         None,
         "--staging-dir",
-        help="Where to build the staging tree (default: data/publish_staging).",
+        help="Where to build the staging tree (default: data/publish_staging, or "
+        "data/publish_staging_targets with --targets).",
     ),
     factory_root: Path = typer.Option(
         None, "--factory-root", help="Factory output root to publish from (default: data/factory)."
     ),
 ):
-    """Assemble the public R2 publication tree from factory outputs and sync it.
+    """Assemble the public R2 publication tree and sync it.
 
-    Always builds a deterministic staging tree (bridge + manifest per cleared
-    dataset, a per-release unified ``all_bridges.parquet``, checksums, machine-
-    readable ``index.json``, and the credibility ``index.html``). License-unverified
-    datasets are excluded. Then, unless ``--dry-run`` (the default), syncs to a local
-    directory (``--target-dir``) or to Cloudflare R2 (S3-compatible ``aws`` CLI,
-    credentials from ``R2_*`` env vars). Immutable release paths: an already-
-    published release is skipped (never overwritten) unless ``--force``.
+    Two modes:
+
+    * Bridge tables (default): builds a deterministic staging tree (bridge +
+      manifest per cleared dataset, a per-release unified ``all_bridges.parquet``,
+      checksums, machine-readable ``index.json``, and the credibility
+      ``index.html``) under the ``bridges/`` prefix. Immutable per ``release=``.
+    * Target snapshots (``--targets``): builds a staging tree of local target
+      dataset snapshots (``data/raw/<name>_v1.0.parquet`` + a normalized
+      ``meta.yaml`` provenance sidecar + ``latest.json``/``index.json``) under
+      the ``targets/`` prefix. Immutable per ``dataset=*/snapshot=*``.
+
+    Both modes exclude license-unverified datasets, and then, unless
+    ``--dry-run`` (the default), sync to a local directory (``--target-dir``) or
+    to Cloudflare R2 (S3-compatible ``aws`` CLI, credentials from ``R2_*`` env
+    vars). An already-published release/snapshot is skipped (never overwritten)
+    unless ``--force``.
     """
     from ..factory.licenses import LicenseRegistry
     from ..factory.publish import (
@@ -376,16 +433,11 @@ def publish(
         staged_files,
         sync_local,
         sync_r2,
+        sync_targets_local,
+        sync_targets_r2,
     )
+    from ..factory.publish_targets import assemble_targets_staging
     from ..filenames import PROJECT_ROOT
-
-    root = factory_root or (PROJECT_ROOT / "data" / "factory")
-    staging = staging_dir or (PROJECT_ROOT / "data" / "publish_staging")
-    if not root.exists():
-        console.print(
-            f"[red]No factory output at {root} — run 'crosswalk factory run' first.[/red]"
-        )
-        raise typer.Exit(1)
 
     try:
         registry = LicenseRegistry.load()
@@ -397,6 +449,90 @@ def publish(
     # overrides any names passed alongside it.
     merged = list(datasets or []) + list(dataset_opt or [])
     ds_filter = None if all_datasets else (merged or None)
+
+    # --- Target snapshots ---
+    if targets:
+        raw = raw_dir or (PROJECT_ROOT / "data" / "raw")
+        staging = staging_dir or (PROJECT_ROOT / "data" / "publish_staging_targets")
+
+        report = assemble_targets_staging(
+            raw_dir=raw,
+            staging_dir=staging,
+            registry=registry,
+            datasets=ds_filter,
+        )
+
+        target_desc = f"local:{target_dir}" if target_dir is not None else "r2"
+        _render_targets_publish_summary(report, target_desc)
+
+        if report.n_published == 0:
+            console.print(
+                "[yellow]Nothing cleared to publish — staging tree built for review only.[/yellow]"
+            )
+
+        if target_dir is not None:
+            if dry_run:
+                files = staged_files(staging)
+                console.print(
+                    f"[blue]DRY RUN: would copy {len(files)} file(s) from {staging} "
+                    f"to {target_dir}. Re-run with --no-dry-run to write.[/blue]"
+                )
+                raise typer.Exit(0)
+            written, plan = sync_targets_local(staging, target_dir, force=force)
+            if plan.skipped_snapshots:
+                skipped = ", ".join(f"{ds}@{snap}" for ds, snap in plan.skipped_snapshots)
+                console.print(
+                    f"[yellow]Skipped already-published (immutable) snapshot(s): "
+                    f"{skipped} — use --force to replace.[/yellow]"
+                )
+            console.print(f"[green]Published {len(written)} file(s) to {target_dir}[/green]")
+            raise typer.Exit(0)
+
+        cfg = r2_env()
+        if cfg is None:
+            missing = ", ".join(missing_r2_env())
+            console.print(
+                f"[yellow]R2 credentials absent (missing: {missing}). Forcing dry run.[/yellow]"
+            )
+            files = staged_files(staging)
+            console.print(
+                f"[blue]DRY RUN: staging tree built at {staging} ({len(files)} file(s)). "
+                f"To publish to R2, set {', '.join(R2_ENV_VARS.values())} and re-run "
+                "with --no-dry-run.[/blue]"
+            )
+            raise typer.Exit(0)
+        if dry_run:
+            argv = build_aws_sync_argv(staging, cfg)
+            console.print(
+                f"[blue]DRY RUN: would run: {' '.join(argv)}\n"
+                "(already-published snapshots are excluded at upload time — immutable). "
+                "Re-run with --no-dry-run to upload.[/blue]"
+            )
+            raise typer.Exit(0)
+        try:
+            _, plan = sync_targets_r2(staging, cfg, force=force)
+        except Exception as exc:  # aws CLI failure or a failed-closed existence check
+            console.print(f"[red]R2 sync failed: {exc}[/red]")
+            raise typer.Exit(1) from exc
+        if plan.skipped_snapshots:
+            skipped = ", ".join(f"{ds}@{snap}" for ds, snap in plan.skipped_snapshots)
+            console.print(
+                f"[yellow]Skipped already-published (immutable) snapshot(s): "
+                f"{skipped} — use --force to replace.[/yellow]"
+            )
+        console.print(
+            f"[green]Published staging tree to R2 bucket '{cfg.bucket}' (targets/).[/green]"
+        )
+        raise typer.Exit(0)
+
+    # --- Bridge tables ---
+    root = factory_root or (PROJECT_ROOT / "data" / "factory")
+    staging = staging_dir or (PROJECT_ROOT / "data" / "publish_staging")
+    if not root.exists():
+        console.print(
+            f"[red]No factory output at {root} — run 'crosswalk factory run' first.[/red]"
+        )
+        raise typer.Exit(1)
 
     gate_floors = load_gate_floors(PROJECT_ROOT / "mbench" / "datasets.toml")
     report = assemble_staging(

@@ -74,6 +74,20 @@ class LicenseRegistry:
         """The global Overture attribution block (applies to every published table)."""
         return dict(self._overture)
 
+    def display_name(self, dataset: str) -> str | None:
+        """Best-effort human display name for ``dataset`` from its registry entry.
+
+        Distinct from ``factory.publish.dataset_display()`` (which reads the
+        dataset's own ``datasets/<name>.yaml``): this reads the ``display_name``
+        already carried alongside each dataset's license entry in
+        ``licenses.toml``, so target-snapshot publishing (which has no factory
+        output to attach a fuller display block to) can label datasets without
+        a second config lookup.
+        """
+        entry = self._datasets.get(dataset) or {}
+        name = entry.get("display_name")
+        return str(name) if name else None
+
     def decision(self, dataset: str) -> LicenseDecision:
         """Return the publication decision for ``dataset``.
 
