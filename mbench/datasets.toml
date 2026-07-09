@@ -85,7 +85,9 @@ connectors = "us_fort_collins_sidewalks_overture_connectors_v1.0.parquet"
 # for the seattle-sidewalk-join-demo's historical snapshot/sidecar only.
 [datasets.us_seattle_sidewalks]
 reference = "us_seattle_sidewalks_overture_segments_v1.0.parquet"
-target = "us_seattle_sidewalks_v2.0.parquet"
+# v1.0 is now COMPKEY-keyed in place (scripts/rekey_seattle_target.py); the old
+# v2.0 sidecar pointer referenced a file that never existed on the pipeline host.
+target = "us_seattle_sidewalks_v1.0.parquet"
 connectors = "us_seattle_sidewalks_overture_connectors_v1.0.parquet"
 
 [datasets.de_berlin_roads]
