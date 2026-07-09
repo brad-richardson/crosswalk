@@ -221,6 +221,68 @@ class StitchingLabelStore:
         self._df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         self.save()
 
+    def rekey_group_ids(self, mapping: dict[str, str]) -> int:
+        """Rewrite label ``group_id`` keys per ``mapping`` (old -> new), guarded.
+
+        This is the ONLY sanctioned way to rekey stitching labels (used by
+        ``crosswalk data stitch-rekey``): it preserves every other column of
+        the row (labeler, labeled_at, selected_edges, ...) and refuses any
+        rewrite that would leave duplicate ``group_id`` rows behind — duplicate
+        rows silently corrupt resolver extraction (``human_by`` last-row-wins
+        vs per-row recovery) and double-count eval.
+
+        Refuses (raises ``ValueError``, writes nothing) when:
+        * two old ids map to the same new id (N->1 collapse — the Boston
+          49-labels-into-8-groups hazard, #375);
+        * a new id already has a label row that is not itself being rekeyed
+          away;
+        * an old id has duplicate rows in the store (pre-existing corruption);
+        * an old id has no row (the plan and the store have drifted apart).
+
+        Returns the number of rows rekeyed. Saves atomically via
+        :meth:`save` (``.csv.bak`` backup + tmp-file replace).
+        """
+        if not mapping:
+            return 0
+        mapping = {str(k): str(v) for k, v in mapping.items()}
+
+        new_ids = list(mapping.values())
+        dup_new = sorted({g for g in new_ids if new_ids.count(g) > 1})
+        if dup_new:
+            raise ValueError(
+                f"rekey mapping is not 1:1 — multiple old group_ids map to {dup_new}; "
+                "N->1 merges must be reconciled in review, never blind-rekeyed"
+            )
+
+        df = self.df
+        gids = df["group_id"].astype(str)
+        counts = gids.value_counts()
+
+        missing = sorted(k for k in mapping if k not in counts.index)
+        if missing:
+            raise ValueError(f"rekey source group_ids not found in store: {missing}")
+        dup_old = sorted(k for k in mapping if counts[k] > 1)
+        if dup_old:
+            raise ValueError(
+                f"store holds duplicate label rows for group_ids {dup_old}; "
+                "repair the store before rekeying"
+            )
+        remaining = set(counts.index) - set(mapping)
+        occupied = sorted(v for v in mapping.values() if v in remaining)
+        if occupied:
+            raise ValueError(
+                f"rekey target group_ids already have a label row: {occupied}; "
+                "rekeying onto them would create duplicate group_id rows"
+            )
+
+        rekeyed = gids.map(mapping).fillna(gids)
+        n = int((rekeyed != gids).sum())
+        df = df.copy()
+        df["group_id"] = rekeyed
+        self._df = df
+        self.save()
+        return n
+
     def get_reviewed_group_ids(self, dataset_id: str | None = None) -> set[str]:
         """Get set of already-reviewed group IDs.
 

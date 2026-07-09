@@ -355,6 +355,11 @@ def test_cli_panel_stats_empty(tmp_path):
 )
 def test_real_data_agy_trips_position_anchor():
     votes_df, consensus_df = load_vote_provenance(REPO_ROOT)
+    # Freeze the sample to the batches agy actually voted in (agy was retired from
+    # the default panel afterwards), so later waves can't shift these exact counts.
+    agy_era = {"boston_test5", "de_berlin_roads_w0707", "us_seattle_sidewalks_w0707"}
+    votes_df = votes_df[votes_df["source_batch"].isin(agy_era)]
+    consensus_df = consensus_df[consensus_df["source_batch"].isin(agy_era)]
     stats = compute_voter_stats(votes_df, consensus_df)
     by_provider = {s.provider: s for s in stats}
 

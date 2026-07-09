@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import errno
 import json
+import math
 import re
 import subprocess
 import tempfile
@@ -33,6 +34,7 @@ from .panel_monitor import wave_position_anchor_warnings
 from .panel_routing import (
     REASON_ALL_ABSTAINED,
     REASON_CLASS_MISMATCH,
+    REASON_LOW_CONFIDENCE,
     REASON_SIZE_GATED,
     candidate_edge_count,
     derive_route_reason,
@@ -77,6 +79,16 @@ DEFAULT_PANEL = [
 # (reasoning etc.) in the model string, so ``effort`` is unused for it — like agy.
 OPENCODE_QWEN = ProviderSpec(name="opencode", model="openrouter/qwen/qwen3-vl-235b-a22b-instruct")
 
+# Candidate REPLACEMENT third voter (default OFF): opencode driving OpenRouter-
+# hosted Kimi K2.6 (Moonshot) — an open-weight native-multimodal flagship and a
+# FOURTH model family (vs the Claude/GPT/Gemini incumbents), so its errors are
+# decorrelated from the rest of the panel. Unlike agy (which must proactively
+# read the pack images itself), the opencode invoker force-attaches every PNG,
+# so this voter is guaranteed to see the full visual evidence. Kimi's thinking
+# runs long on large packs (observed up to ~390s/vote): run v4-candidate waves
+# with ``--timeout 480``.
+OPENCODE_KIMI = ProviderSpec(name="opencode", model="openrouter/moonshotai/kimi-k2.6")
+
 # Named panel configurations. DEFAULT_PANEL (the 3-voter production panel) is the
 # default; the 4th voter ships behind the opt-in ``v3-candidate`` panel only, so
 # production waves are unaffected until the export rule is validated and flipped.
@@ -92,6 +104,11 @@ PANELS: dict[str, list[ProviderSpec]] = {
     "v2": DEFAULT_PANEL,
     "v3-candidate": [*DEFAULT_PANEL, OPENCODE_QWEN],
     "no-agy": [*(p for p in DEFAULT_PANEL if p.name != "agy"), OPENCODE_QWEN],
+    # Third-voter replacement candidate (agy/Gemini -> opencode/Kimi K2.6).
+    # NOT the default: labels from this composition are refused by
+    # stitch-export without --allow-nonstandard-panel until validated and
+    # blessed as the v4 standard (which will bump the export labeler).
+    "v4-candidate": [*(p for p in DEFAULT_PANEL if p.name != "agy"), OPENCODE_KIMI],
 }
 
 
@@ -1095,6 +1112,7 @@ def compute_consensus(
     votes: list[Vote],
     edge_classes: list[tuple[str | None, str | None]] | None = None,
     n_candidate_edges: int | None = None,
+    min_voter_confidence: float | None = None,
 ) -> Consensus:
     """Apply the 3/3, 2/3, else routing rule over a group's votes.
 
@@ -1122,6 +1140,17 @@ def compute_consensus(
     no ``edge_classes`` disables the gate (callers without class metadata get
     the pre-gate behavior). The size gate runs first: when both would demote,
     the structural export block is the decisive fact and its reason wins.
+
+    Low-confidence gate: when ``min_voter_confidence`` is a positive floor, an
+    otherwise-auto-accept verdict whose MINIMUM confidence across valid votes is
+    below it is demoted to ``human_review`` with ``route_reason="low_confidence"``.
+    The two Gemini-based voters report near-constant inflated confidence, so the
+    minimum is effectively the calibrated voter's self-report — a review found low
+    values there flagged wrong unanimous verdicts. A blank/NaN confidence on a
+    valid vote counts as BELOW the floor (a missing self-report must not silently
+    pass). Runs AFTER the size and class gates, so their more-structural reasons
+    win when several would demote. ``None`` or a non-positive floor disables the
+    gate (callers without the setting get the pre-gate behavior).
     """
     group_id = votes[0].group_id if votes else ""
     valid = [v for v in votes if v.choice != "ABSTAIN"]
@@ -1185,6 +1214,18 @@ def compute_consensus(
     if routing == "auto_accept" and edge_classes is not None and has_cross_mode_edge(edge_classes):
         routing = "human_review"
         route_reason = REASON_CLASS_MISMATCH
+
+    # Low-confidence gate: demote an auto-accept whose calibrated-voter
+    # confidence is too low. The Gemini-based voters report near-constant
+    # inflated confidence, so min(valid) is effectively the calibrated voter's
+    # self-report — a review found low values there flagged wrong verdicts. A
+    # blank/NaN confidence counts as below the floor (NaN must not silently
+    # pass). Runs after the size and class gates so their reasons win.
+    if routing == "auto_accept" and min_voter_confidence is not None and min_voter_confidence > 0.0:
+        valid_confs = [v.confidence for v in valid]
+        if any(math.isnan(c) for c in valid_confs) or min(valid_confs) < min_voter_confidence:
+            routing = "human_review"
+            route_reason = REASON_LOW_CONFIDENCE
 
     # Stamp a reason on EVERY row (not just gate demotions) so consensus.csv
     # says why each group routed the way it did. The derivation is shared with
@@ -1426,6 +1467,7 @@ def run_batch(
             votes,
             edge_classes=edge_classes,
             n_candidate_edges=candidate_edge_count(meta),
+            min_voter_confidence=settings.stitch_min_voter_confidence,
         )
         consensus_out.append(_consensus_row(cons))
         logger.info(

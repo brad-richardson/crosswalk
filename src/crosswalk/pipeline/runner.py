@@ -564,6 +564,7 @@ def _export_groups_sidecar(
     from shapely import to_geojson
 
     from ..matching.optimizer import (
+        PARALLEL_SIBLING_REVIEW_FLAG,
         _geom_lookup,
         _name_lookup,
         compute_group_structure,
@@ -735,6 +736,14 @@ def _export_groups_sidecar(
     # closure; it is re-bound at the top of each group iteration below.
     group_owned_pruned: set[tuple[str, str]] = set()
 
+    # Set (per group) of assignment pairs the optimizer demoted MATCH -> REVIEW
+    # (#367 Mode A: contested small-span stub edges, see
+    # ``_contested_small_span_review_pairs`` /
+    # ``optimizer.PARALLEL_SIBLING_REVIEW_FLAG``). Re-bound at the top of each
+    # group iteration below; ``_serialize_edge`` reads it via closure like
+    # ``group_owned_pruned``.
+    group_demoted_pairs: set[tuple[str, str]] = set()
+
     def _serialize_edge(pair: tuple[str, str], r: Any, struct: dict | None) -> dict:
         """Serialize one candidate edge (selected or rejected) to a sidecar dict.
 
@@ -742,6 +751,9 @@ def _export_groups_sidecar(
         per-edge structure block, and marks ``pruned`` when the pair was dropped
         by the confidence-drop prune AND this group owns it (Task B). ``selected``
         comes from ``struct`` (True iff the pair is in the group's assignment).
+        Sets ``review_reason`` when the optimizer demoted this pair's decision to
+        REVIEW (currently only ``"parallel_sibling"``; additive and absent on
+        every other edge — see #371/#367 Mode A).
         """
         edge = {
             "ref_id": pair[0],
@@ -758,6 +770,8 @@ def _export_groups_sidecar(
             edge.update(struct)
         if pair in group_owned_pruned:
             edge["pruned"] = True
+        if pair in group_demoted_pairs:
+            edge["review_reason"] = "parallel_sibling"
         return edge
 
     groups = []
@@ -774,6 +788,13 @@ def _export_groups_sidecar(
             }
         else:
             group_owned_pruned = pruned_pairs_str
+        # Pairs in THIS group's assignment that the optimizer flagged as a
+        # demoted parallel-sibling stub (see ``_serialize_edge`` docstring).
+        group_demoted_pairs = {
+            (str(r.ref_id), str(r.target_id))
+            for r in assign
+            if r.features.get(PARALLEL_SIBLING_REVIEW_FLAG)
+        }
         ref_ids = sorted({str(r.ref_id) for r in assign})
         target_ids = sorted({str(r.target_id) for r in assign})
         tgt_set = set(target_ids)

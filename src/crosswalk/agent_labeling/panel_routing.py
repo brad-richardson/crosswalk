@@ -36,6 +36,19 @@ voted on stay out of the queue even when over-backstop: batch selection no
 longer feeds them to panel waves, and reviewing a monster whole is exactly what
 the #367 Mode-B decomposition flow is being built to avoid (``--include-unvoted``
 remains the manual escape).
+
+Low-confidence overlay: a panel review found the two Gemini-based voters report
+pathologically inflated confidence (one pinned at 0.95, the other a ~1.0 median
+on coin-flips) while the calibrated voters' self-reports separated wrong
+unanimous verdicts from clean accepts. So an ``auto_accept`` whose MINIMUM
+confidence across valid votes is below ``settings.stitch_min_voter_confidence``
+is demoted to ``human_review`` / ``route_reason="low_confidence"`` — at vote time
+in :func:`compute_consensus <stitch_runner.compute_consensus>`, and as a
+read-time overlay here for waves voted before the gate existed (unlike a
+size-gated verdict, a low-confidence one is NOT blocked at export, so without the
+overlay it would silently auto-export on the next ``stitch-export``). The
+low-confidence overlay runs AFTER the size gate — ``size_gated`` wins when both
+apply.
 """
 
 from __future__ import annotations
@@ -114,6 +127,12 @@ REASON_CLASS_MISMATCH = "class-mismatch"
 #: verdict on such a group can mint a label, so it always needs a human.
 #: Same spelling as the legacy phase-2 size gate's stamp.
 REASON_SIZE_GATED = "size_gated"
+#: Low-confidence gate demoted a unanimous verdict whose MINIMUM confidence
+#: across valid votes fell below ``settings.stitch_min_voter_confidence``. The
+#: two Gemini-based voters report near-constant inflated confidence, so the
+#: minimum is effectively the calibrated voter's self-report — a low value there
+#: flagged wrong unanimous verdicts the panel review found.
+REASON_LOW_CONFIDENCE = "low_confidence"
 
 #: Legacy phase-2 stamps that merely echo the ``consensus`` column ("majority",
 #: "none"). They carry strictly less information than what the row's own
@@ -200,6 +219,9 @@ def humanize_route_reason(code: str) -> str:
         # latest_panel_consensus) on over-backstop groups; also the legacy
         # phase-2 gate's spelling.
         REASON_SIZE_GATED: "over the size gate — too large to auto-accept",
+        # Low-confidence gate: stamped by compute_consensus (and the read-time
+        # overlay) when the calibrated voter's confidence was too low.
+        REASON_LOW_CONFIDENCE: "low panel confidence — below the auto-accept floor",
     }
     if code in fixed:
         return fixed[code]
@@ -254,6 +276,56 @@ def _pack_candidate_edge_count(batch_dir: Path, group_id: str) -> int | None:
     return candidate_edge_count(meta)
 
 
+def _float_or_nan(val) -> float:
+    """Parse a confidence cell; a blank/unparseable value becomes ``nan``.
+
+    ``nan`` is the deliberate "missing self-report" sentinel — the low-confidence
+    gate treats it as below any positive floor (a NaN comparison must never
+    silently pass).
+    """
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def _batch_min_confidences(batch_dir: Path) -> dict[str, float | None]:
+    """Per-group minimum confidence across valid votes, from ``votes.csv``.
+
+    Mirrors :func:`stitch_runner.compute_consensus`'s validity rule: a vote whose
+    ``choice`` is ``ABSTAIN`` does not count. For each group the value is:
+
+    * ``None`` — no valid (non-abstaining) vote row (or no/unreadable
+      ``votes.csv``): no confidence evidence, so the gate leaves the row
+      untouched (the same "no evidence -> untouched" stance as the size gate).
+    * ``float('nan')`` — a valid vote's confidence is blank/unparseable
+      (conservatively below any positive floor).
+    * else the numeric minimum across the group's valid votes.
+    """
+    vpath = batch_dir / "votes.csv"
+    if not vpath.is_file():
+        return {}
+    per_group: dict[str, list[float]] = {}
+    try:
+        with open(vpath, newline="") as fh:
+            for row in csv.DictReader(fh):
+                gid = str(row.get("group_id", "") or "").strip()
+                if not gid:
+                    continue
+                if str(row.get("choice", "") or "").strip() == "ABSTAIN":
+                    continue
+                per_group.setdefault(gid, []).append(_float_or_nan(row.get("confidence")))
+    except (OSError, csv.Error, UnicodeDecodeError):
+        return {}
+    out: dict[str, float | None] = {}
+    for gid, confs in per_group.items():
+        if any(math.isnan(c) for c in confs):
+            out[gid] = float("nan")  # a missing self-report gates conservatively
+        else:
+            out[gid] = min(confs)
+    return out
+
+
 def _dataset_batch_dirs(dataset: str, batches_root: Path) -> list[Path]:
     """Batch dirs belonging to ``dataset``, oldest consensus.csv first.
 
@@ -294,6 +366,19 @@ def latest_panel_consensus(
     treating it as accepted would let it vanish, reviewed by no one. The
     on-disk CSV is never modified; rows whose evidence pack is missing are left
     untouched (no size evidence).
+
+    Low-confidence overlay: an ``auto_accept`` row whose MINIMUM confidence
+    across valid votes (read from the batch's ``votes.csv``) is below
+    ``settings.stitch_min_voter_confidence`` is likewise returned as
+    ``human_review`` / ``route_reason="low_confidence"`` — the same code
+    :func:`stitch_runner.compute_consensus` stamps going forward — so a wave
+    voted before the gate existed surfaces in the human queue for adjudication
+    instead of auto-exporting on the next ``stitch-export``. Applied AFTER the
+    size gate (``size_gated`` wins if both). Rows already exported as labels are
+    filtered out of the queue by the reviewed-id check in the caller, so this
+    never re-surfaces a minted label. A blank/NaN confidence on a valid vote
+    counts as below the floor; a group with no confidence evidence is left
+    untouched.
     """
     rows: dict[str, dict] = {}
     origins: dict[str, Path] = {}
@@ -307,13 +392,26 @@ def latest_panel_consensus(
                 origins[gid] = batch_dir
 
     backstop = settings.stitch_export_backstop_max_edges
+    conf_floor = settings.stitch_min_voter_confidence
+    min_conf_by_batch: dict[Path, dict[str, float | None]] = {}
     for gid, row in rows.items():
         if str(row.get("routing", "") or "").strip() != ROUTING_AUTO_ACCEPT:
             continue  # already human-routed; keep the (more specific) reason
-        n_edges = _pack_candidate_edge_count(origins[gid], gid)
+        batch_dir = origins[gid]
+        # Size gate first: the structural export block is the decisive fact.
+        n_edges = _pack_candidate_edge_count(batch_dir, gid)
         if n_edges is not None and n_edges > backstop:
             row["routing"] = ROUTING_HUMAN_REVIEW
             row["route_reason"] = REASON_SIZE_GATED
+            continue
+        # Low-confidence gate.
+        if conf_floor > 0.0:
+            if batch_dir not in min_conf_by_batch:
+                min_conf_by_batch[batch_dir] = _batch_min_confidences(batch_dir)
+            min_conf = min_conf_by_batch[batch_dir].get(gid)
+            if min_conf is not None and (math.isnan(min_conf) or min_conf < conf_floor):
+                row["routing"] = ROUTING_HUMAN_REVIEW
+                row["route_reason"] = REASON_LOW_CONFIDENCE
     return rows
 
 

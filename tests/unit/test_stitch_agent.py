@@ -527,6 +527,151 @@ def test_size_gate_wins_over_class_gate():
 
 
 # ---------------------------------------------------------------------------
+# Consensus: low-confidence gate (panel calibration review follow-up)
+# ---------------------------------------------------------------------------
+
+
+def _vote_c(provider, choice, conf, es=frozenset()):
+    """A vote with an explicit confidence (the ``_vote`` helper hardcodes 0.9)."""
+    return sr.Vote(
+        group_id="g",
+        provider=provider,
+        model="m",
+        choice=choice,
+        confidence=conf,
+        reasoning="",
+        edge_set=es,
+    )
+
+
+def _conf_floor():
+    from crosswalk.config import settings
+
+    return settings.stitch_min_voter_confidence
+
+
+def _unanimous_confs(c1, c2, c3):
+    """Unanimous 'A' votes with the three given confidences."""
+    es = frozenset({(R1, T1)})
+    return [
+        _vote_c("claude", "A", c1, es),
+        _vote_c("codex", "A", c2, es),
+        _vote_c("agy", "A", c3, es),
+    ]
+
+
+def test_low_conf_gate_demotes_below_floor():
+    # A unanimous verdict whose calibrated voter is below the floor is demoted.
+    floor = _conf_floor()
+    c = sr.compute_consensus(
+        _unanimous_confs(floor - 0.1, 0.95, 0.98),
+        min_voter_confidence=floor,
+    )
+    assert c.consensus == "unanimous"  # the panel still agreed
+    assert c.routing == "human_review"
+    assert c.route_reason == "low_confidence"
+
+
+def test_low_conf_gate_uses_minimum_not_mean():
+    # One low vote among two inflated ones still demotes: the MINIMUM governs
+    # (the Gemini voters' high self-reports must not drown out the calibrated
+    # voter's low one).
+    floor = _conf_floor()
+    votes = _unanimous_confs(floor - 0.2, 1.0, 1.0)
+    assert sum(v.confidence for v in votes) / 3 > floor  # mean would pass
+    c = sr.compute_consensus(votes, min_voter_confidence=floor)
+    assert c.routing == "human_review"
+    assert c.route_reason == "low_confidence"
+
+
+def test_low_conf_gate_passes_at_floor():
+    # Boundary: the gate is strictly "<", so a minimum EXACTLY at the floor
+    # still auto-accepts.
+    floor = _conf_floor()
+    c = sr.compute_consensus(
+        _unanimous_confs(floor, floor, floor),
+        min_voter_confidence=floor,
+    )
+    assert c.routing == "auto_accept"
+    assert c.route_reason == "unanimous"
+
+
+def test_low_conf_gate_passes_above_floor():
+    floor = _conf_floor()
+    c = sr.compute_consensus(
+        _unanimous_confs(floor + 0.01, 0.95, 0.98),
+        min_voter_confidence=floor,
+    )
+    assert c.routing == "auto_accept"
+    assert c.route_reason == "unanimous"
+
+
+def test_low_conf_gate_nan_confidence_demotes():
+    # A blank/NaN self-report on a valid vote must not silently pass a NaN
+    # comparison — it counts as below the floor.
+    c = sr.compute_consensus(
+        _unanimous_confs(float("nan"), 0.98, 0.99),
+        min_voter_confidence=_conf_floor(),
+    )
+    assert c.routing == "human_review"
+    assert c.route_reason == "low_confidence"
+
+
+def test_low_conf_gate_disabled_by_none():
+    # Backward-compat: no floor -> gate is a no-op even for a low minimum.
+    c = sr.compute_consensus(_unanimous_confs(0.1, 0.2, 0.3), min_voter_confidence=None)
+    assert c.routing == "auto_accept"
+    assert c.route_reason == "unanimous"
+
+
+def test_low_conf_gate_disabled_by_zero_floor():
+    # A non-positive floor disables the gate (and does not demote on NaN either).
+    c = sr.compute_consensus(_unanimous_confs(float("nan"), 0.2, 0.3), min_voter_confidence=0.0)
+    assert c.routing == "auto_accept"
+    assert c.route_reason == "unanimous"
+
+
+def test_low_conf_gate_only_affects_auto_accept():
+    # A dissent verdict already routes to a human; a low confidence must not
+    # overwrite its more specific reason.
+    es = frozenset({(R1, T1)})
+    votes = [
+        _vote_c("claude", "A", 0.2, es),
+        _vote_c("codex", "A", 0.2, es),
+        _vote_c("agy", "B", 0.2),
+    ]
+    c = sr.compute_consensus(votes, min_voter_confidence=_conf_floor())
+    assert c.routing == "human_review"
+    assert c.route_reason == "dissent:agy=B"
+
+
+def test_size_gate_wins_over_low_conf_gate():
+    # Ordering: when both the size gate and the low-confidence gate would demote,
+    # the structural export block wins — size_gated, not low_confidence.
+    floor = _conf_floor()
+    c = sr.compute_consensus(
+        _unanimous_confs(floor - 0.2, 0.95, 0.98),
+        n_candidate_edges=_backstop() + 1,
+        min_voter_confidence=floor,
+    )
+    assert c.routing == "human_review"
+    assert c.route_reason == "size_gated"
+
+
+def test_class_gate_wins_over_low_conf_gate():
+    # Ordering: the class gate runs before the low-confidence gate, so a
+    # cross-mode low-confidence auto-accept stamps class-mismatch.
+    floor = _conf_floor()
+    c = sr.compute_consensus(
+        _unanimous_confs(floor - 0.2, 0.95, 0.98),
+        edge_classes=[("footway", "residential")],
+        min_voter_confidence=floor,
+    )
+    assert c.routing == "human_review"
+    assert c.route_reason == "class-mismatch"
+
+
+# ---------------------------------------------------------------------------
 # Runner: retry-once + abstention (mocked subprocess)
 # ---------------------------------------------------------------------------
 
@@ -1690,6 +1835,20 @@ def test_opencode_registered_and_v3_panel_composition():
     assert [p.name for p in sr.get_panel("v2")] == ["claude", "codex", "agy"]
     assert sr.get_panel("nonexistent") is sr.DEFAULT_PANEL
     assert sr.get_panel(None) is sr.DEFAULT_PANEL
+
+
+def test_v4_candidate_panel_composition():
+    """v4-candidate swaps the agy third voter for opencode/Kimi K2.6 (opt-in).
+
+    The composition is a REPLACEMENT (3 voters, agy out) — not an addition like
+    v3-candidate — and must not touch DEFAULT_PANEL: labels from it are refused
+    by stitch-export without --allow-nonstandard-panel until blessed as v4.
+    """
+    v4 = sr.get_panel("v4-candidate")
+    assert [p.name for p in v4] == ["claude", "codex", "opencode"]
+    assert v4[2].model == "openrouter/moonshotai/kimi-k2.6"
+    # Production default remains the 3 incumbents.
+    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "agy"]
 
 
 def test_invoke_opencode_arg_construction(monkeypatch, tmp_path):
