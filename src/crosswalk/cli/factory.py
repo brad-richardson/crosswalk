@@ -8,6 +8,7 @@ delta report. See ``docs/FACTORY.md``.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import typer
@@ -251,7 +252,11 @@ def delta(
 
     result = compute_delta(dataset, from_bridge, to_bridge, from_release, to_release)
     s = result.summary
-    console.print(
+    # CSV written to real stdout (no --output file) must be pure CSV for scripted /
+    # piped consumers (#364) — send the human-readable summary to stderr instead.
+    csv_to_stdout = fmt == "csv" and output is None
+    status_console = Console(stderr=True) if csv_to_stdout else console
+    status_console.print(
         f"[blue]{dataset}: same={s['same']} changed={s['changed']} "
         f"lost={s['lost']} gained={s['gained']}[/blue]"
     )
@@ -268,6 +273,12 @@ def delta(
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(content)
         console.print(f"[green]Wrote {fmt} delta to {output}[/green]")
+    elif fmt == "csv":
+        # Never route CSV through Rich: its width-aware console wrapping splits
+        # long semicolon-joined GERS-id lists (from_gers/to_gers) across lines,
+        # corrupting the output for scripted/piped consumers (#364). Write plain
+        # CSV directly so stdout is byte-for-byte what pandas produced.
+        sys.stdout.write(content)
     else:
         console.print(content)
 
