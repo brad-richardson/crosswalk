@@ -84,7 +84,10 @@ def _map_vote_groups_to_sidecar(groups: list[dict], votes_df: pd.DataFrame) -> d
             for sgid in edge_groups.get(e, ()):
                 cnt[sgid] += 1
         if cnt:
-            mapping[str(vgid)] = max(cnt, key=cnt.get)
+            # #354: sort before max() so a count tie resolves to the smallest
+            # group_id, not hash-order-dependent set iteration. This feeds the
+            # experimental resolver's training table via edge_soft_labels().
+            mapping[str(vgid)] = max(sorted(cnt), key=cnt.get)
     return mapping
 
 

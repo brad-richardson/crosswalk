@@ -90,7 +90,10 @@ def _recover_group(
             counts[gid] += 1
     if not counts:
         return None, 0, len(label_es)
-    best = max(counts, key=counts.get)
+    # #367: label_es is a frozenset, so its iteration order (hence insertion
+    # order into counts) is hash-seed dependent; sort before max() so a count
+    # tie resolves deterministically to the smallest group_id.
+    best = max(sorted(counts), key=counts.get)
     return groups_by_id[best], counts[best], len(label_es)
 
 
