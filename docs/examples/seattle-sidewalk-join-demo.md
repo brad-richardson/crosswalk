@@ -188,15 +188,17 @@ the key the city's other datasets already use. For that **rebuilt** bridge the
 ID sidecar is unnecessary — external SDOT-keyed data joins straight through
 `COMPKEY` (or via `UNITID`→`COMPKEY`), no snapshot projection required.
 
-The instructions above still describe the **original** `OBJECTID`-keyed bridge
-(built from the `v1.0` 2026-02-08 snapshot), for which the sidecar remains the
-correct bridge — that snapshot and its sidecar are unchanged. The live re-fetch
-is written to `data/raw/us_seattle_sidewalks_v2.0.parquet` so the historical
-snapshot is preserved. The re-key covered re-matching against the new fetch and
-a migration of all Seattle labels (`labels/stitching`, `labels/human`,
-`labels/features`, `labels/data`) from `OBJECTID` to `COMPKEY` ids, deriving the
-mapping from the `v1.0` snapshot (which retains both columns) and preserving each
-label's stored h3 suffix.
+The instructions above describe the original `OBJECTID`-keyed bridge. The target
+is now re-keyed to stable `COMPKEY` **in place** on the canonical `v1.0`
+2026-02-08 snapshot (`scripts/rekey_seattle_target.py`), deriving the
+`OBJECTID`→`COMPKEY` mapping from that snapshot's own `source_tags` (which retain
+both columns) and preserving each feature's geometry and stored h3 suffix; the
+pre-re-key `OBJECTID` snapshot is kept as `…v1.0.parquet.objectid.bak`. A live
+re-fetch is deliberately **not** used — SDOT reassigns `OBJECTID` on republish
+and a fresh fetch would also shift geometry (changing the h3 suffix), so it would
+not match the already-migrated `COMPKEY` labels. All Seattle labels
+(`labels/stitching`, `labels/human`, `labels/features`, `labels/data`) were
+migrated from `OBJECTID` to `COMPKEY` by the same mapping.
 
 ## Licensing & attribution
 

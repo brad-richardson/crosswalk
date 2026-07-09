@@ -80,12 +80,13 @@ reference = "us_fort_collins_sidewalks_overture_segments_v1.0.parquet"
 target = "us_fort_collins_sidewalks_v1.0.parquet"
 connectors = "us_fort_collins_sidewalks_overture_connectors_v1.0.parquet"
 
-# target re-keyed from ArcGIS OBJECTID to stable SDOT COMPKEY (v2.0, live fetch);
-# labels/stitching are migrated to COMPKEY ids to match. v1.0 (OBJECTID) is kept
-# for the seattle-sidewalk-join-demo's historical snapshot/sidecar only.
+# target re-keyed from ArcGIS OBJECTID to stable SDOT COMPKEY, and
+# labels/stitching migrated to COMPKEY to match. The re-key is applied in place
+# to the canonical v1.0 snapshot (scripts/rekey_seattle_target.py); the earlier
+# v2.0 sidecar pointer referenced a file that never existed on the pipeline host.
 [datasets.us_seattle_sidewalks]
 reference = "us_seattle_sidewalks_overture_segments_v1.0.parquet"
-target = "us_seattle_sidewalks_v2.0.parquet"
+target = "us_seattle_sidewalks_v1.0.parquet"
 connectors = "us_seattle_sidewalks_overture_connectors_v1.0.parquet"
 
 [datasets.de_berlin_roads]
