@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import errno
 import json
+import math
 import re
 import subprocess
 import tempfile
@@ -32,6 +33,7 @@ from ..config import settings
 from .panel_routing import (
     REASON_ALL_ABSTAINED,
     REASON_CLASS_MISMATCH,
+    REASON_LOW_CONFIDENCE,
     REASON_SIZE_GATED,
     candidate_edge_count,
     derive_route_reason,
@@ -1094,6 +1096,7 @@ def compute_consensus(
     votes: list[Vote],
     edge_classes: list[tuple[str | None, str | None]] | None = None,
     n_candidate_edges: int | None = None,
+    min_voter_confidence: float | None = None,
 ) -> Consensus:
     """Apply the 3/3, 2/3, else routing rule over a group's votes.
 
@@ -1121,6 +1124,17 @@ def compute_consensus(
     no ``edge_classes`` disables the gate (callers without class metadata get
     the pre-gate behavior). The size gate runs first: when both would demote,
     the structural export block is the decisive fact and its reason wins.
+
+    Low-confidence gate: when ``min_voter_confidence`` is a positive floor, an
+    otherwise-auto-accept verdict whose MINIMUM confidence across valid votes is
+    below it is demoted to ``human_review`` with ``route_reason="low_confidence"``.
+    The two Gemini-based voters report near-constant inflated confidence, so the
+    minimum is effectively the calibrated voter's self-report — a review found low
+    values there flagged wrong unanimous verdicts. A blank/NaN confidence on a
+    valid vote counts as BELOW the floor (a missing self-report must not silently
+    pass). Runs AFTER the size and class gates, so their more-structural reasons
+    win when several would demote. ``None`` or a non-positive floor disables the
+    gate (callers without the setting get the pre-gate behavior).
     """
     group_id = votes[0].group_id if votes else ""
     valid = [v for v in votes if v.choice != "ABSTAIN"]
@@ -1184,6 +1198,18 @@ def compute_consensus(
     if routing == "auto_accept" and edge_classes is not None and has_cross_mode_edge(edge_classes):
         routing = "human_review"
         route_reason = REASON_CLASS_MISMATCH
+
+    # Low-confidence gate: demote an auto-accept whose calibrated-voter
+    # confidence is too low. The Gemini-based voters report near-constant
+    # inflated confidence, so min(valid) is effectively the calibrated voter's
+    # self-report — a review found low values there flagged wrong verdicts. A
+    # blank/NaN confidence counts as below the floor (NaN must not silently
+    # pass). Runs after the size and class gates so their reasons win.
+    if routing == "auto_accept" and min_voter_confidence is not None and min_voter_confidence > 0.0:
+        valid_confs = [v.confidence for v in valid]
+        if any(math.isnan(c) for c in valid_confs) or min(valid_confs) < min_voter_confidence:
+            routing = "human_review"
+            route_reason = REASON_LOW_CONFIDENCE
 
     # Stamp a reason on EVERY row (not just gate demotions) so consensus.csv
     # says why each group routed the way it did. The derivation is shared with
@@ -1425,6 +1451,7 @@ def run_batch(
             votes,
             edge_classes=edge_classes,
             n_candidate_edges=candidate_edge_count(meta),
+            min_voter_confidence=settings.stitch_min_voter_confidence,
         )
         consensus_out.append(_consensus_row(cons))
         logger.info(

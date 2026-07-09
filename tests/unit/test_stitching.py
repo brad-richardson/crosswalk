@@ -1230,6 +1230,173 @@ class TestPanelRoutingSizeGate:
 
 
 # ---------------------------------------------------------------------------
+# panel_routing — read-time low-confidence overlay (calibration review void)
+# ---------------------------------------------------------------------------
+
+
+class TestPanelRoutingLowConfidence:
+    """Low-confidence auto_accepts must surface as panel failures, not auto-export.
+
+    A wave voted before the low-confidence gate existed recorded a unanimous
+    auto_accept whose minimum valid-vote confidence was below the floor. Unlike a
+    size-gated verdict it is NOT blocked at export, so without the overlay it
+    would silently auto-export on the next stitch-export. The overlay in
+    latest_panel_consensus rewrites such rows to human_review / low_confidence
+    (reading the minimum from votes.csv, never touching the on-disk CSVs).
+    """
+
+    @property
+    def _floor(self):
+        from crosswalk.config import settings
+
+        return settings.stitch_min_voter_confidence
+
+    def _write_wave(self, batch_dir, cons_rows, votes, meta_edges=None, mtime=None):
+        """Write a consensus.csv + votes.csv (+ optional per-group metadata.yaml)."""
+        import csv as _csv
+
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        cpath = batch_dir / "consensus.csv"
+        cfields = ["group_id", "routing", "route_reason", "minority", "consensus", "choice"]
+        with open(cpath, "w", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=cfields)
+            w.writeheader()
+            for row in cons_rows:
+                w.writerow({k: row.get(k, "") for k in cfields})
+        vfields = ["group_id", "provider", "choice", "confidence"]
+        with open(batch_dir / "votes.csv", "w", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=vfields)
+            w.writeheader()
+            for row in votes:
+                w.writerow({k: row.get(k, "") for k in vfields})
+        for gid, n in (meta_edges or {}).items():
+            gdir = batch_dir / gid
+            gdir.mkdir(exist_ok=True)
+            (gdir / "metadata.yaml").write_text(f"group_id: {gid}\nn_edges_full: {n}\n")
+        if mtime is not None:
+            import os
+
+            os.utime(cpath, (mtime, mtime))
+
+    def _unanimous(self, gid, c1, c2, c3):
+        """Unanimous 'A' consensus row + three 'A' votes with the given confidences."""
+        cons = {"group_id": gid, "routing": "auto_accept", "route_reason": "unanimous"}
+        votes = [
+            {"group_id": gid, "provider": "claude", "choice": "A", "confidence": c1},
+            {"group_id": gid, "provider": "codex", "choice": "A", "confidence": c2},
+            {"group_id": gid, "provider": "agy", "choice": "A", "confidence": c3},
+        ]
+        return cons, votes
+
+    def test_below_floor_auto_accept_becomes_panel_failure(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import (
+            attach_panel_route_reasons,
+            latest_panel_routing,
+            panel_failed_group_ids,
+        )
+
+        root = tmp_path / "batches"
+        cons, votes = self._unanimous("g_low", self._floor - 0.1, 0.95, 0.98)
+        self._write_wave(root / "ds_a", [cons], votes, mtime=1000)
+        assert latest_panel_routing("ds_a", root)["g_low"] == "human_review"
+        assert panel_failed_group_ids("ds_a", root) == {"g_low"}
+        groups = [{"group_id": "g_low"}]
+        assert attach_panel_route_reasons(groups, "ds_a", root) == 1
+        assert groups[0]["panel_route_reason"] == "low_confidence"
+        assert groups[0]["panel_route_reason_human"] == (
+            "low panel confidence — below the auto-accept floor"
+        )
+
+    def test_at_and_above_floor_unchanged(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import (
+            latest_panel_routing,
+            panel_failed_group_ids,
+        )
+
+        root = tmp_path / "batches"
+        at_cons, at_votes = self._unanimous("at_floor", self._floor, self._floor, self._floor)
+        hi_cons, hi_votes = self._unanimous("above", self._floor + 0.01, 0.95, 0.98)
+        self._write_wave(root / "ds_a", [at_cons, hi_cons], at_votes + hi_votes, mtime=1000)
+        routing = latest_panel_routing("ds_a", root)
+        assert routing == {"at_floor": "auto_accept", "above": "auto_accept"}
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_nan_confidence_demotes(self, tmp_path):
+        # A blank confidence cell on a valid vote counts as below the floor.
+        from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
+
+        root = tmp_path / "batches"
+        cons, votes = self._unanimous("g_nan", "", 0.98, 0.99)  # blank -> NaN
+        self._write_wave(root / "ds_a", [cons], votes, mtime=1000)
+        assert panel_failed_group_ids("ds_a", root) == {"g_nan"}
+
+    def test_missing_votes_leaves_row_untouched(self, tmp_path):
+        # No votes.csv rows for the group -> no confidence evidence -> untouched.
+        from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
+
+        root = tmp_path / "batches"
+        cons = {"group_id": "g1", "routing": "auto_accept", "route_reason": "unanimous"}
+        self._write_wave(root / "ds_a", [cons], votes=[], mtime=1000)
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_abstaining_votes_excluded_from_minimum(self, tmp_path):
+        # An ABSTAIN vote's confidence does not count toward the minimum (mirrors
+        # compute_consensus's validity rule); the two valid votes are above floor.
+        from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
+
+        root = tmp_path / "batches"
+        cons = {"group_id": "g1", "routing": "auto_accept", "route_reason": "unanimous"}
+        votes = [
+            {"group_id": "g1", "provider": "claude", "choice": "A", "confidence": 0.9},
+            {"group_id": "g1", "provider": "codex", "choice": "A", "confidence": 0.95},
+            {"group_id": "g1", "provider": "agy", "choice": "ABSTAIN", "confidence": 0.0},
+        ]
+        self._write_wave(root / "ds_a", [cons], votes, mtime=1000)
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_size_gate_wins_in_overlay(self, tmp_path):
+        # A group that is both over-backstop AND low-confidence stamps size_gated:
+        # the low-confidence overlay runs only after the size gate passes.
+        from crosswalk.agent_labeling.panel_routing import latest_panel_consensus
+
+        root = tmp_path / "batches"
+        from crosswalk.config import settings
+
+        cons, votes = self._unanimous("both", self._floor - 0.2, 0.95, 0.98)
+        self._write_wave(
+            root / "ds_a",
+            [cons],
+            votes,
+            meta_edges={"both": settings.stitch_export_backstop_max_edges + 1},
+            mtime=1000,
+        )
+        row = latest_panel_consensus("ds_a", root)["both"]
+        assert row["routing"] == "human_review"
+        assert row["route_reason"] == "size_gated"
+
+    def test_human_review_rows_keep_specific_reason(self, tmp_path):
+        # The overlay only rewrites auto_accepts: a low-confidence dissent row
+        # already routes to a human and keeps its more specific reason.
+        from crosswalk.agent_labeling.panel_routing import latest_panel_consensus
+
+        root = tmp_path / "batches"
+        cons = {
+            "group_id": "g1",
+            "routing": "human_review",
+            "route_reason": "dissent:codex=B",
+            "minority": "codex=B",
+        }
+        votes = [
+            {"group_id": "g1", "provider": "claude", "choice": "A", "confidence": 0.2},
+            {"group_id": "g1", "provider": "codex", "choice": "B", "confidence": 0.2},
+            {"group_id": "g1", "provider": "agy", "choice": "A", "confidence": 0.2},
+        ]
+        self._write_wave(root / "ds_a", [cons], votes, mtime=1000)
+        row = latest_panel_consensus("ds_a", root)["g1"]
+        assert row["route_reason"] == "dissent:codex=B"
+
+
+# ---------------------------------------------------------------------------
 # panel_routing — route-reason derivation for historical consensus rows
 # ---------------------------------------------------------------------------
 
@@ -1303,6 +1470,12 @@ class TestDeriveRouteReason:
             self._derive(consensus="unanimous", route_reason="class-mismatch") == "class-mismatch"
         )
         assert self._derive(route_reason="size_gated", minority="codex=D") == "size_gated"
+        # low_confidence is stamped by the gate/overlay and is not derivable from
+        # the columns, so it is preserved verbatim.
+        assert (
+            self._derive(route_reason="low_confidence", consensus="unanimous", choice="A")
+            == "low_confidence"
+        )
 
     def test_legacy_tier_echo_stamps_are_rederived(self):
         # Phase-2 stamped bare tier echoes ("majority"/"none") — strictly less
@@ -1402,6 +1575,7 @@ class TestHumanizeRouteReason:
 
         assert h("") == ""
         assert h("size_gated") == "over the size gate — too large to auto-accept"
+        assert h("low_confidence") == "low panel confidence — below the auto-accept floor"
         assert h("some_new_code") == "some new code"
 
 
