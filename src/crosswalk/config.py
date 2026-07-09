@@ -780,6 +780,40 @@ class MatcherSettings(BaseSettings):
         "options span MORE than this many distinct candidate edges; smaller groups "
         "keep the full option set (byte-identical packs).",
     )
+    # Per-voter bias monitoring for the stitch panel (crosswalk.agent_labeling.
+    # panel_monitor). Makes voter defects LOUD instead of found by accident.
+    # Motivating evidence: voter `agy` (Gemini Flash via CLI) voted the first-listed
+    # option "A" in 11/12 valid ballots at a CONSTANT 0.95 confidence — a
+    # position-anchored rubber stamp that inflated unanimity and drove ~1/3 of panel
+    # failures in its waves, with nothing surfacing it. Brad chose MONITORING over
+    # option-letter shuffling deliberately: shuffling hides the anchor, the monitor
+    # exposes it. Defaults are conservative so only a genuine anchor / rubber-stamp
+    # trips, not ordinary agreement.
+    panel_monitor_position_anchor_share: float = Field(
+        default=0.6,
+        description="POSITION_ANCHOR alarm: fraction of a voter's valid ballots landing on "
+        "its single most-common choice POSITION (letter slot; NONE/ABSTAIN excluded). Above "
+        "this the voter is picking by slot, not merit.",
+    )
+    panel_monitor_position_anchor_min_n: int = Field(
+        default=10,
+        description="Minimum valid ballots before POSITION_ANCHOR can trip (aggregate / "
+        "offline monitoring floor).",
+    )
+    panel_monitor_constant_confidence_std: float = Field(
+        default=0.02,
+        description="CONSTANT_CONFIDENCE alarm: population std of a voter's confidence over "
+        "its valid ballots below this flags a rubber-stamped constant (e.g. agy's flat 0.95).",
+    )
+    panel_monitor_constant_confidence_min_n: int = Field(
+        default=10,
+        description="Minimum valid ballots before CONSTANT_CONFIDENCE can trip.",
+    )
+    panel_monitor_wave_min_n: int = Field(
+        default=8,
+        description="Lower valid-ballot floor used when surfacing POSITION_ANCHOR at wave time "
+        "(per-batch), where a voter has fewer ballots than the aggregate view.",
+    )
     # Panel low-confidence routing gate. A unanimous auto_accept whose MINIMUM
     # confidence across valid (non-abstaining) votes falls below this floor is
     # demoted to human_review (route_reason="low_confidence"). Empirically the
