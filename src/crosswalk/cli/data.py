@@ -2180,6 +2180,185 @@ def _round_geojson_coords(geojson: dict, precision: int = 6) -> dict:
     return {**geojson, "coordinates": _round_coords(geojson["coordinates"])}
 
 
+def _generate_stitch_batch_for_dataset(
+    ds_name: str,
+    *,
+    output_dir,
+    batch_size: int,
+    k_alternatives: int,
+    include_unvoted: bool,
+) -> bool:
+    """Generate one dataset's stitching review queue (``{ds}_batch.json``).
+
+    Shared per-dataset body behind ``crosswalk data stitch-batch`` (single and
+    ``--all``) and the refresh phase of ``stitch-batch-all``, so all three write
+    identical queues. Returns True iff a non-empty batch was written.
+    """
+    import json
+    from datetime import UTC, datetime
+
+    from ..agent_labeling.panel_routing import (
+        attach_panel_route_reasons,
+        panel_failed_group_ids,
+    )
+    from ..filenames import bridge_filename, groups_sidecar_path, stitch_batch_path
+    from ..labeling.stitching_store import StitchingLabelStore
+    from ..matching.alternatives import generate_top_k_alternatives
+    from ..matching.batch_selection import select_stitching_batch
+
+    bridge_path = output_dir / bridge_filename(ds_name)
+    sidecar_path = groups_sidecar_path(bridge_path)
+
+    if not sidecar_path.exists():
+        console.print(f"  [yellow]No groups sidecar found at {sidecar_path}[/yellow]")
+        return False
+
+    # Load groups sidecar
+    try:
+        sidecar = json.loads(sidecar_path.read_text())
+        groups = sidecar.get("groups", [])
+    except (json.JSONDecodeError, OSError) as e:
+        console.print(f"  [red]Failed to load groups sidecar: {e}[/red]")
+        return False
+
+    console.print(f"  Loaded {len(groups)} groups from sidecar")
+
+    if not groups:
+        console.print("  [yellow]No groups to process[/yellow]")
+        return False
+
+    # Load existing stitching labels to skip already-reviewed
+    stitch_store = StitchingLabelStore(ds_name)
+    reviewed_ids = stitch_store.get_reviewed_group_ids(ds_name)
+    console.print(f"  Already reviewed: {len(reviewed_ids)} groups")
+
+    # Gate the human queue to groups the agent panel routed to human_review
+    # (unless --include-unvoted). Restrict to the current sidecar's group ids
+    # so stale votes on ids that no longer exist (re-segmentation) are
+    # dropped. Passing this allow-list to select_stitching_batch confines the
+    # tier sampling to panel failures.
+    candidate_ids: set[str] | None = None
+    if not include_unvoted:
+        sidecar_ids = {g.get("group_id") for g in groups}
+        failed_ids = panel_failed_group_ids(ds_name)
+        candidate_ids = failed_ids & sidecar_ids
+        eligible = candidate_ids - reviewed_ids
+        console.print(
+            f"  Panel-failure gate: {len(failed_ids)} routed to human_review, "
+            f"{len(candidate_ids)} in current sidecar, {len(eligible)} unreviewed "
+            f"(use --include-unvoted to sample all groups)"
+        )
+        if not eligible:
+            console.print(
+                "  [yellow]No unreviewed panel failures — writing an empty queue. "
+                "Run the agent panel (crosswalk agent stitch-batch/stitch-run) to "
+                "produce more, or pass --include-unvoted.[/yellow]"
+            )
+
+    # Pre-compute alternatives per group. These drive both the batch
+    # selection scoring AND the review UI's one-click option picker, so
+    # they are intentionally retained in the batch file. Alternatives are
+    # just ID pairs + confidence (no geometries), so the size cost is small.
+    console.print(f"  Computing top-{k_alternatives} alternatives per group...")
+    for group in groups:
+        alternatives = generate_top_k_alternatives(
+            component_edges=group.get("edges", []),
+            ref_geoms=group.get("ref_geometries", {}),
+            target_geoms=group.get("target_geometries", {}),
+            k=k_alternatives,
+        )
+        group["alternatives"] = alternatives
+
+    # Select batch
+    selected = select_stitching_batch(
+        groups=groups,
+        reviewed_group_ids=reviewed_ids,
+        k=batch_size,
+        candidate_group_ids=candidate_ids,
+    )
+
+    if not selected:
+        console.print("  [yellow]No groups selected for batch[/yellow]")
+        if not include_unvoted:
+            # Gating is active and nothing qualified. Write an EMPTY queue so
+            # a previously-generated (ungated) batch is not left serving stale
+            # never-voted groups to the reviewer.
+            empty_batch = {
+                "dataset_id": ds_name,
+                "generated_at": datetime.now(UTC).isoformat(),
+                "batch_size": 0,
+                "groups": [],
+            }
+            empty_path = stitch_batch_path(ds_name)
+            empty_path.parent.mkdir(parents=True, exist_ok=True)
+            empty_path.write_text(json.dumps(empty_batch, indent=2))
+            console.print(f"  [green]Wrote empty queue to {empty_path}[/green]")
+        return False
+
+    # NOTE: alternatives and optimizer_assignment are deliberately kept on
+    # each selected group so the review UI can pre-seed the optimizer's
+    # proposed assignment and offer the top-K alternatives as one-click
+    # options ("verify, don't construct").
+
+    # Annotate each queued group with WHY the panel routed it to a human
+    # (panel_route_reason + a short display variant). Pure annotation from
+    # the latest consensus row — never changes which groups are selected.
+    n_reasons = attach_panel_route_reasons(selected, ds_name)
+    if n_reasons:
+        console.print(f"  Panel route reasons attached: {n_reasons}/{len(selected)}")
+
+    # Fill in spatial context for each group
+    console.print("  Filling spatial context...")
+    _fill_spatial_context(selected, ds_name)
+    ctx_counts = [
+        len(g.get("context_ref_ids", [])) + len(g.get("context_target_ids", [])) for g in selected
+    ]
+    console.print(
+        f"  Added context: {sum(ctx_counts)} segments "
+        f"(avg {sum(ctx_counts) / len(ctx_counts):.0f}/group)"
+    )
+
+    # Write batch file
+    batch = {
+        "dataset_id": ds_name,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "batch_size": len(selected),
+        "groups": selected,
+    }
+
+    batch_path = stitch_batch_path(ds_name)
+    batch_path.parent.mkdir(parents=True, exist_ok=True)
+    batch_path.write_text(json.dumps(batch, indent=2))
+
+    # Count tiers
+    tier_counts = {}
+    for g in selected:
+        tier = g.get("review_tier", "unknown")
+        tier_counts[tier] = tier_counts.get(tier, 0) + 1
+
+    console.print(f"  [green]Wrote batch of {len(selected)} groups to {batch_path}[/green]")
+    tier_str = ", ".join(f"{t}={c}" for t, c in sorted(tier_counts.items()))
+    console.print(f"  Tiers: {tier_str}")
+
+    # Maintenance invariant: a freshly generated queue must be in parity with
+    # the sidecar it was built from (each entry's optimizer_assignment == the
+    # sidecar group's selected edges). This is trivially true here because the
+    # entries ARE the sidecar groups, but running the check makes the
+    # stale-proposal invariant a guarded property of the rebuild path itself.
+    from ..matching.stitch_queue_refresh import check_queue_optimizer_parity
+
+    sidecar_by_id = {g.get("group_id"): g for g in groups}
+    drift = check_queue_optimizer_parity(selected, sidecar_by_id)
+    if drift:
+        console.print(
+            f"  [red]WARNING: {len(drift)} generated entries drifted from the "
+            f"sidecar selected set (stale proposals): "
+            f"{', '.join(d['group_id'] for d in drift[:5])}[/red]"
+        )
+
+    return True
+
+
 @data_app.command("stitch-batch")
 def stitch_batch(
     dataset: str = typer.Argument(
@@ -2235,21 +2414,7 @@ def stitch_batch(
         crosswalk data stitch-batch us_boston_streets -n 30  # Custom batch size
         crosswalk data stitch-batch us_boston_streets --include-unvoted  # Legacy
     """
-    import json
-    from datetime import UTC, datetime
-
-    from ..agent_labeling.panel_routing import (
-        attach_panel_route_reasons,
-        panel_failed_group_ids,
-    )
-    from ..filenames import (
-        PROJECT_ROOT,
-        groups_sidecar_path,
-        stitch_batch_path,
-    )
-    from ..labeling.stitching_store import StitchingLabelStore
-    from ..matching.alternatives import generate_top_k_alternatives
-    from ..matching.batch_selection import select_stitching_batch
+    from ..filenames import PROJECT_ROOT
 
     if batch_size <= 0:
         console.print("[red]Error: --batch-size must be positive[/red]")
@@ -2283,160 +2448,173 @@ def stitch_batch(
 
     for ds_name in datasets_to_process:
         console.print(f"\n[bold blue]Processing {ds_name}...[/bold blue]")
+        _generate_stitch_batch_for_dataset(
+            ds_name,
+            output_dir=output_dir,
+            batch_size=batch_size,
+            k_alternatives=k_alternatives,
+            include_unvoted=include_unvoted,
+        )
 
-        # Find groups sidecar
-        from ..filenames import bridge_filename
 
-        bridge_path = output_dir / bridge_filename(ds_name)
-        sidecar_path = groups_sidecar_path(bridge_path)
+@data_app.command("stitch-batch-all")
+def stitch_batch_all(
+    refresh: bool = typer.Option(
+        True,
+        "--refresh/--no-refresh",
+        help="Regenerate every dataset's per-dataset queue from its groups "
+        "sidecar before combining (default). Pass --no-refresh to combine the "
+        "existing data/cache/stitch/*_batch.json files as-is.",
+    ),
+    batch_size: int = typer.Option(
+        15,
+        "--batch-size",
+        "-n",
+        help="Per-dataset groups sampled during --refresh (default: 15)",
+    ),
+    k_alternatives: int = typer.Option(
+        8,
+        "--alternatives",
+        "-k",
+        help="Number of top-K organic alternatives per group during --refresh",
+    ),
+    include_unvoted: bool = typer.Option(
+        False,
+        "--include-unvoted",
+        help="During --refresh, sample ANY unreviewed group rather than gating "
+        "to agent-panel failures (see stitch-batch).",
+    ),
+):
+    """Combine every per-dataset queue into ONE cross-dataset review queue.
 
-        if not sidecar_path.exists():
-            console.print(f"  [yellow]No groups sidecar found at {sidecar_path}[/yellow]")
-            continue
+    Writes ``data/cache/stitch/__all___batch.json`` — a single queue holding
+    every dataset's unreviewed M:N groups so the web ``/stitching-review`` mode
+    can serve them all without switching datasets. Each group is stamped with its
+    owning ``dataset_id`` so labels are recorded back to the correct
+    ``labels/stitching/dataset=*/`` partition. Groups are ordered by dataset
+    (alphabetical), preserving each dataset's value-sorted order within.
 
-        # Load groups sidecar
-        try:
-            sidecar = json.loads(sidecar_path.read_text())
-            groups = sidecar.get("groups", [])
-        except (json.JSONDecodeError, OSError) as e:
-            console.print(f"  [red]Failed to load groups sidecar: {e}[/red]")
-            continue
+    By default this first regenerates each dataset's per-dataset queue (same
+    machinery as ``stitch-batch --all``) so the combined queue is fresh; pass
+    ``--no-refresh`` to combine the existing ``*_batch.json`` files verbatim.
+    The combined file is a snapshot; the UI still filters out already-reviewed
+    groups live (per-dataset labels), so re-running is cheap and safe.
 
-        console.print(f"  Loaded {len(groups)} groups from sidecar")
+    Examples:
+        crosswalk data stitch-batch-all                 # Refresh all + combine
+        crosswalk data stitch-batch-all --no-refresh    # Combine existing as-is
+    """
+    import json
+    from datetime import UTC, datetime
 
-        if not groups:
-            console.print("  [yellow]No groups to process[/yellow]")
-            continue
+    from ..filenames import PROJECT_ROOT, STITCH_ALL_QUEUE, stitch_batch_path
 
-        # Load existing stitching labels to skip already-reviewed
-        stitch_store = StitchingLabelStore(ds_name)
-        reviewed_ids = stitch_store.get_reviewed_group_ids(ds_name)
-        console.print(f"  Already reviewed: {len(reviewed_ids)} groups")
+    output_dir = PROJECT_ROOT / "data" / "output"
 
-        # Gate the human queue to groups the agent panel routed to human_review
-        # (unless --include-unvoted). Restrict to the current sidecar's group ids
-        # so stale votes on ids that no longer exist (re-segmentation) are
-        # dropped. Passing this allow-list to select_stitching_batch confines the
-        # tier sampling to panel failures.
-        candidate_ids: set[str] | None = None
-        if not include_unvoted:
-            sidecar_ids = {g.get("group_id") for g in groups}
-            failed_ids = panel_failed_group_ids(ds_name)
-            candidate_ids = failed_ids & sidecar_ids
-            eligible = candidate_ids - reviewed_ids
+    if refresh:
+        # Regenerate every REAL dataset that has a groups sidecar, so the
+        # combined queue reflects the current optimizer/panel state. The sidecar
+        # glob also matches before_/after_/baseline_ comparison artifacts
+        # (data/output/before_us_boston_streets_groups.json etc.); those are not
+        # datasets, so gate on DatasetLoader membership to keep them out of the
+        # queue. A dataset that still has a real batch cache but no raw files is
+        # kept too (its queue is live even if inputs were cleaned up).
+        from ..datasets.loader import DatasetLoader
+
+        real_datasets = set(DatasetLoader().list_available())
+        cache_dir = stitch_batch_path(STITCH_ALL_QUEUE).parent
+        has_batch = {
+            f.stem.replace("_batch", "")
+            for f in cache_dir.glob("*_batch.json")
+            if f.stem.replace("_batch", "") != STITCH_ALL_QUEUE
+        }
+        datasets_to_refresh = []
+        skipped = []
+        if output_dir.exists():
+            for sidecar_file in sorted(output_dir.glob("*_groups.json")):
+                ds_name = sidecar_file.stem.replace("_groups", "")
+                if ds_name in real_datasets or ds_name in has_batch:
+                    datasets_to_refresh.append(ds_name)
+                else:
+                    skipped.append(ds_name)
+        if skipped:
             console.print(
-                f"  Panel-failure gate: {len(failed_ids)} routed to human_review, "
-                f"{len(candidate_ids)} in current sidecar, {len(eligible)} unreviewed "
-                f"(use --include-unvoted to sample all groups)"
+                f"[dim]Skipping {len(skipped)} non-dataset sidecars "
+                f"(comparison artifacts): {', '.join(skipped)}[/dim]"
             )
-            if not eligible:
+        if not datasets_to_refresh:
+            console.print("[yellow]No real datasets with groups sidecars found[/yellow]")
+            raise typer.Exit(0)
+        console.print(
+            f"[blue]Refreshing {len(datasets_to_refresh)} per-dataset queues "
+            f"before combining...[/blue]"
+        )
+        for ds_name in datasets_to_refresh:
+            console.print(f"\n[bold blue]Processing {ds_name}...[/bold blue]")
+            # One dataset's failure (e.g. a malformed panel CSV) must not abort
+            # the whole combine — its existing cached batch is reused as-is.
+            try:
+                _generate_stitch_batch_for_dataset(
+                    ds_name,
+                    output_dir=output_dir,
+                    batch_size=batch_size,
+                    k_alternatives=k_alternatives,
+                    include_unvoted=include_unvoted,
+                )
+            except Exception as e:
                 console.print(
-                    "  [yellow]No unreviewed panel failures — writing an empty queue. "
-                    "Run the agent panel (crosswalk agent stitch-batch/stitch-run) to "
-                    "produce more, or pass --include-unvoted.[/yellow]"
+                    f"  [red]Refresh failed for {ds_name} ({e}); "
+                    f"keeping its existing cached queue.[/red]"
                 )
 
-        # Pre-compute alternatives per group. These drive both the batch
-        # selection scoring AND the review UI's one-click option picker, so
-        # they are intentionally retained in the batch file. Alternatives are
-        # just ID pairs + confidence (no geometries), so the size cost is small.
-        console.print(f"  Computing top-{k_alternatives} alternatives per group...")
-        for group in groups:
-            alternatives = generate_top_k_alternatives(
-                component_edges=group.get("edges", []),
-                ref_geoms=group.get("ref_geometries", {}),
-                target_geoms=group.get("target_geometries", {}),
-                k=k_alternatives,
-            )
-            group["alternatives"] = alternatives
+    # Combine every per-dataset batch file (skip the aggregate itself) into one
+    # queue. Each group is tagged with its owning dataset_id so downstream
+    # rendering + label recording route to the correct partition.
+    cache_dir = stitch_batch_path(STITCH_ALL_QUEUE).parent
+    combined_groups: list[dict] = []
+    source_summary: list[tuple[str, int]] = []
+    if cache_dir.exists():
+        for batch_file in sorted(cache_dir.glob("*_batch.json")):
+            ds_name = batch_file.stem.replace("_batch", "")
+            if ds_name == STITCH_ALL_QUEUE:
+                continue
+            try:
+                batch = json.loads(batch_file.read_text())
+            except (json.JSONDecodeError, OSError) as e:
+                console.print(f"  [red]Skipping {batch_file.name}: {e}[/red]")
+                continue
+            groups = batch.get("groups", [])
+            owner = batch.get("dataset_id", ds_name)
+            for g in groups:
+                # Stamp the owning dataset so the UI can route labels back and
+                # resolve per-group spatial-context membership.
+                g["dataset_id"] = owner
+            combined_groups.extend(groups)
+            if groups:
+                source_summary.append((owner, len(groups)))
 
-        # Select batch
-        selected = select_stitching_batch(
-            groups=groups,
-            reviewed_group_ids=reviewed_ids,
-            k=batch_size,
-            candidate_group_ids=candidate_ids,
-        )
+    combined = {
+        "dataset_id": STITCH_ALL_QUEUE,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "batch_size": len(combined_groups),
+        "groups": combined_groups,
+    }
 
-        if not selected:
-            console.print("  [yellow]No groups selected for batch[/yellow]")
-            if not include_unvoted:
-                # Gating is active and nothing qualified. Write an EMPTY queue so
-                # a previously-generated (ungated) batch is not left serving stale
-                # never-voted groups to the reviewer.
-                empty_batch = {
-                    "dataset_id": ds_name,
-                    "generated_at": datetime.now(UTC).isoformat(),
-                    "batch_size": 0,
-                    "groups": [],
-                }
-                empty_path = stitch_batch_path(ds_name)
-                empty_path.parent.mkdir(parents=True, exist_ok=True)
-                empty_path.write_text(json.dumps(empty_batch, indent=2))
-                console.print(f"  [green]Wrote empty queue to {empty_path}[/green]")
-            continue
+    all_path = stitch_batch_path(STITCH_ALL_QUEUE)
+    all_path.parent.mkdir(parents=True, exist_ok=True)
+    all_path.write_text(json.dumps(combined, indent=2))
 
-        # NOTE: alternatives and optimizer_assignment are deliberately kept on
-        # each selected group so the review UI can pre-seed the optimizer's
-        # proposed assignment and offer the top-K alternatives as one-click
-        # options ("verify, don't construct").
-
-        # Annotate each queued group with WHY the panel routed it to a human
-        # (panel_route_reason + a short display variant). Pure annotation from
-        # the latest consensus row — never changes which groups are selected.
-        n_reasons = attach_panel_route_reasons(selected, ds_name)
-        if n_reasons:
-            console.print(f"  Panel route reasons attached: {n_reasons}/{len(selected)}")
-
-        # Fill in spatial context for each group
-        console.print("  Filling spatial context...")
-        _fill_spatial_context(selected, ds_name)
-        ctx_counts = [
-            len(g.get("context_ref_ids", [])) + len(g.get("context_target_ids", []))
-            for g in selected
-        ]
+    console.print(
+        f"\n[green]Wrote combined queue of {len(combined_groups)} groups "
+        f"from {len(source_summary)} datasets to {all_path}[/green]"
+    )
+    for owner, n in source_summary:
+        console.print(f"  {owner}: {n}")
+    if not combined_groups:
         console.print(
-            f"  Added context: {sum(ctx_counts)} segments "
-            f"(avg {sum(ctx_counts) / len(ctx_counts):.0f}/group)"
+            "[yellow]Combined queue is empty — no per-dataset batches with groups. "
+            "Generate some with 'crosswalk data stitch-batch --all' first.[/yellow]"
         )
-
-        # Write batch file
-        batch = {
-            "dataset_id": ds_name,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "batch_size": len(selected),
-            "groups": selected,
-        }
-
-        batch_path = stitch_batch_path(ds_name)
-        batch_path.parent.mkdir(parents=True, exist_ok=True)
-        batch_path.write_text(json.dumps(batch, indent=2))
-
-        # Count tiers
-        tier_counts = {}
-        for g in selected:
-            tier = g.get("review_tier", "unknown")
-            tier_counts[tier] = tier_counts.get(tier, 0) + 1
-
-        console.print(f"  [green]Wrote batch of {len(selected)} groups to {batch_path}[/green]")
-        tier_str = ", ".join(f"{t}={c}" for t, c in sorted(tier_counts.items()))
-        console.print(f"  Tiers: {tier_str}")
-
-        # Maintenance invariant: a freshly generated queue must be in parity with
-        # the sidecar it was built from (each entry's optimizer_assignment == the
-        # sidecar group's selected edges). This is trivially true here because the
-        # entries ARE the sidecar groups, but running the check makes the
-        # stale-proposal invariant a guarded property of the rebuild path itself.
-        from ..matching.stitch_queue_refresh import check_queue_optimizer_parity
-
-        sidecar_by_id = {g.get("group_id"): g for g in groups}
-        drift = check_queue_optimizer_parity(selected, sidecar_by_id)
-        if drift:
-            console.print(
-                f"  [red]WARNING: {len(drift)} generated entries drifted from the "
-                f"sidecar selected set (stale proposals): "
-                f"{', '.join(d['group_id'] for d in drift[:5])}[/red]"
-            )
 
 
 @data_app.command("stitch-refresh-queue")

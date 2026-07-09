@@ -25,10 +25,32 @@ from __future__ import annotations
 
 import csv
 import math
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
 from ..filenames import PROJECT_ROOT
+
+
+def _raise_csv_field_limit() -> None:
+    """Lift csv's per-field size cap so large ``edge_set`` cells parse.
+
+    ``consensus.csv`` stores each group's selected ``edge_set`` as a JSON array
+    inline; for large M:N groups this single field exceeds Python's default
+    131072-char limit and ``csv.DictReader`` raises "field larger than field
+    limit". Raise the limit to the largest C long the platform accepts (backing
+    off on the Windows OverflowError where ``sys.maxsize`` overflows a C long).
+    """
+    limit = sys.maxsize
+    while True:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:
+            limit //= 10
+
+
+_raise_csv_field_limit()
 
 # Root under which each panel wave writes ``<batch_name>/consensus.csv``.
 STITCH_BATCHES_DIR = PROJECT_ROOT / "data" / "agents" / "stitching" / "batches"

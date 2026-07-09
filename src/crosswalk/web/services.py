@@ -1185,8 +1185,15 @@ def load_stitch_batch(dataset_id: str) -> dict | None:
 def get_unreviewed_stitch_groups(dataset_id: str, groups: list[dict]) -> list[dict]:
     """Filter groups to only those not yet reviewed.
 
+    Each group is checked against ITS OWN dataset's stitching labels: for a
+    normal per-dataset batch that is just ``dataset_id``, but for the combined
+    ``__all__`` queue every group carries its owning ``dataset_id`` and must be
+    filtered against that partition's reviewed set (a group is reviewed in its
+    own dataset, never in the synthetic ``__all__`` one). Reviewed-id sets are
+    loaded once per owning dataset and cached.
+
     Args:
-        dataset_id: Dataset identifier
+        dataset_id: Queue identifier (a real dataset, or ``__all__``)
         groups: List of group dicts from the batch
 
     Returns:
@@ -1194,9 +1201,18 @@ def get_unreviewed_stitch_groups(dataset_id: str, groups: list[dict]) -> list[di
     """
     from ..labeling.stitching_store import StitchingLabelStore
 
-    store = StitchingLabelStore(dataset_id)
-    reviewed_ids = store.get_reviewed_group_ids(dataset_id)
-    return [g for g in groups if g.get("group_id") not in reviewed_ids]
+    reviewed_by_ds: dict[str, set] = {}
+
+    def _reviewed_for(ds: str) -> set:
+        if ds not in reviewed_by_ds:
+            reviewed_by_ds[ds] = StitchingLabelStore(ds).get_reviewed_group_ids(ds)
+        return reviewed_by_ds[ds]
+
+    return [
+        g
+        for g in groups
+        if g.get("group_id") not in _reviewed_for(g.get("dataset_id") or dataset_id)
+    ]
 
 
 def record_stitching_label(

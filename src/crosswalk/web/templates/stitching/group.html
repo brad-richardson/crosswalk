@@ -35,6 +35,9 @@
         <span class="match-type-badge match-type-{{ group.match_type | replace(':', '-') }}">
             {{ group.match_type }}
         </span>
+        {% if dataset == '__all__' and group.dataset_id %}
+        <span class="ribbon-dataset" title="Owning dataset">{{ group.dataset_id }}</span>
+        {% endif %}
         <span class="ribbon-count">
             {{ group.ref_ids | length }} ref &times; {{ group.target_ids | length }} target
         </span>

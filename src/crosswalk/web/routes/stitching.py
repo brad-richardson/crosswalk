@@ -8,7 +8,13 @@ from fastapi.responses import HTMLResponse
 from shapely.geometry import LineString, mapping, shape
 from shapely.ops import substring, unary_union
 
-from ...filenames import PROJECT_ROOT, bridge_filename, groups_sidecar_path
+from ...filenames import (
+    PROJECT_ROOT,
+    STITCH_ALL_QUEUE,
+    bridge_filename,
+    groups_sidecar_path,
+    stitch_batch_path,
+)
 from ...labeling.stitching_store import LABEL_SEMANTICS_PAIR, LABEL_SEMANTICS_SET
 from ...matching.alternatives import _shorten_id
 from ...matching.sliver import (
@@ -38,10 +44,28 @@ router = APIRouter()
 
 
 def _validate_dataset(dataset: str) -> bool:
-    """Check dataset exists in the known dataset list (prevents path traversal)."""
+    """Check dataset exists in the known dataset list (prevents path traversal).
+
+    The synthetic ``__all__`` combined queue is accepted too: it is not a real
+    dataset but a curated cache file whose id is a fixed sentinel (no user input
+    reaches a path here), so it cannot be a traversal vector.
+    """
     if not dataset:
         return False
+    if dataset == STITCH_ALL_QUEUE:
+        return True
     return dataset in list_datasets()
+
+
+def _group_dataset(group: dict, page_dataset: str) -> str:
+    """Resolve the dataset that OWNS a group.
+
+    For a normal per-dataset queue this is just the page dataset. For the
+    combined ``__all__`` queue each group carries its own ``dataset_id``, which
+    is the partition its label must be written to and the sidecar its
+    spatial-context membership is resolved against.
+    """
+    return group.get("dataset_id") or page_dataset
 
 
 # Display-only cap on how many spatial-context segments are presented per side
@@ -596,7 +620,11 @@ async def stitching_review(
     ``/stitching-review/group`` endpoint is an HTMX fragment and renders
     without styles/map when opened directly.
     """
+    # Surface the combined cross-dataset queue at the top of the switcher, but
+    # only once it has actually been generated (crosswalk data stitch-batch-all).
     datasets = list_datasets()
+    if stitch_batch_path(STITCH_ALL_QUEUE).exists():
+        datasets = [STITCH_ALL_QUEUE, *datasets]
 
     if not dataset:
         return templates.TemplateResponse(
@@ -660,7 +688,9 @@ async def stitching_review(
             logger.warning(f"Deep-link group not found in {dataset} batch: {group_id!r}")
             return HTMLResponse("Group not found in batch", status_code=404)
         deep_group = all_groups[deep_index]
-        geojson, group_ctx = _render_group(deep_group, dataset, deanchored)
+        geojson, group_ctx = _render_group(
+            deep_group, _group_dataset(deep_group, dataset), deanchored
+        )
         return templates.TemplateResponse(
             request,
             "stitching/page.html",
@@ -696,7 +726,7 @@ async def stitching_review(
         )
 
     group = groups[0]
-    geojson, group_ctx = _render_group(group, dataset, deanchored)
+    geojson, group_ctx = _render_group(group, _group_dataset(group, dataset), deanchored)
 
     return templates.TemplateResponse(
         request,
@@ -771,7 +801,7 @@ async def stitching_group(
             {"request": request, "dataset": dataset, "all_reviewed": True},
         )
 
-    geojson, group_ctx = _render_group(group, dataset, deanchored)
+    geojson, group_ctx = _render_group(group, _group_dataset(group, dataset), deanchored)
 
     return templates.TemplateResponse(
         request,
@@ -986,7 +1016,9 @@ async def stitching_select(
                 num_targets = 0
 
         record_stitching_label(
-            dataset_id=dataset,
+            # Route to the group's OWNING dataset partition — for the combined
+            # __all__ queue this is the group's own dataset_id, not "__all__".
+            dataset_id=_group_dataset(group, dataset),
             group_id=group_id,
             selected_edges=final_edges,
             match_type=group.get("match_type", ""),
@@ -1015,7 +1047,7 @@ async def stitching_select(
         )
 
     group = groups[0]
-    geojson, group_ctx = _render_group(group, dataset, deanchored)
+    geojson, group_ctx = _render_group(group, _group_dataset(group, dataset), deanchored)
 
     return templates.TemplateResponse(
         request,
@@ -1077,7 +1109,7 @@ async def stitching_skip(
                 break
 
     group = groups[next_index]
-    geojson, group_ctx = _render_group(group, dataset, deanchored)
+    geojson, group_ctx = _render_group(group, _group_dataset(group, dataset), deanchored)
 
     return templates.TemplateResponse(
         request,
