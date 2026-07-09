@@ -350,3 +350,45 @@ def test_stitch_eval_mapping_ignores_rejected_edges(tmp_path):
     # the human label maps cleanly to the one real group by its selected edges.
     assert rec["clean"] == [("hg1", "g1")]
     assert rec["split"] == []
+
+
+def test_nan_confidence_excluded_and_json_stays_strict(tmp_path):
+    """A NaN-confidence candidate must not leak a bare `NaN` token into the
+    sidecar JSON (invalid strict JSON for non-Python consumers). NaN
+    comparisons are always False, so a naive `r.confidence < min_confidence`
+    floor check lets it through; the fix treats NaN as failing the floor, so
+    the candidate is excluded from the sidecar entirely (not merely
+    re-encoded as null)."""
+    ref, tgt, results, selected = _scenario()
+    # Corrupt the R3->T1 rejected candidate's confidence to NaN (e.g. an
+    # upstream feature-computation glitch).
+    results = [
+        _mr("R3", "T1", float("nan"), 2, 0) if (r.ref_id, r.target_id) == ("R3", "T1") else r
+        for r in results
+    ]
+    out = tmp_path / "bridge.parquet"
+    path = _export_groups_sidecar(
+        results=results,
+        optimized=selected,
+        output_path=out,
+        reference=ref,
+        target=tgt,
+        min_confidence=0.1,
+        ref_id_column="id",
+        target_id_column="id",
+        reference_proj=ref,
+        target_proj=tgt,
+    )
+    raw = path.read_text()
+
+    def _reject_constant(token):
+        raise ValueError(f"non-finite constant leaked into JSON: {token}")
+
+    # Strict round-trip: no bare NaN/Infinity tokens anywhere in the file.
+    data = json.loads(raw, parse_constant=_reject_constant)
+
+    g = next(gg for gg in data["groups"] if gg["group_id"] == "g1")
+    # The NaN-confidence candidate is dropped outright, not re-encoded as null.
+    assert ("R3", "T1") not in {(e["ref_id"], e["target_id"]) for e in g["rejected_edges"]}
+    # The other (finite-confidence) rejected candidate is unaffected.
+    assert ("R1", "T2") in {(e["ref_id"], e["target_id"]) for e in g["rejected_edges"]}

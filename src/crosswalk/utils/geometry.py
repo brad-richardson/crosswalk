@@ -94,8 +94,13 @@ def filter_to_linestrings(
 
     line_mask = geom_types == "LineString"
     flattened_count = int((mls_mask & line_mask).sum())
-    # Non-line geometries that remain (Points, Polygons, degenerate MLS, nulls).
-    other_count = original_count - int(line_mask.sum()) - null_count
+    # Non-line geometries that remain (Points, Polygons, degenerate MLS).
+    # Computed directly from the masks rather than
+    # ``original_count - line_mask.sum() - null_count``: an empty LineString
+    # has geom_type "LineString", so it is counted in BOTH line_mask.sum() and
+    # null_count, and that subtraction-based formula double-subtracted it,
+    # undercounting (or even going negative) by the empty-LineString count.
+    other_count = int((~line_mask & ~null_mask).sum())
 
     filtered = gdf[line_mask & ~null_mask].copy()
 
