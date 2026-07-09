@@ -22,7 +22,10 @@ the wave order.
 
 Size-gate overlay: the export path has a hard backstop
 (``settings.stitch_export_backstop_max_edges``) — no verdict on a group whose
-candidate-edge count exceeds it can ever mint a label. An ``auto_accept``
+candidate-edge count exceeds it can ever mint a label
+(:func:`stitch_export._gate_group` enforces the backstop on the candidate
+count on BOTH the structural path and the legacy no-structure-fields fallback;
+:func:`stitch_export._gate_empty_group` likewise for reject-alls). An ``auto_accept``
 verdict on such a group would therefore vanish: not in the human queue (it did
 not route to ``human_review``) and blocked at export. :func:`compute_consensus
 <stitch_runner.compute_consensus>` now demotes those verdicts at vote time, and

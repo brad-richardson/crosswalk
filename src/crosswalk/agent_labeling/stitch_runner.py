@@ -1012,9 +1012,11 @@ def compute_consensus(
     supplied and exceeds the export backstop
     (``settings.stitch_export_backstop_max_edges``), an otherwise-auto-accept
     verdict is demoted to ``human_review`` with ``route_reason="size_gated"``.
-    No verdict on such a group can ever mint a label (the export backstop
-    blocks it), so letting it auto-accept would make it vanish — not in the
-    human queue, not exported, reviewed by no one. Non-auto-accept outcomes
+    No verdict on such a group can ever mint a label — ``stitch_export``
+    enforces the backstop on the candidate count on both its structural gate
+    and its legacy no-structure-fields fallback — so letting it auto-accept
+    would make it vanish: not in the human queue, not exported, reviewed by
+    no one. Non-auto-accept outcomes
     already route to a human and keep their (more specific) reason, so every
     over-backstop group ends up ``human_review`` regardless of vote outcome.
     ``None`` disables the gate (callers without size metadata get the pre-gate

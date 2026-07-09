@@ -343,7 +343,9 @@ def plan_exports(
     anything larger regardless — a defence against a structure-detection bug,
     not the primary gate. When a group lacks structure fields (an older
     batch.json predating the structure sidecar) the gate falls back to the flat
-    ``max_edges`` cap on the selected edge set.
+    ``max_edges`` cap on the selected edge set PLUS the hard backstop on the
+    group's candidate count, so the backstop invariant (no over-backstop group
+    ever auto-exports) holds on the legacy path too.
 
     When ``export_empty_set`` (default), unanimous-NONE groups (all panelists
     voted "none of the options fit") additionally become EMPTY-SET candidates:
@@ -523,7 +525,12 @@ def _gate_group(
     # Gate (b): size gate. Prefer the structural gate when the group carries
     # structure fields (single corridor / few assignment-components within a
     # soft budget, under a hard backstop). Fall back to the flat edge cap on the
-    # selected edge set for older batch.json packs without structure fields.
+    # selected edge set for older batch.json packs without structure fields —
+    # ALSO enforcing the hard backstop on the group's CANDIDATE count there,
+    # mirroring _gate_empty_group. Without it, a legacy over-backstop group
+    # with a small selected set (e.g. calib0709's 0cbcf706: 45 candidates, 18
+    # selected) slipped past the flat cap and minted a label, resurrecting the
+    # size-routing void the consensus/read-time size gates close.
     n_group_edges = grp.get("n_edges")
     n_corridors = grp.get("n_corridors")
     n_assign = grp.get("n_assignment_components")
@@ -545,7 +552,7 @@ def _gate_group(
                 else REASON_STRUCTURAL_TANGLE
             )
             return _mk(reason, n_edges_final=n_raw)
-    elif n_raw > max_edges:
+    elif n_raw > max_edges or int(n_group_edges) > backstop_max_edges:
         return _mk(REASON_OVER_MAX, n_edges_final=n_raw)
 
     # Gate (c): class-consistency (any cross-mode pair: pedestrian/vehicular/bike).

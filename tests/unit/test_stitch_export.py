@@ -309,6 +309,61 @@ def test_structural_gate_backstop_blocks_giant_single_corridor(tmp_path, labels_
     assert g.reason == REASON_OVER_MAX
 
 
+def test_legacy_fallback_blocks_over_backstop_candidates(tmp_path, labels_dir):
+    """calib0709 shape: no structure fields, 45 candidates, 18 selected -> BLOCKED.
+
+    The legacy fallback capped only the SELECTED edge set (18 <= max_edges), so
+    an over-backstop group with a small selection exported — minting a panel
+    label AND marking the group reviewed (removing it from the human queue),
+    resurrecting the size-routing void. The backstop must bind the group's
+    CANDIDATE count on the legacy path too (real shapes: calib0709 0cbcf706
+    45/18, 2414344b 44/19).
+    """
+    selected = [(f"r{i}", f"t{i}") for i in range(18)]
+    extra = [(f"r{i}", f"tx{i}") for i in range(27)]  # 45 candidates total
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "legacy_monster",
+                "routing": "auto_accept",
+                "edges": selected,
+                "candidate_edges": extra,
+                # No n_edges / n_corridors / n_assignment_components: exercises
+                # the no-structure-fields fallback.
+            }
+        ],
+    )
+    report = _plan([b], labels_dir, max_edges=20, backstop_max_edges=40)
+    g = _by_gid(report)["legacy_monster"]
+    assert not g.exported
+    assert g.reason == REASON_OVER_MAX
+    assert g.n_edges_raw == 18
+
+
+def test_legacy_fallback_under_backstop_still_exports(tmp_path, labels_dir):
+    """No structure fields, candidates within the backstop -> still exports."""
+    selected = [(f"r{i}", f"t{i}") for i in range(18)]
+    extra = [(f"r{i}", f"tx{i}") for i in range(12)]  # 30 candidates total
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "legacy_ok",
+                "routing": "auto_accept",
+                "edges": selected,
+                "candidate_edges": extra,
+            }
+        ],
+    )
+    report = _plan([b], labels_dir, max_edges=20, backstop_max_edges=40)
+    g = _by_gid(report)["legacy_ok"]
+    assert g.exported, f"under-backstop legacy group should export, got {g.reason}"
+    assert g.reason == REASON_EXPORTED
+
+
 def test_class_mismatch_rejected(tmp_path, labels_dir):
     b = make_batch(
         tmp_path / "b1",
