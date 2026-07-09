@@ -95,14 +95,28 @@ jobs:
         run: uv venv
       - name: Install dependencies (with spark extra)
         run: uv pip install -e ."[dev,ml,web,spark]" --python .venv/bin/python
-      - name: Cache Sedona/Ivy jars
-        uses: actions/cache@v4
+      - name: Restore Sedona/Ivy jar cache
+        id: ivy-cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.ivy2
           key: ivy2-sedona-1.6.1-spark-3.5
       - name: Run Spark/Sedona E2E tests
         # -n0 disables xdist so a single Spark session serves both tests.
         run: uv run pytest -m spark -n0 -v
+      - name: Save Sedona/Ivy jar cache
+        # Split restore/save (rather than the combined actions/cache@v4 action)
+        # and gate the save on a green run: the combined action's post-step
+        # saves unconditionally, so an interrupted/failed Maven resolve would
+        # cache a partial or corrupt ~/.ivy2 under this exact static key. With
+        # no restore-keys fallback, every later run then restores that poison
+        # and red-X's until someone manually bumps the key (#363). Only
+        # writing the cache after success keeps the key self-healing.
+        if: success() && steps.ivy-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.ivy2
+          key: ivy2-sedona-1.6.1-spark-3.5
 
   publish:
     # PyPI Trusted Publishing (OIDC): the PyPI project `crosswalk-py` trusts this

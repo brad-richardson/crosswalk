@@ -220,6 +220,21 @@ def test_shipped_booster_scores_in_spark(sedona):
     from crosswalk.spark import spark_manifest
 
     features = spark_manifest()["features"]
+    # Lockstep guard: the toy feature dicts above must always cover exactly
+    # the shipped manifest's feature set (which is itself pinned to
+    # config.SPARK_PORTABLE_FEATURES by test_shipped_spark_model.py). Without
+    # this, a FEATURE_VERSION bump that adds/renames a Spark feature would
+    # make `group[features]` inside the applyInPandas UDF below raise a
+    # KeyError that only surfaces at `.collect()` as an opaque Py4J
+    # PythonException, instead of failing here with a clear message.
+    assert set(features) == set(_MATCH_FEATURES) == set(_NON_MATCH_FEATURES), (
+        "Toy feature dicts have drifted from crosswalk.spark.spark_manifest()"
+        "['features']. Update _MATCH_FEATURES/_NON_MATCH_FEATURES in this file "
+        f"to match. features={sorted(features)} "
+        f"match_only={sorted(set(_MATCH_FEATURES) - set(features))} "
+        f"non_match_only={sorted(set(_NON_MATCH_FEATURES) - set(features))} "
+        f"missing_from_both={sorted(set(features) - set(_MATCH_FEATURES) - set(_NON_MATCH_FEATURES))}"
+    )
 
     match_row = {"row_kind": "match", **_MATCH_FEATURES}
     non_match_row = {"row_kind": "non_match", **_NON_MATCH_FEATURES}
