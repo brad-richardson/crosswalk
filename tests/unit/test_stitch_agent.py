@@ -1692,6 +1692,20 @@ def test_opencode_registered_and_v3_panel_composition():
     assert sr.get_panel(None) is sr.DEFAULT_PANEL
 
 
+def test_v4_candidate_panel_composition():
+    """v4-candidate swaps the agy third voter for opencode/Kimi K2.6 (opt-in).
+
+    The composition is a REPLACEMENT (3 voters, agy out) — not an addition like
+    v3-candidate — and must not touch DEFAULT_PANEL: labels from it are refused
+    by stitch-export without --allow-nonstandard-panel until blessed as v4.
+    """
+    v4 = sr.get_panel("v4-candidate")
+    assert [p.name for p in v4] == ["claude", "codex", "opencode"]
+    assert v4[2].model == "openrouter/moonshotai/kimi-k2.6"
+    # Production default remains the 3 incumbents.
+    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "agy"]
+
+
 def test_invoke_opencode_arg_construction(monkeypatch, tmp_path):
     """Prompt goes via stdin (not argv); -m model and one -f per attached image.
 

@@ -76,6 +76,16 @@ DEFAULT_PANEL = [
 # (reasoning etc.) in the model string, so ``effort`` is unused for it — like agy.
 OPENCODE_QWEN = ProviderSpec(name="opencode", model="openrouter/qwen/qwen3-vl-235b-a22b-instruct")
 
+# Candidate REPLACEMENT third voter (default OFF): opencode driving OpenRouter-
+# hosted Kimi K2.6 (Moonshot) — an open-weight native-multimodal flagship and a
+# FOURTH model family (vs the Claude/GPT/Gemini incumbents), so its errors are
+# decorrelated from the rest of the panel. Unlike agy (which must proactively
+# read the pack images itself), the opencode invoker force-attaches every PNG,
+# so this voter is guaranteed to see the full visual evidence. Kimi's thinking
+# runs long on large packs (observed up to ~390s/vote): run v4-candidate waves
+# with ``--timeout 480``.
+OPENCODE_KIMI = ProviderSpec(name="opencode", model="openrouter/moonshotai/kimi-k2.6")
+
 # Named panel configurations. DEFAULT_PANEL (the 3-voter production panel) is the
 # default; the 4th voter ships behind the opt-in ``v3-candidate`` panel only, so
 # production waves are unaffected until the export rule is validated and flipped.
@@ -91,6 +101,11 @@ PANELS: dict[str, list[ProviderSpec]] = {
     "v2": DEFAULT_PANEL,
     "v3-candidate": [*DEFAULT_PANEL, OPENCODE_QWEN],
     "no-agy": [*(p for p in DEFAULT_PANEL if p.name != "agy"), OPENCODE_QWEN],
+    # Third-voter replacement candidate (agy/Gemini -> opencode/Kimi K2.6).
+    # NOT the default: labels from this composition are refused by
+    # stitch-export without --allow-nonstandard-panel until validated and
+    # blessed as the v4 standard (which will bump the export labeler).
+    "v4-candidate": [*(p for p in DEFAULT_PANEL if p.name != "agy"), OPENCODE_KIMI],
 }
 
 
