@@ -177,6 +177,39 @@ class TestStitchBatchAllCombine:
         assert combined["groups"] == []
 
 
+class TestStitchBatchAllFlagDatasetGate:
+    """`stitch-batch --all` must skip before_/after_/baseline_ comparison
+    sidecars the same way `stitch-batch-all` does (see
+    TestStitchBatchAllCombine.test_combine_excludes_comparison_artifacts above)
+    — reusing DatasetLoader.list_available() rather than globbing
+    *_groups.json verbatim and regenerating batch caches for junk artifacts."""
+
+    def test_all_flag_skips_comparison_artifacts(self, tmp_path, monkeypatch):
+        output_dir = tmp_path / "data" / "output"
+        output_dir.mkdir(parents=True)
+        (output_dir / "before_us_boston_streets_groups.json").write_text("{}")
+        (output_dir / "us_boston_streets_groups.json").write_text("{}")
+
+        monkeypatch.setattr("crosswalk.filenames.PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(
+            "crosswalk.datasets.loader.DatasetLoader.list_available",
+            lambda self: ["us_boston_streets"],
+        )
+
+        processed = []
+
+        def _fake_generate(ds_name, **kwargs):
+            processed.append(ds_name)
+            return True
+
+        monkeypatch.setattr("crosswalk.cli.data._generate_stitch_batch_for_dataset", _fake_generate)
+
+        result = runner.invoke(app, ["data", "stitch-batch", "--all"])
+        assert result.exit_code == 0, result.output
+        # Only the real dataset is processed; the comparison artifact is skipped.
+        assert processed == ["us_boston_streets"]
+
+
 class TestFindGroupCollisionSafe:
     """Writer/lookup paths must disambiguate a shared group_id by owning dataset."""
 

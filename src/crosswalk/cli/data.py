@@ -2414,6 +2414,7 @@ def stitch_batch(
         crosswalk data stitch-batch us_boston_streets -n 30  # Custom batch size
         crosswalk data stitch-batch us_boston_streets --include-unvoted  # Legacy
     """
+    from ..datasets.loader import DatasetLoader
     from ..filenames import PROJECT_ROOT
 
     if batch_size <= 0:
@@ -2427,15 +2428,30 @@ def stitch_batch(
 
     # Determine which datasets to process
     if all_datasets:
-        # Find all groups sidecar files
+        # Find all groups sidecar files, gated to real dataset membership. The
+        # sidecar glob also contains before_/after_/baseline_ comparison
+        # artifacts (from the CLAUDE.md change-tracking workflow); those are NOT
+        # datasets. Admitting one would regenerate a junk batch cache for it and
+        # route its review labels to a labels/stitching/dataset=before_*/
+        # partition no consumer reads. Same gate as `stitch-batch-all`.
+        real_datasets = set(DatasetLoader().list_available())
         datasets_to_process = []
+        skipped = []
         if output_dir.exists():
             for sidecar_file in sorted(output_dir.glob("*_groups.json")):
                 # Extract dataset name from filename: us_boston_streets_groups.json
                 ds_name = sidecar_file.stem.replace("_groups", "")
-                datasets_to_process.append(ds_name)
+                if ds_name in real_datasets:
+                    datasets_to_process.append(ds_name)
+                else:
+                    skipped.append(ds_name)
+        if skipped:
+            console.print(
+                f"[dim]Skipping {len(skipped)} non-dataset sidecars "
+                f"(comparison artifacts): {', '.join(skipped)}[/dim]"
+            )
         if not datasets_to_process:
-            console.print("[yellow]No groups sidecar files found in data/output/[/yellow]")
+            console.print("[yellow]No real datasets with groups sidecars found[/yellow]")
             raise typer.Exit(0)
         console.print(
             f"[blue]Found {len(datasets_to_process)} datasets with groups sidecars[/blue]"
