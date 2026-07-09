@@ -894,7 +894,7 @@ The toml blocks below are drafted so an approval is copy-paste.
 
 | # | dataset | target segs | license | one-line evidence |
 |---|---|---|---|---|
-| 1 | us_philadelphia_sidewalks | 204,760 | DVRPC Data License (custom, attribution-only) | Dataset-level Use Constraints "Unrestricted: can be shared internally and externally without data sharing agreement"; full license text read — credit + no-updates + accuracy obligations only, no redistribution/derivative/SA/NC bar |
+| 1 | us_philadelphia_sidewalks | 204,760 | DVRPC Data License (custom, attribution-only) | Dataset-level Use Limitations "Unrestricted: can be shared internally and externally without data sharing agreement"; full license text read — credit + no-updates + accuracy obligations only, no redistribution/derivative/SA/NC bar |
 | 2 | sg_singapore_footpaths | 109,960 | Singapore Open Data Licence v1.0 | LTA DataMall landing page: "Use of LTA's datasets and APIs on DataMall constitutes acceptance of the Singapore Open Data Licence" — resolves the SODL-vs-website-ToU conflict in SODL's favor |
 | 3 | de_berlin_roads | 43,369 | dl-de/by-2.0 (safe posture) | Fetched Esri DE item (the actual source) declares dl-de/by-2.0 + credit "Geoportal Berlin / Detailnetz"; official Berlin records say dl-de/zero-2.0 — attributing under by-2.0 satisfies both |
 | 4 | hk_hongkong_roads | 36,107 | DATA.GOV.HK Terms and Conditions of Use | Portal terms grant "browse, download, distribute, reproduce… for both commercial and non-commercial purposes on a free-of-charge basis"; FAQ: "Except re-sale of the data, there is no restriction on the uses of the data" |
@@ -904,8 +904,10 @@ The toml blocks below are drafted so an approval is copy-paste.
 ### 1.1 us_philadelphia_sidewalks (204,760 segs)
 
 **Re-verified 2026-07-09:** `catalog.dvrpc.org/dataset/dvrpc-pedestrian-network` live —
-Use Constraints = "Unrestricted: can be shared internally and externally without
-data sharing agreement" (dataset-level), License = "No License Provided".
+Use Limitations = "Unrestricted: can be shared internally and externally without
+data sharing agreement" (dataset-level), License = "No License Provided" (which is
+why the DVRPC Data License document, not a named SPDX license, is the governing
+instrument).
 `catalog.dvrpc.org/dvrpc_data_license.html` live — **full text read verbatim**: a
 warranty/liability disclaimer plus exactly three recipient obligations ("will
 credit DVRPC as the source when this data is utilized in analyses, maps,
@@ -935,7 +937,7 @@ source_url = "https://arcgis.dvrpc.org/portal/rest/services/Transportation/pedes
 panel_recommendation = "needs_human"
 panel_confidence = 0.82
 panel_reviewed_at = "2026-07-06"
-note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): full DVRPC Data License text read verbatim — warranty disclaimer + credit/no-updates/accuracy obligations only; no redistribution, derivative, share-alike, or NC term. Dataset-level Use Constraints: 'Unrestricted: can be shared internally and externally without data sharing agreement'. Hunt for newer/named DVRPC license found none. Optional: confirm derived-table reading with mruane@dvrpc.org."
+note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): full DVRPC Data License text read verbatim — warranty disclaimer + credit/no-updates/accuracy obligations only; no redistribution, derivative, share-alike, or NC term. Dataset-level Use Limitations: 'Unrestricted: can be shared internally and externally without data sharing agreement'. Hunt for newer/named DVRPC license found none. Optional: confirm derived-table reading with mruane@dvrpc.org."
 ```
 
 ### 1.2 sg_singapore_footpaths (109,960 segs)
@@ -1113,8 +1115,9 @@ Creative Commons Attribution Share-Alike 4.0 (CC-BY-SA-4.0) permite a livre
 utilização e reprodução das informações… e manutenção de licença semelhante");
 WFS GetCapabilities shows `AccessConstraints = NONE`, no per-layer override for
 `classificacao_viaria_cet`. **The share-alike screen does NOT clear this one:**
-fetched `creativecommons.org/compatiblelicenses` — the only BY-SA-compatible
-licenses are **Free Art License 1.3 and GPLv3; ODbL is not on the list**, and no
+fetched `creativecommons.org/compatiblelicenses` — the only non-CC licenses on
+CC's BY-SA compatibility list are **Free Art License 1.3 and GPLv3; ODbL is not on
+the list**, and no
 BY-SA↔ODbL compatibility declaration exists in either direction. So a BY-SA
 adaptation can never be relicensed ODbL, while ODbL requires derivative databases
 under ODbL — a merged artifact cannot satisfy both.
