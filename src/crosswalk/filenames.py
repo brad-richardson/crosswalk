@@ -292,16 +292,25 @@ def groups_sidecar_path(bridge_path: Path) -> Path:
     return bridge_path.parent / f"{stem}.json"
 
 
+# Sentinel "dataset" id for the combined cross-dataset stitching review queue
+# (crosswalk data stitch-batch-all). It is not a real dataset — its batch file
+# aggregates every per-dataset queue, and each group inside carries its own
+# ``dataset_id`` so the review UI can route labels back to the owning partition.
+STITCH_ALL_QUEUE = "__all__"
+
+
 def stitch_batch_path(dataset_id: str) -> Path:
     """Get path to stitching review batch file.
 
     Args:
-        dataset_id: Dataset identifier (e.g., "us_boston_streets")
+        dataset_id: Dataset identifier (e.g., "us_boston_streets"), or
+            ``STITCH_ALL_QUEUE`` for the combined cross-dataset queue.
 
     Returns:
         Path to batch JSON file
 
     Example:
         us_boston_streets -> data/cache/stitch/us_boston_streets_batch.json
+        __all__           -> data/cache/stitch/__all___batch.json
     """
     return STITCH_CACHE_DIR / f"{dataset_id}_batch.json"
