@@ -23,7 +23,13 @@ from loguru import logger
 from scipy.spatial import cKDTree
 from shapely import LineString
 
-from ..config import DEFAULT_SNAP_TOLERANCE_M, MAX_ALIGNMENT_OVERLAP_M, NAMES_COLUMN, settings
+from ..config import (
+    DEFAULT_SNAP_TOLERANCE_M,
+    MAX_ALIGNMENT_OVERLAP_M,
+    NAMES_COLUMN,
+    settings,
+    sliver_overlap_m,
+)
 from .sliver import sliver_edges_for_match_results
 from .types import MatchDecision, MatchResult, MatchType
 
@@ -804,6 +810,23 @@ def _merge_singletons_by_alignment(
 # OTHER side's span is.
 MN_CONTESTED_EDGE_MAX_SPAN = 0.3
 
+# Absolute-overlap companion to the fraction test. A low span FRACTION on a long
+# segment can still be a large ABSOLUTE overlap — config.py documents exactly this
+# false-positive class for a fraction-only rule ("25% of a 1.5 km ref is ~375 m of
+# real road, not a stub"). Mirroring is_sliver_edge's hybrid rule, an edge is only
+# a demotion candidate when the aligned overlap is ALSO small in meters, so genuine
+# long-corridor edges are never routed to review. Missing lengths -> +inf overlap
+# (via sliver_overlap_m), so an unmeasurable edge is never demoted.
+#
+# Calibrated on us_boston_streets: the 7 confirmed over-merge stubs (#367 Mode A)
+# have aligned overlaps of 5.3-40.8 m, while the documented false-positive scale is
+# ~375 m — so 75 m sits in the gap, keeping every true stub demotable (max 40.8 m)
+# while exempting genuine long-corridor edges. A NOTE on why there is no score
+# margin on "contested": those real crossing stubs are near-ties by nature (the
+# rival often beats them by <0.02), so any epsilon on the contest test silently
+# re-admits them — measured directly, a 0.02 margin lost 3 of the 7 true stubs.
+MN_CONTESTED_MAX_ABS_OVERLAP_M = 75.0
+
 # Feature-dict flag set on a MatchResult whose decision this guard demoted to
 # REVIEW, so downstream (review UI / audit) can identify the reason.
 PARALLEL_SIBLING_REVIEW_FLAG = "parallel_sibling_stub_review"
@@ -828,14 +851,25 @@ def _edge_span_fracs(r: MatchResult) -> tuple[float, float]:
 
 def _contested_small_span_review_pairs(
     component_results: list[MatchResult],
+    ref_geoms: dict[Any, LineString] | None = None,
+    target_geoms: dict[Any, LineString] | None = None,
 ) -> set[tuple[Any, Any]]:
     """Identify contested small-span M:N edges to demote to REVIEW (module note above).
 
-    An edge is flagged when BOTH:
+    An edge is flagged when ALL of:
       - it is small on both alignment axes: ``max(ref_span, tgt_span) <
         MN_CONTESTED_EDGE_MAX_SPAN``; and
-      - it is contested: another edge sharing its ``ref_id`` OR its
-        ``target_id`` has strictly higher confidence.
+      - its aligned overlap is ALSO small in absolute meters (``<
+        MN_CONTESTED_MAX_ABS_OVERLAP_M``) — the hybrid companion that exempts a
+        genuine long-corridor edge whose low fraction still spans many meters;
+        and
+      - it is contested: another edge sharing its ``ref_id`` OR its ``target_id``
+        has strictly higher confidence. (No score margin: real crossing stubs are
+        near-ties, so any epsilon silently re-admits them — see the module note.)
+
+    ``ref_geoms``/``target_geoms`` supply segment lengths for the absolute-overlap
+    gate; a missing length yields +inf overlap, so an unmeasurable edge is never
+    demoted (matching ``is_sliver_edge``'s fail-safe).
 
     Orphan-guard: a node (ref or target) is never left with zero MATCH edges. If
     demoting a flagged candidate would orphan its ref or its target (leave it
@@ -847,6 +881,8 @@ def _contested_small_span_review_pairs(
     edges themselves are NOT removed — the caller keeps them in the group and
     flips only their decision.
     """
+    ref_geoms = ref_geoms or {}
+    target_geoms = target_geoms or {}
     best_by_ref: dict[Any, float] = {}
     best_by_target: dict[Any, float] = {}
     for r in component_results:
@@ -860,6 +896,13 @@ def _contested_small_span_review_pairs(
     for r in component_results:
         ref_span, tgt_span = _edge_span_fracs(r)
         if max(ref_span, tgt_span) >= MN_CONTESTED_EDGE_MAX_SPAN:
+            kept.append(r)
+            continue
+        ref_len = ref_geoms[r.ref_id].length if r.ref_id in ref_geoms else None
+        tgt_len = target_geoms[r.target_id].length if r.target_id in target_geoms else None
+        if sliver_overlap_m(ref_span, tgt_span, ref_len, tgt_len) >= MN_CONTESTED_MAX_ABS_OVERLAP_M:
+            # Small fraction but a large absolute overlap — a genuine edge, not a
+            # segmentation stub. Never demote.
             kept.append(r)
             continue
         contested = (
@@ -1043,7 +1086,9 @@ def _classify_and_resolve_component(
         # confident-but-spurious boundary-mismatch edge doesn't over-merge the
         # MATCH set — the edge stays in the group for human adjudication (see
         # ``_contested_small_span_review_pairs``).
-        review_pairs = _contested_small_span_review_pairs(component_results)
+        review_pairs = _contested_small_span_review_pairs(
+            component_results, ref_geoms, target_geoms
+        )
         return _create_group_results(component_results, MatchType.M_TO_N, review_pairs), []
 
     # Decompose into sub-components by matching contiguity groups on each side.
@@ -1085,7 +1130,9 @@ def _classify_and_resolve_component(
                 # Smaller M:N sub-component. Same anti-crossing guard as the
                 # single-corridor M:N case above (#367 Mode A): demote contested
                 # small-span edges to REVIEW, keeping them in the group.
-                sub_review_pairs = _contested_small_span_review_pairs(sub_edges)
+                sub_review_pairs = _contested_small_span_review_pairs(
+                    sub_edges, ref_geoms, target_geoms
+                )
                 group_results.extend(
                     _create_group_results(sub_edges, MatchType.M_TO_N, sub_review_pairs)
                 )
