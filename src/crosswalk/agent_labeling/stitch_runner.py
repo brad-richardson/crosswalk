@@ -29,6 +29,7 @@ import yaml
 from loguru import logger
 
 from ..config import settings
+from .panel_monitor import wave_position_anchor_warnings
 from .panel_routing import (
     REASON_ALL_ABSTAINED,
     REASON_CLASS_MISMATCH,
@@ -1435,6 +1436,12 @@ def run_batch(
 
     votes_df = pd.DataFrame(vote_rows, columns=VOTES_COLUMNS)
     consensus_df = pd.DataFrame(consensus_out, columns=CONSENSUS_COLUMNS)
+
+    # Per-voter bias monitoring: make a position-anchored voter LOUD within its own
+    # wave (a lower n-floor than the aggregate offline monitor). This does NOT touch
+    # the breaker or consensus semantics — it only inspects the completed rows.
+    for _warning in wave_position_anchor_warnings(votes_df, consensus_df):
+        logger.warning(f"panel bias: {_warning}")
 
     votes_df.to_csv(batch_dir / "votes.csv", index=False)
     consensus_df.to_csv(batch_dir / "consensus.csv", index=False)

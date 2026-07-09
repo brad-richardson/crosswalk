@@ -1332,6 +1332,123 @@ def _write_stitch_eval_report(output, summary, results, disagreements, dataset, 
     Path(output).write_text("".join(lines))
 
 
+@agent_app.command("panel-stats")
+def panel_stats(
+    dataset: str = typer.Option(
+        None, "--dataset", "-d", help="Restrict to one dataset (default: all committed votes)"
+    ),
+    data_root: Path = typer.Option(
+        Path("."), "--data-root", help="Repo root holding labels/votes/"
+    ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Exit nonzero if ANY voter trips an alarm (for CI/cron). Off by default.",
+    ),
+):
+    """Per-voter bias monitor for the stitch panel.
+
+    Reads committed vote provenance (labels/votes/dataset=*/{votes,consensus}.csv)
+    and prints a per-voter table plus any tripped alarms. Makes voter defects LOUD
+    instead of found by accident — e.g. voter `agy` voting the first-listed option
+    "A" in 11/12 valid ballots at a flat 0.95 confidence (POSITION_ANCHOR +
+    CONSTANT_CONFIDENCE). This is a MONITOR by design: we do NOT shuffle option
+    letters (that would hide the anchor), we surface it.
+
+    Examples:
+        crosswalk agent panel-stats
+        crosswalk agent panel-stats --dataset us_boston_streets
+        crosswalk agent panel-stats --strict   # nonzero exit on any alarm (CI)
+    """
+    from rich.table import Table
+
+    from ..agent_labeling.panel_monitor import (
+        CONSTANT_CONFIDENCE,
+        POSITION_ANCHOR,
+        compute_voter_stats,
+        load_vote_provenance,
+    )
+    from ..config import settings
+
+    votes_df, consensus_df = load_vote_provenance(data_root, dataset=dataset)
+    if len(votes_df) == 0:
+        console.print(f"[yellow]No committed votes found under {data_root}/labels/votes[/yellow]")
+        raise typer.Exit(0)
+
+    stats = compute_voter_stats(votes_df, consensus_df)
+    scope = dataset or "all datasets"
+    n_datasets = votes_df["dataset"].nunique() if "dataset" in votes_df.columns else 1
+
+    def _f(x: float, pct: bool = False) -> str:
+        if x != x:  # NaN
+            return "-"
+        return f"{x:.0%}" if pct else f"{x:.3f}"
+
+    table = Table(
+        title=f"Panel voter stats — {scope} ({len(votes_df)} votes across {n_datasets} dataset(s))"
+    )
+    table.add_column("voter", style="bold")
+    table.add_column("model")
+    table.add_column("valid", justify="right")
+    table.add_column("modal pos", justify="right")
+    table.add_column("share", justify="right")
+    table.add_column("dissent", justify="right")
+    table.add_column("abstain", justify="right")
+    table.add_column("conf μ", justify="right")
+    table.add_column("conf σ", justify="right")
+    table.add_column("conf min/max", justify="right")
+    table.add_column("calib gap", justify="right")
+    table.add_column("alarms", style="red")
+
+    for s in sorted(stats, key=lambda s: s.provider):
+        alarm_txt = ("[red]" + " ".join(s.alarms) + "[/red]") if s.alarms else "[green]ok[/green]"
+        share_txt = _f(s.modal_position_share, pct=True)
+        if POSITION_ANCHOR in s.alarms:
+            share_txt = f"[red]{share_txt}[/red]"
+        std_txt = _f(s.conf_std)
+        if CONSTANT_CONFIDENCE in s.alarms:
+            std_txt = f"[red]{std_txt}[/red]"
+        table.add_row(
+            s.provider,
+            s.model or "-",
+            str(s.n_valid),
+            f"{s.modal_letter}",
+            share_txt,
+            _f(s.dissent_rate, pct=True),
+            _f(s.abstain_rate, pct=True),
+            _f(s.conf_mean),
+            std_txt,
+            f"{_f(s.conf_min)}/{_f(s.conf_max)}",
+            _f(s.calibration_gap),
+            alarm_txt,
+        )
+
+    console.print(table)
+
+    tripped = [(s.provider, a) for s in stats for a in s.alarms]
+    if tripped:
+        console.print("\n[bold red]Tripped alarms[/bold red]")
+        for s in stats:
+            for a in s.alarms:
+                if a == POSITION_ANCHOR:
+                    console.print(
+                        f"  [red]{a}[/red] {s.provider}: "
+                        f"{s.modal_position_share:.0%} of {s.n_valid} valid ballots on "
+                        f"position {s.modal_letter} (threshold "
+                        f"{settings.panel_monitor_position_anchor_share:.0%}) — picking by slot"
+                    )
+                elif a == CONSTANT_CONFIDENCE:
+                    console.print(
+                        f"  [red]{a}[/red] {s.provider}: confidence σ={s.conf_std:.4f} over "
+                        f"{s.n_valid} valid ballots (threshold "
+                        f"{settings.panel_monitor_constant_confidence_std}) — a rubber stamp"
+                    )
+        if strict:
+            raise typer.Exit(1)
+    else:
+        console.print("\n[green]No alarms tripped.[/green]")
+
+
 @agent_app.command("stitch-expressibility")
 def stitch_expressibility(
     dataset: str = typer.Argument(..., help="Dataset name (e.g. us_boston_streets)"),
