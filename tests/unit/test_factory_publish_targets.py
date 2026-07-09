@@ -104,6 +104,19 @@ def test_discover_target_files_excludes_overture_and_osm(raw_dir):
     assert set(found) == {"us_ok_targets"}
 
 
+def test_discover_target_files_keeps_target_whose_name_contains_role_tokens(raw_dir):
+    """Exclusion keys on the exact role SUFFIX, not a bare ``_osm_`` / ``_overture_``
+    substring: a genuine target dataset whose own name embeds those tokens (but
+    does not END in a reference role suffix) must NOT be silently dropped."""
+    _write_target_parquet(raw_dir, "us_osm_import_roads")
+    _write_target_parquet(raw_dir, "us_overture_derived_paths")
+    # A real reference file (ends in the role suffix) is still excluded.
+    (raw_dir / "us_osm_import_roads_osm_segments_v1.0.parquet").write_bytes(b"")
+
+    found = discover_target_files(raw_dir)
+    assert set(found) == {"us_osm_import_roads", "us_overture_derived_paths"}
+
+
 def test_discover_target_files_empty_dir(tmp_path):
     assert discover_target_files(tmp_path / "does_not_exist") == {}
 
@@ -252,12 +265,32 @@ def test_snapshot_resolution_falls_back_to_yaml_and_mtime(raw_dir, empty_dataset
         )
     )
     import os
+    import time
 
-    mtime = datetime(2026, 5, 4, 12, 0, 0).timestamp()
+    # An mtime instant of 2026-05-04 20:00 UTC. Force a far-eastern local tz
+    # (UTC+14) so the LOCAL calendar date of that instant is the NEXT day
+    # (2026-05-05). The snapshot must resolve in UTC (2026-05-04) regardless —
+    # this hardcoded assertion would FAIL if the code regressed to local-tz
+    # ``date.fromtimestamp``. Save/restore TZ + tzset explicitly so the forced
+    # timezone never leaks into other tests in this worker process.
+    mtime = datetime(2026, 5, 4, 20, 0, 0, tzinfo=UTC).timestamp()
     os.utime(path, (mtime, mtime))
+    _saved_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "Pacific/Kiritimati"  # UTC+14
+    time.tzset()
+    try:
+        # Sanity: in this tz the local date really does differ from the UTC date,
+        # so the assertion below is a real guard, not a tautology.
+        assert date.fromtimestamp(mtime).isoformat() == "2026-05-05"
 
-    prov = resolve_snapshot_provenance(path, "us_ok_targets", datasets_dir=empty_datasets_dir)
-    assert prov.snapshot == date.fromtimestamp(mtime).isoformat()
+        prov = resolve_snapshot_provenance(path, "us_ok_targets", datasets_dir=empty_datasets_dir)
+        assert prov.snapshot == "2026-05-04"  # UTC calendar date of the mtime instant
+    finally:
+        if _saved_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = _saved_tz
+        time.tzset()
     assert prov.source == "arcgis"
     assert prov.source_url == "https://example.test/yaml-source"
     assert prov.id_column == "OBJECTID"

@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -47,12 +47,19 @@ TARGET_META_FILENAME = "meta.yaml"
 LATEST_JSON_FILENAME = "latest.json"
 TARGETS_INDEX_FILENAME = "index.json"
 
-# Source-file naming convention (see ``filenames.target_filename``): a bare
-# target parquet is ``<dataset>_<DATA_VERSION>.parquet``. Overture / OSM
-# reference-side files share the same version suffix but carry these infixes,
-# so they must never be mistaken for a target.
-_EXCLUDED_INFIXES = ("_overture_", "_osm_")
-_EXCLUDED_SUFFIXES = (".bak", ".suspect", ".meta.yaml")
+# Source-file naming convention (see ``filenames.py``): a bare target parquet is
+# ``<dataset>_<DATA_VERSION>.parquet``. Overture / OSM reference-side files share
+# the same version suffix but end (once the version suffix is stripped) with one
+# of these role suffixes, so they must never be mistaken for a target. Matching
+# the *exact* role suffix — not a bare ``_osm_`` / ``_overture_`` substring —
+# avoids silently excluding a hypothetical target whose own name happens to
+# contain those tokens.
+_EXCLUDED_NAME_SUFFIXES = (
+    "_overture_segments",
+    "_overture_connectors",
+    "_osm_segments",
+    "_osm_connectors",
+)
 
 
 # --------------------------------------------------------------------------
@@ -62,9 +69,14 @@ def discover_target_files(raw_dir: Path) -> dict[str, Path]:
     """Local target parquet files under ``raw_dir``, keyed by dataset name.
 
     Matches the ``<dataset>_<DATA_VERSION>.parquet`` naming convention (see
-    ``filenames.target_filename``); excludes Overture/OSM reference-side files
-    (``_overture_`` / ``_osm_`` infixes) and any ``.bak`` / ``.suspect`` /
-    ``.meta.yaml`` sidecar that happens to match the glob.
+    ``filenames.py``); excludes Overture/OSM reference-side files, identified by
+    their role suffix (``_overture_segments`` / ``_overture_connectors`` /
+    ``_osm_segments`` / ``_osm_connectors``) rather than a bare substring.
+
+    The glob (``*_<DATA_VERSION>.parquet``) already restricts to ``.parquet``
+    names, so ``.bak`` / ``.suspect`` / ``.meta.yaml`` sidecars (which end in
+    those extensions, e.g. ``<name>_v1.0.parquet.bak``) never match and need no
+    separate filter.
     """
     raw_dir = Path(raw_dir)
     if not raw_dir.exists():
@@ -72,12 +84,8 @@ def discover_target_files(raw_dir: Path) -> dict[str, Path]:
     suffix = f"_{DATA_VERSION}.parquet"
     out: dict[str, Path] = {}
     for path in sorted(raw_dir.glob(f"*{suffix}")):
-        if any(path.name.endswith(s) for s in _EXCLUDED_SUFFIXES):
-            continue
-        if not path.name.endswith(suffix):
-            continue
         name = path.name[: -len(suffix)]
-        if any(infix in name for infix in _EXCLUDED_INFIXES):
+        if any(name.endswith(role) for role in _EXCLUDED_NAME_SUFFIXES):
             continue
         out[name] = path
     return out
@@ -121,7 +129,13 @@ def resolve_snapshot_provenance(
     fetch target``) when present — its ``fetched_at`` (first 10 chars) becomes
     the snapshot date. Otherwise falls back to ``datasets/<dataset>.yaml``'s
     ``source:`` block for source/source_url/id_column/bbox, and the parquet
-    file's mtime (date only) for the snapshot date.
+    file's mtime (**UTC** calendar date) for the snapshot date.
+
+    Both paths resolve the date in UTC — the sidecar's ``fetched_at`` is a
+    tz-aware UTC datetime, so the mtime fallback must interpret the epoch mtime
+    in UTC too. Using local time would mint a different immutable
+    ``snapshot=<date>/`` path for a file whose mtime straddles UTC midnight
+    depending on the machine's timezone (e.g. a laptop vs. a UTC CI runner).
     """
     from ..fetch.metadata import load_metadata
 
@@ -147,7 +161,7 @@ def resolve_snapshot_provenance(
     bbox = tuple(float(x) for x in bbox_raw) if bbox_raw else None
     feature_count = target_fetch.get("feature_count") if isinstance(target_fetch, dict) else None
 
-    snapshot = date.fromtimestamp(path.stat().st_mtime).isoformat()
+    snapshot = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).date().isoformat()
     return SnapshotProvenance(
         snapshot=snapshot,
         source=src.get("type"),
