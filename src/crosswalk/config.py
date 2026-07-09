@@ -780,6 +780,26 @@ class MatcherSettings(BaseSettings):
         "options span MORE than this many distinct candidate edges; smaller groups "
         "keep the full option set (byte-identical packs).",
     )
+    # Panel low-confidence routing gate. A unanimous auto_accept whose MINIMUM
+    # confidence across valid (non-abstaining) votes falls below this floor is
+    # demoted to human_review (route_reason="low_confidence"). Empirically the
+    # two Gemini-based voters (agy, opencode) report near-constant inflated
+    # confidence (agy pinned at 0.95; opencode median 1.0), so the panel minimum
+    # is effectively the calibrated voter's (claude / codex) self-report. Across
+    # the committed ballots that minimum cleanly separates flagged-wrong
+    # unanimous verdicts (min <= 0.72, e.g. the wrong Boston 25724c6c at 0.66)
+    # from clean accepts (min >= 0.78, clustered at 0.90+); 0.75 sits in the
+    # empty 0.72–0.78 gap. Applied AFTER the size gate (size_gated wins if both).
+    # A blank/NaN confidence on a valid vote counts as BELOW the floor. Set to
+    # 0.0 to disable.
+    stitch_min_voter_confidence: float = Field(
+        default=0.75,
+        description="Panel low-confidence gate floor: a unanimous auto_accept whose "
+        "minimum valid-vote confidence is below this is demoted to human_review. The "
+        "minimum tracks the calibrated voter (the Gemini voters are pinned high), so "
+        "0.75 separates flagged-wrong verdicts (<=0.72) from clean accepts (>=0.78). "
+        "Set to 0.0 to disable.",
+    )
     auto_select_model: bool = Field(
         default=True,
         description="Automatically select between full and geometry-only models based on "
