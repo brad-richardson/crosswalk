@@ -1312,8 +1312,13 @@ def stitch_expressibility(
 
     Reports the fraction of settled (pair-semantics, non-reject-all) stitching
     labels whose exact edge set is expressible by the current option generator
-    for the sidecar group they correspond to. Reads the sidecar and labels READ
-    ONLY; runs no provider. Useful as a before/after gate on generator changes.
+    for the sidecar group they correspond to. SET-semantics labels (group
+    membership assertions, no specific edges) are scored separately and
+    reported alongside as best-option membership/boundary-precision/coverage —
+    they used to be silently dropped from this metric, which hid large-group
+    failures where every generated option uses the full ref/target set. Reads
+    the sidecar and labels READ ONLY; runs no provider. Useful as a
+    before/after gate on generator changes.
 
     Examples:
         crosswalk agent stitch-expressibility us_boston_streets
@@ -1352,6 +1357,40 @@ def stitch_expressibility(
                 f"    - label {m.label_group_id} -> group {m.sidecar_group_id} "
                 f"({m.match_type}): {m.n_label_edges} edges / {m.n_group_edges} in group, "
                 f"{m.n_options} options"
+            )
+
+    # SET-semantics labels (group MEMBERSHIP assertions, no specific edges):
+    # scored on membership/boundary/coverage against the best generated
+    # option, reported alongside (not folded into) the pair numbers above.
+    console.print(
+        f"\n[bold]Set-label expressibility: {dataset}[/bold]  "
+        f"(dropped={s['n_dropped']} — pair reject-all / empty-membership rows)"
+    )
+    console.print(
+        f"  set-settled={s['n_set_settled']}  set-clean-recoverable={s['n_set_recoverable']}  "
+        f"set-covered={s['n_set_covered']}"
+    )
+    set_rate = s["set_expressibility"]
+    console.print(
+        f"  SET EXPRESSIBILITY = [green]{set_rate:.1%}[/green]" if set_rate is not None else "  n/a"
+    )
+    bp = s["set_mean_best_boundary_precision"]
+    cov = s["set_mean_best_coverage"]
+    console.print(
+        f"  mean best-option boundary precision: {bp:.3f}  |  mean best-option coverage: {cov:.3f}"
+        if bp is not None
+        else "  mean best-option boundary precision: n/a"
+    )
+    console.print(
+        f"  inexpressible (recoverable but no option nails membership): {s['n_set_misses']}"
+    )
+    if show_misses:
+        for m in sorted(report.set_misses, key=lambda x: x.best_boundary_precision)[:show_misses]:
+            console.print(
+                f"    - label {m.label_group_id} -> group {m.sidecar_group_id} "
+                f"({m.match_type}): {m.n_ref_members} refs / {m.n_target_members} targets, "
+                f"best boundary precision {m.best_boundary_precision:.3f}, "
+                f"coverage {m.best_coverage:.3f}, {m.n_options} options"
             )
 
 
