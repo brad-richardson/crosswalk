@@ -68,6 +68,15 @@ class CrosswalkAdapter:
             output_dir: Directory for output files.
             **kwargs: Extra options passed as CLI flags.
                 model: Model type (default: "xgboost").
+                dataset: Dataset name (e.g. "us_boston_streets"). When provided it
+                    is passed to ``crosswalk stitch`` as the positional dataset
+                    argument ALONGSIDE the explicit ``-r``/``-t`` paths. This is
+                    what engages crosswalk's resolver-prune allowlist, which keys
+                    on dataset identity (never the file paths) since #350. Without
+                    it the stitch runs prune-OFF and evaluates a different row set
+                    than production — ~5pt below the calibrated gate floor (#372).
+                    The mbench runner injects this automatically from the dataset
+                    being benchmarked.
                 crosswalk_cmd: How to invoke crosswalk (default: "uv run crosswalk").
                     Split with shlex; e.g. "crosswalk" to use a binary on PATH.
                     The deprecated ``matcher_cmd`` key is still accepted.
@@ -95,9 +104,19 @@ class CrosswalkAdapter:
         repo_root = kwargs.get("repo_root")
         repo_root = Path(repo_root).resolve() if repo_root else _find_repo_root()
 
-        cmd = [
-            *base_cmd,
-            "stitch",
+        # Pass the dataset NAME as the positional argument (in addition to the
+        # explicit -r/-t paths) so crosswalk's resolver-prune allowlist engages.
+        # `crosswalk stitch <dataset> -r ... -t ...` resolves the prune by dataset
+        # identity while still using the exact paths mbench resolved — matching the
+        # production/factory path the gate floors were calibrated on (#372). With
+        # no dataset name the prune keys to None and stays OFF, scoring a different
+        # (unpruned) row set ~5pt below the floor.
+        dataset = kwargs.get("dataset")
+
+        cmd = [*base_cmd, "stitch"]
+        if dataset:
+            cmd.append(str(dataset))
+        cmd += [
             "-r",
             str(reference),
             "-t",

@@ -63,14 +63,22 @@ overrides are treated as CWD-relative (normal shell semantics).
 
 #### How the matcher adapter invokes matcher
 
-The matcher adapter shells out with `uv run crosswalk stitch ...`, executed with
-its working directory set to the **matcher repo root** (auto-detected as the
-directory containing `src/crosswalk`). Running via `uv run` from the repo root
-means:
+The matcher adapter shells out with `uv run crosswalk stitch <dataset> -r … -t …`,
+executed with its working directory set to the **matcher repo root** (auto-detected
+as the directory containing `src/crosswalk`). Running via `uv run` from the repo
+root means:
 
 - matcher does not need to be on your `PATH`, and
 - matcher's relative model path (`data/models/matcher_model_combined.joblib`)
   resolves correctly regardless of where you launched `mbench`.
+
+The adapter passes the **dataset name** as the positional argument (alongside the
+explicit `-r`/`-t` paths mbench resolved). This matters for the gate: crosswalk's
+resolver-prune allowlist keys on dataset identity (never file paths) since #350,
+so a path-only `stitch` runs with the prune **off** and scores a different
+(unpruned) row set than production — ~5pt below the calibrated gate floor (the
+`us_boston_streets` false-FAIL of #372). Passing the name engages the same pruned
+path the floors were calibrated on.
 
 Override the invocation with `--opt matcher_cmd="matcher"` (to use a binary
 already on `PATH`) and/or `--opt repo_root=/path/to/matcher` (to point at a

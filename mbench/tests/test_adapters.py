@@ -102,6 +102,56 @@ class TestCrosswalkAdapter:
             val = cmd[cmd.index(flag) + 1]
             assert Path(val).is_absolute(), f"{flag} path not absolute: {val}"
 
+    @patch("mbench.adapters.crosswalk.subprocess.run")
+    def test_run_passes_dataset_name_as_positional(self, mock_run, tmp_path):
+        """The dataset name must be the positional arg right after ``stitch``.
+
+        This is what engages crosswalk's resolver-prune allowlist, which keys on
+        dataset identity (never file paths) since #350. Without it the gate scores
+        an unpruned row set ~5pt below the calibrated floor (#372).
+        """
+        mock_run.return_value = MagicMock(returncode=0)
+        bridge_path = tmp_path / "bridge.parquet"
+        pd.DataFrame({"gers_id": ["r1"], "local_id": ["t1"]}).to_parquet(bridge_path)
+
+        adapter = CrosswalkAdapter()
+        adapter.run(
+            reference=tmp_path / "ref.parquet",
+            target=tmp_path / "tgt.parquet",
+            output_dir=tmp_path,
+            dataset="us_boston_streets",
+        )
+
+        cmd = mock_run.call_args[0][0]
+        stitch_idx = cmd.index("stitch")
+        # Positional dataset arg immediately follows `stitch`, before any flag.
+        assert cmd[stitch_idx + 1] == "us_boston_streets"
+        # ...and it precedes the -r/-t/-o flags (a positional, not a flag value).
+        assert stitch_idx + 1 < cmd.index("-r")
+
+    @patch("mbench.adapters.crosswalk.subprocess.run")
+    def test_run_without_dataset_omits_positional(self, mock_run, tmp_path):
+        """With no dataset name, `stitch` is followed directly by a flag.
+
+        Raw path mode (no dataset identity) must not inject a stray positional
+        that crosswalk would misparse as a dataset name.
+        """
+        mock_run.return_value = MagicMock(returncode=0)
+        bridge_path = tmp_path / "bridge.parquet"
+        pd.DataFrame({"gers_id": ["r1"], "local_id": ["t1"]}).to_parquet(bridge_path)
+
+        adapter = CrosswalkAdapter()
+        adapter.run(
+            reference=tmp_path / "ref.parquet",
+            target=tmp_path / "tgt.parquet",
+            output_dir=tmp_path,
+        )
+
+        cmd = mock_run.call_args[0][0]
+        stitch_idx = cmd.index("stitch")
+        # No positional between `stitch` and the first flag.
+        assert cmd[stitch_idx + 1] == "-r"
+
     def test_find_repo_root_locates_crosswalk_package(self):
         root = _find_repo_root()
         assert (root / "src" / "crosswalk").is_dir()

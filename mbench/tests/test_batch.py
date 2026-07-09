@@ -35,7 +35,68 @@ class _FakeAdapter:
         return ToolOutput(matches=matches, metadata={"test": True})
 
 
+@dataclass
+class _RecordingAdapter(_FakeAdapter):
+    """Fake adapter that records the kwargs forwarded to ``run``."""
+
+    name: str = "recording"
+    last_kwargs: dict = None
+
+    def run(self, reference, target, output_dir, **kwargs):
+        self.last_kwargs = dict(kwargs)
+        return super().run(reference, target, output_dir, **kwargs)
+
+
+def _make_labeled_inputs(tmp_path: Path, dataset: str) -> tuple[Path, Path, Path]:
+    ref = tmp_path / "ref.parquet"
+    ref.touch()
+    tgt = tmp_path / "tgt.parquet"
+    tgt.touch()
+    labels_dir = tmp_path / "labels"
+    dataset_dir = labels_dir / f"dataset={dataset}"
+    dataset_dir.mkdir(parents=True)
+    pd.DataFrame({"ref_id": ["r1"], "target_id": ["t1"], "label": ["match"]}).to_csv(
+        dataset_dir / "data.csv", index=False
+    )
+    return ref, tgt, labels_dir
+
+
 class TestRunSingle:
+    def test_forwards_dataset_name_to_adapter(self, tmp_path: Path):
+        """run_single injects the dataset identity into adapter.run kwargs (#372).
+
+        Crosswalk's resolver-prune allowlist keys on the dataset NAME, so the
+        adapter needs it to run the same (pruned) code path production/the gate
+        floor was calibrated on.
+        """
+        ref, tgt, labels_dir = _make_labeled_inputs(tmp_path, "us_boston_streets")
+        adapter = _RecordingAdapter()
+        run_single(
+            adapter=adapter,
+            dataset="us_boston_streets",
+            reference=ref,
+            target=tgt,
+            labels_dir=labels_dir,
+            output_dir=tmp_path / "output",
+        )
+        assert adapter.last_kwargs.get("dataset") == "us_boston_streets"
+
+    def test_forwards_dataset_alongside_other_opts(self, tmp_path: Path):
+        """The dataset injection coexists with other tool kwargs (e.g. --opt)."""
+        ref, tgt, labels_dir = _make_labeled_inputs(tmp_path, "test_ds")
+        adapter = _RecordingAdapter()
+        run_single(
+            adapter=adapter,
+            dataset="test_ds",
+            reference=ref,
+            target=tgt,
+            labels_dir=labels_dir,
+            output_dir=tmp_path / "output",
+            model="xgboost",
+        )
+        assert adapter.last_kwargs.get("dataset") == "test_ds"
+        assert adapter.last_kwargs.get("model") == "xgboost"
+
     def test_missing_reference_raises(self, tmp_path: Path):
         adapter = _FakeAdapter()
         with pytest.raises(FileNotFoundError, match="Reference file not found"):
