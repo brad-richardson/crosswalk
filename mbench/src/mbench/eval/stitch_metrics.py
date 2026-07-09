@@ -245,7 +245,11 @@ def map_labels_to_groups(
                 counts[gid] += 1
         if not counts:
             continue  # edges no longer survive in any current group
-        best = max(counts, key=counts.get)
+        # #367: sort candidates before max() so a count tie breaks on the
+        # lexicographically smallest group_id, not dict/set iteration order
+        # (hash-seed-dependent for str keys — same root cause as #354's
+        # recover_labeled_groups wobble).
+        best = max(sorted(counts), key=counts.get)
         # Prefer a verbatim group_id match when it still overlaps this label.
         target = hgid if counts.get(hgid, 0) > 0 else best
         mapping[idx] = target
@@ -287,7 +291,9 @@ def map_set_labels_to_groups(
                 counts[gid] += 1
         if not counts:
             continue
-        best = max(counts, key=counts.get)
+        # Same deterministic tie-break as map_labels_to_groups above (#367):
+        # sort before max() so ties resolve to the smallest group_id.
+        best = max(sorted(counts), key=counts.get)
         mapping[idx] = hgid if counts.get(hgid, 0) > 0 else best
     return mapping
 
