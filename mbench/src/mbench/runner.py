@@ -157,7 +157,16 @@ def run_single(
     cpu_user_before, cpu_sys_before, _ = _measure_children()
     t0 = time.monotonic()
 
-    output_path = adapter.run(reference, target, tool_output_dir, **kwargs)
+    # Pass the dataset identity through to the adapter. Some tools key behavior
+    # on the dataset NAME rather than the file paths — crosswalk's resolver-prune
+    # allowlist has been dataset-identity-keyed since #350, so a path-only stitch
+    # invocation runs with the prune OFF and evaluates a different (unpruned) row
+    # set than production, ~5pt below the calibrated gate floor (#372). ``dataset``
+    # is a named run_single parameter, so it never collides with ``**kwargs``;
+    # setdefault is just defensive. Adapters that don't read it ignore it.
+    run_kwargs = dict(kwargs)
+    run_kwargs.setdefault("dataset", dataset)
+    output_path = adapter.run(reference, target, tool_output_dir, **run_kwargs)
 
     wall_time = time.monotonic() - t0
     cpu_user_after, cpu_sys_after, peak_rss_mb = _measure_children()
