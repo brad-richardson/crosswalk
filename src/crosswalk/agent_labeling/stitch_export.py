@@ -23,6 +23,15 @@ Two verdict classes are promoted:
     is on by default; pass ``export_empty_set=False`` (CLI ``--no-empty-set``) to
     skip it.
 
+A third class covers DECOMPOSED groups (#367 Mode B, ``stitch-batch
+--decompose``): an over-backstop group split into panel-sized sub-problems is
+recomposed here — a whole-group label (labeler ``panel_unanimous_decomposed_v3``,
+the union of the sub-selections) is minted ONLY when every sub-problem in the
+batch.json roster resolved as a unanimous accept; any failed or unvoted
+sub-problem blocks the group (``subproblem_failed`` / ``subproblems_unvoted``).
+Sub-problem consensus rows are consumed by that recomposition and never export
+individually. See :mod:`crosswalk.matching.group_decomposition`.
+
 The empty-set label uses the SAME on-disk representation as a human reject-all
 review (PAIR semantics, ``selected_edges == "[]"``, ``num_refs/num_targets == 0``),
 so it round-trips through every consumer that already handles reject-all human
@@ -68,6 +77,7 @@ accurate.
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -76,6 +86,12 @@ from loguru import logger
 
 from ..config import settings
 from ..labeling.stitching_store import StitchingLabelStore
+from ..matching.group_decomposition import (
+    STATUS_FAILED,
+    STATUS_UNVOTED,
+    Recomposition,
+    recompose_subproblem_verdicts,
+)
 from ..matching.optimizer import group_is_structurally_simple
 from ..matching.sliver import annotate_group_sliver_flags
 from .panel_routing import REASON_UNANIMOUS_NONE, _int_or_none, derive_route_reason
@@ -108,6 +124,14 @@ PANEL_LABELER_PREFIX = "panel_"
 # (research/learned_optimizer_design.md §6.3). Version suffix tracks PANEL_LABELER
 # (same panel composition / pack inputs).
 PANEL_NONE_LABELER = "panel_unanimous_none_v3"
+
+# Distinct labeler for a RECOMPOSED whole-group label (#367 Mode B): the union
+# of unanimous per-sub-problem verdicts from a decomposed over-backstop group.
+# No single panel saw the whole group, so this is a different labeling process
+# than PANEL_LABELER and must stay sliceable on its own in per-labeler eval.
+# Kept under the ``panel_`` prefix (non-human); version suffix tracks
+# PANEL_LABELER (same panel composition / pack inputs per sub-problem).
+PANEL_DECOMPOSED_LABELER = "panel_unanimous_decomposed_v3"
 
 #: The provider composition PANEL_LABELER is valid provenance for. Composition
 #: changes have historically bumped the labeler (v1 -> v2), so a batch run with
@@ -149,6 +173,11 @@ REASON_STRUCTURAL_TANGLE = "structural_tangle"
 REASON_CLASS_MISMATCH = "class_mismatch"
 REASON_EMPTIED_BY_SLIVER = "emptied_by_sliver"
 REASON_HUMAN_PRECEDENCE = "human_precedence"
+# Decomposed-group (recomposition) outcomes: a sub-problem the panel could not
+# unanimously accept, or one never voted (including size-gated irreducible
+# blocks), blocks the whole-group label.
+REASON_SUBPROBLEM_FAILED = "subproblem_failed"
+REASON_SUBPROBLEMS_UNVOTED = "subproblems_unvoted"
 
 
 @dataclass
@@ -169,6 +198,12 @@ class GroupExport:
     # True for a unanimous-NONE (reject-all) export: selected_edges is empty and
     # the row is stamped PANEL_NONE_LABELER. False for a normal accept export.
     is_empty_set: bool = False
+    # True for a recomposed decomposed-group outcome (#367 Mode B): the group's
+    # verdict is the union of per-sub-problem panel votes; an export is stamped
+    # PANEL_DECOMPOSED_LABELER.
+    from_decomposition: bool = False
+    n_subproblems: int = 0
+    n_subproblems_resolved: int = 0
 
 
 @dataclass
@@ -182,6 +217,10 @@ class ExportReport:
     # Count of unanimous-NONE candidate groups seen (the empty-set path's analog
     # of ``n_auto_accept``). Zero when ``export_empty_set`` is off.
     n_unanimous_none: int = 0
+    # Decomposition (#367 Mode B): consensus rows consumed as sub-problem
+    # verdicts (never exported individually), and parents with a roster.
+    n_subproblem_rows: int = 0
+    n_decomposed_parents: int = 0
 
     @property
     def exported(self) -> list[GroupExport]:
@@ -360,18 +399,46 @@ def plan_exports(
         backstop_max_edges = settings.stitch_export_backstop_max_edges
     merged = _merge_consensus(batch_dirs)
 
-    # Load batch.json groups (geometries/edges) once per distinct batch dir.
+    # Load batch.json groups (geometries/edges) once per distinct batch dir,
+    # preserving the caller's precedence order (later supersedes earlier).
     # batch.json is the ONLY source of geometries (sliver gate) and candidate
     # edges (overlap precedence); warn loudly if a batch dir lacks it, since
     # those gates then degrade rather than fail.
     batch_groups: dict[Path, dict[str, dict]] = {}
-    for bd in {bd for bd, _ in merged.values()}:
+    for bd in dict.fromkeys(Path(b) for b in batch_dirs):
         if not (bd / "batch.json").exists():
             logger.warning(
                 f"No batch.json in {bd}: sliver canonicalization and edge-overlap "
                 "precedence cannot run for its groups (gates degrade)."
             )
         batch_groups[bd] = _load_batch_groups(bd)
+
+    # Decomposition rosters (#367 Mode B): a parent entry written by
+    # ``stitch-batch --decompose`` carries the FULL sub-problem roster
+    # (including size-gated oversized sub-problems that were never packed).
+    # Later batch dirs supersede earlier ones per parent, mirroring
+    # ``_merge_consensus`` precedence. Every roster sub-problem id maps to its
+    # parent so its consensus rows are consumed by recomposition below and are
+    # never exported individually (a sub-problem id is not a sidecar group).
+    rosters: dict[str, tuple[Path, dict]] = {}
+    for bd in batch_groups:
+        for gid, grp in batch_groups[bd].items():
+            if grp.get("decomposed_parent") and grp.get("subproblem_ids"):
+                rosters[gid] = (bd, grp)
+    sub_to_parent: dict[str, str] = {
+        str(sid): parent_gid
+        for parent_gid, (_bd, grp) in rosters.items()
+        for sid in grp["subproblem_ids"]
+    }
+    # Defense in depth: ANY batch group carrying ``parent_group_id`` is a
+    # sub-problem, even when a newer decomposition's roster no longer lists it
+    # (e.g. the budget changed between waves). Such an orphaned sub row is
+    # consumed (skipped) rather than falling through to the normal loop, where
+    # its auto_accept could mint a label under a non-sidecar sub-problem id.
+    for bd in batch_groups:
+        for gid, grp in batch_groups[bd].items():
+            if grp.get("parent_group_id"):
+                sub_to_parent.setdefault(str(gid), str(grp["parent_group_id"]))
 
     # Human labels for precedence. Exclude our own previously-exported panel rows
     # (they are not human) so re-runs stay idempotent and accurately reported.
@@ -394,6 +461,8 @@ def plan_exports(
     candidate_metas: dict[str, dict] = {}
     candidate_edges: dict[str, frozenset] = {}
     for gid, (bd, row) in merged.items():
+        if gid in sub_to_parent:
+            continue  # sub-problem rows are recomposition inputs, not candidates
         is_accept = str(row.get("routing")) == "auto_accept"
         is_none = export_empty_set and _is_unanimous_none(row)
         if not (is_accept or is_none):
@@ -412,6 +481,22 @@ def plan_exports(
             candidate_edges[gid] = frozenset(
                 (str(e["ref_id"]), str(e["target_id"])) for e in grp.get("edges", [])
             )
+
+    # Decomposed parents are recomposition candidates: include their metadata
+    # (class gate) and candidate edges (human edge-overlap / set-membership
+    # precedence) exactly like directly-voted candidate groups. Parents carry
+    # no evidence pack, so batch.json is the metadata source.
+    for parent_gid, (bd, grp) in sorted(rosters.items()):
+        gdir = bd / parent_gid
+        if (gdir / "metadata.yaml").exists():
+            candidate_metas[parent_gid] = _load_group_metadata(gdir)
+        else:
+            meta = _meta_from_group(grp)
+            if meta is not None:
+                candidate_metas[parent_gid] = meta
+        candidate_edges[parent_gid] = frozenset(
+            (str(e["ref_id"]), str(e["target_id"])) for e in grp.get("edges", [])
+        )
 
     overlap_map: dict[str, str] = {}
     if not human_df.empty:
@@ -438,7 +523,14 @@ def plan_exports(
     groups: list[GroupExport] = []
     n_auto = 0
     n_none = 0
+    n_sub_rows = 0
     for gid, (bd, row) in sorted(merged.items()):
+        # Sub-problem rows (#367 Mode B) are consumed by the recomposition path
+        # below — a sub-problem id is not a sidecar group and must never mint a
+        # label of its own (not even an empty-set one).
+        if gid in sub_to_parent:
+            n_sub_rows += 1
+            continue
         # Gate (a): route each candidate row to its path. auto_accept -> accept
         # gates; unanimous-NONE -> empty-set gates (when enabled). Everything
         # else is not a candidate at all.
@@ -475,12 +567,51 @@ def plan_exports(
                 )
             )
 
+    # Recomposition (#367 Mode B): one outcome per decomposed parent, from its
+    # sub-problem verdicts. Conservative all-or-nothing rule — see
+    # :func:`_gate_recomposed_group`. When an OLD wave also voted the parent
+    # directly, its (size-gated) outcome above coexists in the report; a later
+    # recomposed export for the same group_id supersedes it at write time
+    # (``write_exports`` upserts by group_id in report order).
+    for parent_gid, (bd, grp) in sorted(rosters.items()):
+        roster_ids = [str(s) for s in grp["subproblem_ids"]]
+        verdicts: dict[str, tuple[str, list[tuple[str, str]]]] = {}
+        sub_confs: list[float] = []
+        for sid in roster_ids:
+            if sid not in merged:
+                continue
+            srow = merged[sid][1]
+            verdicts[sid] = (
+                str(srow.get("routing", "")),
+                _parse_edge_set_pairs(srow.get("edge_set")),
+            )
+            if str(srow.get("routing")) == "auto_accept":
+                with suppress(ValueError, TypeError):
+                    sub_confs.append(float(srow.get("mean_confidence") or 0.0))
+        rec = recompose_subproblem_verdicts(parent_gid, roster_ids, verdicts)
+        groups.append(
+            _gate_recomposed_group(
+                gid=parent_gid,
+                bd=bd,
+                grp=grp,
+                rec=rec,
+                meta=candidate_metas.get(parent_gid),
+                human_gids=human_gids,
+                overlap_map=overlap_map,
+                # Weakest-link confidence: the minimum accepted sub-panel mean,
+                # so a reviewer sees the least-certain sub-decision.
+                mean_confidence=min(sub_confs) if sub_confs else 0.0,
+            )
+        )
+
     return ExportReport(
         dataset=dataset,
         n_total_groups=len(merged),
         n_auto_accept=n_auto,
         groups=groups,
         n_unanimous_none=n_none,
+        n_subproblem_rows=n_sub_rows,
+        n_decomposed_parents=len(rosters),
     )
 
 
@@ -657,6 +788,87 @@ def _gate_empty_group(
     return _mk(REASON_EXPORTED, n_edges_final=0, selected_edges=[])
 
 
+def _gate_recomposed_group(
+    gid: str,
+    bd: Path,
+    grp: dict,
+    rec: Recomposition,
+    meta: dict | None,
+    human_gids: set[str],
+    overlap_map: dict[str, str],
+    mean_confidence: float,
+) -> GroupExport:
+    """Gate a decomposed group's recomposed verdict into a whole-group export.
+
+    Conservative all-or-nothing rule (#367 Mode B): a label is minted ONLY when
+    every sub-problem in the roster resolved as a unanimous panel accept — any
+    failed sub-problem (``subproblem_failed``) or unvoted/size-gated one
+    (``subproblems_unvoted``) blocks the group, and the failing sub-problems
+    stay routed to human review. Mixed human+panel recomposition (a human
+    sub-verdict completing a partially-panel-resolved group) is deferred.
+
+    The remaining gates mirror :func:`_gate_group` on the UNION selection, with
+    one deliberate exception — there is NO size gate: each sub-decision was
+    within the panel envelope by construction, and the union spans the whole
+    over-backstop parent, which is exactly what decomposition exists to label.
+    Class-consistency, sliver canonicalization, and human precedence apply to
+    the union / parent group unchanged.
+    """
+    match_type = str(grp.get("match_type") or (meta.get("match_type") if meta else "") or "")
+    n_raw = len(rec.union_edges)
+
+    def _mk(reason: str, **kw) -> GroupExport:
+        return GroupExport(
+            group_id=gid,
+            source_batch=bd.name,
+            exported=(reason == REASON_EXPORTED),
+            reason=reason,
+            match_type=match_type,
+            n_edges_raw=n_raw,
+            mean_confidence=mean_confidence,
+            from_decomposition=True,
+            n_subproblems=rec.n_subproblems,
+            n_subproblems_resolved=rec.n_resolved,
+            **kw,
+        )
+
+    if rec.status == STATUS_FAILED:
+        return _mk(REASON_SUBPROBLEM_FAILED, n_edges_final=n_raw)
+    if rec.status == STATUS_UNVOTED:
+        return _mk(REASON_SUBPROBLEMS_UNVOTED, n_edges_final=n_raw)
+
+    # Class-consistency gate on the union (same rule as _gate_group).
+    if meta is not None:
+        ref_c, tgt_c = _segment_class_maps(meta)
+        edge_classes = _edge_classes_for(frozenset(rec.union_edges), ref_c, tgt_c)
+        if has_cross_mode_edge(edge_classes):
+            return _mk(REASON_CLASS_MISMATCH, n_edges_final=n_raw)
+
+    # Sliver canonicalization on the union.
+    sliver_pairs = _group_sliver_pairs(grp)
+    final_pairs = [p for p in rec.union_edges if p not in sliver_pairs]
+    n_slivers = n_raw - len(final_pairs)
+    if not final_pairs:
+        return _mk(REASON_EMPTIED_BY_SLIVER, n_slivers_dropped=n_slivers, n_edges_final=0)
+
+    # Human precedence (exact group_id or edge-overlap): never overwrite a human.
+    if gid in human_gids or gid in overlap_map:
+        return _mk(
+            REASON_HUMAN_PRECEDENCE,
+            n_slivers_dropped=n_slivers,
+            n_edges_final=len(final_pairs),
+            human_group_id=(gid if gid in human_gids else overlap_map[gid]),
+        )
+
+    selected = [{"ref_id": r, "target_id": t} for r, t in final_pairs]
+    return _mk(
+        REASON_EXPORTED,
+        n_slivers_dropped=n_slivers,
+        n_edges_final=len(final_pairs),
+        selected_edges=selected,
+    )
+
+
 def write_exports(
     report: ExportReport,
     dataset: str,
@@ -667,14 +879,22 @@ def write_exports(
     Accept groups are stamped ``panel_unanimous_v3`` with their chosen edge set;
     reject-all (empty-set) groups are stamped ``panel_unanimous_none_v3`` with
     ``selected_edges == []`` (PAIR semantics, num_refs/num_targets == 0 — the same
-    on-disk shape as a human reject-all). Upserts by ``group_id`` (the store
-    replaces an existing row for the same group_id), so this is idempotent. The
-    source batch name is recorded in the ``session_id`` field for provenance.
+    on-disk shape as a human reject-all); recomposed decomposed-group verdicts
+    (#367 Mode B) are stamped ``panel_unanimous_decomposed_v3`` with the union of
+    their sub-problem selections. Upserts by ``group_id`` (the store replaces an
+    existing row for the same group_id), so this is idempotent. The source batch
+    name is recorded in the ``session_id`` field for provenance.
     Returns the number of rows written.
     """
     store = StitchingLabelStore(dataset, labels_dir=labels_dir)
     written = 0
     for g in report.exported:
+        if g.is_empty_set:
+            labeler = PANEL_NONE_LABELER
+        elif g.from_decomposition:
+            labeler = PANEL_DECOMPOSED_LABELER
+        else:
+            labeler = PANEL_LABELER
         ref_ids = {e["ref_id"] for e in g.selected_edges}
         tgt_ids = {e["target_id"] for e in g.selected_edges}
         store.add(
@@ -683,7 +903,7 @@ def write_exports(
             match_type=g.match_type,
             num_refs=len(ref_ids),
             num_targets=len(tgt_ids),
-            labeler=PANEL_NONE_LABELER if g.is_empty_set else PANEL_LABELER,
+            labeler=labeler,
             session_id=g.source_batch,
         )
         written += 1
