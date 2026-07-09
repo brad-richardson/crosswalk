@@ -10,6 +10,9 @@ import pytest
 from shapely import LineString
 
 from crosswalk.matching.optimizer import (
+    PARALLEL_SIBLING_REVIEW_FLAG,
+    _contested_small_span_review_pairs,
+    _create_group_results,
     _endpoints_are_collinear,
     _find_contiguous_id_groups,
     apply_confidence_drop_prune,
@@ -19,7 +22,7 @@ from crosswalk.matching.optimizer import (
     optimize_matches_greedy,
     optimize_matches_with_grouping,
 )
-from crosswalk.matching.types import MatchDecision, MatchResult
+from crosswalk.matching.types import MatchDecision, MatchResult, MatchType
 
 
 @pytest.fixture
@@ -1317,3 +1320,128 @@ class TestOptimizerDeterminism:
             )
             digests.add(proc.stdout.strip())
         assert len(digests) == 1, f"hash-seed sensitive: {digests}"
+
+
+def _edge(ref_id, target_id, conf, ref_span, tgt_span):
+    """MatchResult with alignment fractions producing the given spans (from 0)."""
+    return MatchResult(
+        ref_id,
+        target_id,
+        MatchDecision.MATCH,
+        conf,
+        {},
+        {},
+        gers_start_frac=0.0,
+        gers_end_frac=ref_span,
+        local_start_frac=0.0,
+        local_end_frac=tgt_span,
+    )
+
+
+def _len_geoms(edges, length=100.0):
+    """`length`-meter LineString geoms for every ref/target id in ``edges``.
+
+    The absolute-overlap gate reads ``geom.length``; 100 m segments make a
+    ~10%-span stub ~10 m of overlap (below the 75 m gate), so stubs stay
+    demotable while the fraction shape drives the test.
+    """
+    line = LineString([(0.0, 0.0), (0.0, length)])
+    refs = {e.ref_id: line for e in edges}
+    tgts = {e.target_id: line for e in edges}
+    return refs, tgts
+
+
+class TestContestedSmallSpanReviewDemotion:
+    """#367 Mode A: contested small-span M:N stubs demote to REVIEW, not dropped."""
+
+    def test_contested_stub_flagged_for_review(self):
+        """A small-span edge contested on BOTH sides is flagged (193ac00f shape)."""
+        # r_b covers ~88% of its ref to t_a (conf 1.0); r_a covers ~90% of t_b
+        # (conf 0.998); the stub r_b->t_b covers only ~11%/8% of ref/target
+        # (conf 0.97) and is contested on both its ref (r_b, 1.0) and target
+        # (t_b, 0.998) — the parallel-sibling crossing stub.
+        edges = [
+            _edge("r_a", "t_b", 0.998, 0.986, 0.906),
+            _edge("r_b", "t_a", 1.0, 0.881, 1.0),
+            _edge("r_b", "t_b", 0.97, 0.108, 0.079),
+        ]
+        rg, tg = _len_geoms(edges)
+        demote = _contested_small_span_review_pairs(edges, rg, tg)
+        assert demote == {("r_b", "t_b")}
+
+    def test_genuine_asymmetric_coverage_match_not_flagged(self):
+        """A short ref fully consumed by a long target (tgt_span low, ref_span
+        ~1.0) is NEVER flagged, even if contested — max(span) stays high."""
+        edges = [
+            # r_short fully covers itself into t_long (ref_span 1.0) but only a
+            # small fraction of the long target — a legitimate asymmetric match.
+            _edge("r_short", "t_long", 0.97, 1.0, 0.06),
+            # a higher-confidence rival on the same target makes it "contested".
+            _edge("r_other", "t_long", 1.0, 0.5, 0.9),
+        ]
+        rg, tg = _len_geoms(edges)
+        assert _contested_small_span_review_pairs(edges, rg, tg) == set()
+
+    def test_long_corridor_small_fraction_not_flagged(self):
+        """A small-FRACTION edge whose ABSOLUTE overlap is large (long segment)
+        is a genuine corridor edge, not a segmentation stub — exempt even when
+        contested and both endpoints are anchored. The absolute-overlap gate is
+        the only thing separating it from the demotable short-segment shape."""
+        edges = [
+            _edge("r_long", "t_anchor", 1.0, 0.9, 0.9),  # anchors r_long
+            _edge("r_long", "t_long", 0.97, 0.2, 0.2),  # small fraction, under test
+            _edge("r_other", "t_long", 1.0, 0.9, 0.9),  # higher-conf rival → contested
+        ]
+        # 2 km segments: 0.2 fraction = 400 m of real overlap, far above the 75 m
+        # gate → exempt.
+        rg_long, tg_long = _len_geoms(edges, length=2000.0)
+        assert _contested_small_span_review_pairs(edges, rg_long, tg_long) == set()
+        # Identical shape on 100 m segments: 0.2 * 100 = 20 m < 75 m gate, and both
+        # endpoints are anchored, so it DOES demote — proving the gate is the cause.
+        rg_short, tg_short = _len_geoms(edges, length=100.0)
+        assert ("r_long", "t_long") in _contested_small_span_review_pairs(edges, rg_short, tg_short)
+
+    def test_uncontested_small_span_not_flagged(self):
+        """A small-span edge with no higher-confidence rival is left alone."""
+        edges = [
+            _edge("r_a", "t_a", 0.97, 0.1, 0.08),  # small but sole claimant
+            _edge("r_b", "t_b", 0.99, 0.9, 0.9),
+        ]
+        rg, tg = _len_geoms(edges)
+        assert _contested_small_span_review_pairs(edges, rg, tg) == set()
+
+    def test_orphan_guard_keeps_sole_edge_as_match(self):
+        """A small contested edge that is a node's ONLY edge is never demoted;
+        an otherwise-identical stub whose endpoints are both anchored IS."""
+        edges = [
+            _edge("r_a", "t_a", 1.0, 0.9, 0.9),  # anchors r_a and t_a
+            _edge("r_b", "t_b", 1.0, 0.9, 0.9),  # anchors r_b and t_b
+            # Stub whose ref (r_b) and target (t_a) are BOTH anchored → demoted.
+            _edge("r_b", "t_a", 0.97, 0.1, 0.1),
+            # Small contested edge that is r_c's SOLE edge → orphan-guard keeps it.
+            _edge("r_c", "t_a", 0.96, 0.1, 0.1),
+        ]
+        rg, tg = _len_geoms(edges)
+        demote = _contested_small_span_review_pairs(edges, rg, tg)
+        assert ("r_b", "t_a") in demote
+        assert ("r_c", "t_a") not in demote  # rescued: r_c would be orphaned
+
+    def test_create_group_results_demotes_review_pairs_without_dropping(self):
+        """review_pairs edges become REVIEW+flagged; all edges are retained."""
+        edges = [
+            _edge("r_a", "t_b", 0.998, 0.986, 0.906),
+            _edge("r_b", "t_a", 1.0, 0.881, 1.0),
+            _edge("r_b", "t_b", 0.97, 0.108, 0.079),
+        ]
+        tagged = _create_group_results(edges, MatchType.M_TO_N, review_pairs={("r_b", "t_b")})
+        # Nothing dropped.
+        assert len(tagged) == len(edges)
+        by_pair = {(r.ref_id, r.target_id): r for r in tagged}
+        stub = by_pair[("r_b", "t_b")]
+        assert stub.decision == MatchDecision.REVIEW
+        assert stub.features.get(PARALLEL_SIBLING_REVIEW_FLAG) == 1.0
+        # The dominant edges keep the (MATCH) group decision and are not flagged.
+        for pair in (("r_a", "t_b"), ("r_b", "t_a")):
+            r = by_pair[pair]
+            assert r.decision == MatchDecision.MATCH
+            assert PARALLEL_SIBLING_REVIEW_FLAG not in r.features
