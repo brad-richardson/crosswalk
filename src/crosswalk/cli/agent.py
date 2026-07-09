@@ -230,6 +230,7 @@ def generate_agent_test_batch(
     from ..agent_labeling.context_generator import write_candidate_package
     from ..agent_labeling.sampler import SampledCandidate
     from ..features.semantic import resolve_best_name_variant
+    from ..utils.geometry import filter_to_linestrings
 
     def _resolve_names(ref_row, target_row) -> tuple[str | None, str | None]:
         """Resolve best name pair using bilateral variant resolution."""
@@ -303,6 +304,7 @@ def generate_agent_test_batch(
         raise typer.Exit(1)
 
     ref_gdf = gpd.read_parquet(reference)
+    ref_gdf = filter_to_linestrings(ref_gdf, source_name="reference")
     ref_lookup = ref_gdf.set_index("id")
 
     # Load target datasets - auto-discover paths based on dataset name
@@ -318,7 +320,9 @@ def generate_agent_test_batch(
         ]
         path = next((p for p in candidates if p.exists()), None)
         if path:
-            target_gdfs[dataset] = gpd.read_parquet(path).set_index("id")
+            target_gdf = gpd.read_parquet(path)
+            target_gdf = filter_to_linestrings(target_gdf, source_name=path.name)
+            target_gdfs[dataset] = target_gdf.set_index("id")
         else:
             console.print(f"[yellow]Warning: No data file for {dataset}[/yellow]")
 

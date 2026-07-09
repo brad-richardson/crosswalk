@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..blocking import generate_candidates
 from ..matching.types import MatchResult
+from ..utils.geometry import filter_to_linestrings
 
 
 @dataclass
@@ -97,6 +98,9 @@ def load_geodataframe(path: Path) -> gpd.GeoDataFrame:
     # Ensure CRS is set (default to WGS84 if missing)
     if gdf.crs is None:
         gdf = gdf.set_crs("EPSG:4326")
+
+    # Normalize to LineStrings at the load boundary (MultiLineStrings flattened)
+    gdf = filter_to_linestrings(gdf, source_name=str(path.name))
 
     return gdf
 
