@@ -1,7 +1,9 @@
 """Unit tests for target-snapshot publishing (``crosswalk factory publish --targets``).
 
-Covers: license gating (pending_review / unlisted excluded), the on-disk key
-layout (``targets/dataset=*/snapshot=*/data.parquet`` + ``meta.yaml`` +
+Covers: license gating (pending_review / unlisted excluded), the persisted
+quality-hold gate shared with the bridges path (#370/#338 — see
+``publish.py::dataset_quality_hold``), the on-disk key layout
+(``targets/dataset=*/snapshot=*/data.parquet`` + ``meta.yaml`` +
 ``latest.json`` + top-level ``index.json``), snapshot-date resolution (fetch
 sidecar vs dataset-yaml + mtime fallback), immutability (refuse overwrite of an
 existing snapshot without ``--force``), and dry-run/CLI wiring emits no network
@@ -23,6 +25,8 @@ from typer.testing import CliRunner
 
 from crosswalk.cli import app
 from crosswalk.factory.licenses import LicenseRegistry
+from crosswalk.factory.manifest import Manifest
+from crosswalk.factory.publish import BRIDGES_PREFIX, assemble_staging
 from crosswalk.factory.publish_sync import (
     R2Config,
     build_aws_sync_argv,
@@ -43,6 +47,8 @@ from crosswalk.factory.publish_targets import (
 from crosswalk.fetch.metadata import FetchMetadata, save_metadata
 
 runner = CliRunner()
+
+BRIDGES_RELEASE = "2026-01-21.0"
 
 
 def _write_target_parquet(raw_dir: Path, name: str) -> Path:
@@ -159,6 +165,180 @@ def test_unlisted_dataset_excluded(raw_dir, tmp_path, empty_datasets_dir):
     zz = next(d for d in report.datasets if d.dataset == "zz_unlisted_targets")
     assert not zz.published
     assert "no license registry entry" in zz.reason
+
+
+# --------------------------------------------------------------------------
+# Quality hold (declarative do-not-ship in the dataset YAML; #370/#338)
+#
+# ``dataset_quality_hold`` (publish.py) is shared by both publish paths. Only
+# the bridges path (``assemble_staging``) enforced it before this change —
+# ``co_bogota_bike_network`` is license-approved and quality-held, yet its YAML
+# hold block says the hold "Blocks publishing (crosswalk factory publish)"
+# with no bridges-only qualifier. These tests pin the targets path to the same
+# behavior, and (b) pin that the bridges path itself is unchanged.
+# --------------------------------------------------------------------------
+HOLD = {
+    "reason": (
+        "cross-mode defect: cycleways matched to parallel road centerlines at 0.82-0.95 confidence"
+    ),
+    "since": "2026-07-06",
+}
+
+
+def _write_dataset_yaml(datasets_dir, name, *, quality_hold=None):
+    """Write a minimal dataset YAML config into the test datasets dir."""
+    data = {"name": name, "display_name": f"Display {name}", "type": "bike"}
+    if quality_hold is not None:
+        data["quality_hold"] = quality_hold
+    (datasets_dir / f"{name}.yaml").write_text(yaml.safe_dump(data, sort_keys=False))
+
+
+def _make_bridges_factory_dataset(factory_root, name, *, release=BRIDGES_RELEASE):
+    """Minimal synthetic bridges-path factory output (bridge.parquet + manifest.json)."""
+    ds_dir = factory_root / f"release={release}" / f"dataset={name}"
+    ds_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "local_id": [f"{name}_0"],
+            "gers_id": ["gers-0"],
+            "confidence": [0.9],
+            "match_type": ["1:1"],
+            "match_decision": ["match"],
+        }
+    ).to_parquet(ds_dir / "bridge.parquet", index=False)
+    Manifest(
+        dataset=name,
+        release=release,
+        created_at="2026-07-05T00:00:00+00:00",
+        n_reference=1,
+        n_target=1,
+        n_candidates=1,
+        n_matched=1,
+        n_review=0,
+        n_unmatched=0,
+        groups={"n_groups": 1, "n_m_to_n": 0, "n_oversized": 0},
+        wall_s=0.1,
+    ).write(ds_dir / "manifest.json")
+    return ds_dir
+
+
+def test_quality_hold_excludes_target_snapshot_even_when_license_approved(
+    raw_dir, tmp_path, empty_datasets_dir
+):
+    """(a) The #338 incident this mechanism prevents on the bridges path applies
+    identically here: license-approved but quality-held must exclude the TARGET
+    snapshot too — the concrete divergence is ``co_bogota_bike_network``, whose
+    YAML hold block claims (without a bridges-only qualifier) to block
+    ``crosswalk factory publish`` outright."""
+    _write_target_parquet(raw_dir, "us_ok_targets")
+    _write_dataset_yaml(empty_datasets_dir, "us_ok_targets", quality_hold=HOLD)
+
+    staging = tmp_path / "staging"
+    report = assemble_targets_staging(
+        raw_dir, staging, _registry(), datasets_dir=empty_datasets_dir
+    )
+
+    held = next(d for d in report.datasets if d.dataset == "us_ok_targets")
+    assert held.status == "excluded"
+    assert held.reason == f"quality hold: {HOLD['reason']} (since 2026-07-06)"
+    # The license IS approved — the hold, not the license, is what blocks it.
+    assert held.license["approved"] is True
+    assert held.quality_hold == HOLD
+    assert report.n_published == 0
+    # No data copied into the staging tree.
+    assert not (staging / TARGETS_PREFIX / "dataset=us_ok_targets").exists()
+    # Excluded dataset never appears in the (published-only) index.
+    idx = json.loads((staging / TARGETS_PREFIX / TARGETS_INDEX_FILENAME).read_text())
+    assert "us_ok_targets" not in idx["datasets"]
+
+
+def test_quality_hold_takes_precedence_over_pending_target_license(
+    raw_dir, tmp_path, empty_datasets_dir
+):
+    """A held target reports the hold even while its license is still pending, so
+    a later license flip can never change its outcome or its stated reason."""
+    _write_target_parquet(raw_dir, "xx_pending_targets")
+    _write_dataset_yaml(empty_datasets_dir, "xx_pending_targets", quality_hold=HOLD)
+
+    report = assemble_targets_staging(
+        raw_dir, tmp_path / "staging", _registry(), datasets_dir=empty_datasets_dir
+    )
+    d = next(x for x in report.datasets if x.dataset == "xx_pending_targets")
+    assert not d.published
+    assert d.reason.startswith("quality hold:")
+    assert d.license["approved"] is False  # license state still recorded alongside
+
+
+def test_malformed_quality_hold_still_holds_target_snapshot(raw_dir, tmp_path, empty_datasets_dir):
+    """Fail-safe: any truthy quality_hold value holds — a defective dataset must
+    never ship on a parsing technicality (mirrors the bridges-path guarantee)."""
+    _write_target_parquet(raw_dir, "us_ok_targets")
+    (empty_datasets_dir / "us_ok_targets.yaml").write_text(
+        "name: us_ok_targets\nquality_hold: true\n"
+    )
+    report = assemble_targets_staging(
+        raw_dir, tmp_path / "staging", _registry(), datasets_dir=empty_datasets_dir
+    )
+    held = next(d for d in report.datasets if d.dataset == "us_ok_targets")
+    assert held.status == "excluded"
+    assert held.reason.startswith("quality hold:")
+
+
+def test_dataset_yaml_without_hold_still_publishes_target(raw_dir, tmp_path, empty_datasets_dir):
+    """(c) A YAML config with no quality_hold block changes nothing — an approved,
+    un-held dataset still stages exactly as before this change."""
+    _write_target_parquet(raw_dir, "us_ok_targets")
+    _write_dataset_yaml(empty_datasets_dir, "us_ok_targets")
+
+    report = assemble_targets_staging(
+        raw_dir, tmp_path / "staging", _registry(), datasets_dir=empty_datasets_dir
+    )
+    ok = next(d for d in report.datasets if d.dataset == "us_ok_targets")
+    assert ok.published
+    assert ok.quality_hold is None
+    assert report.n_published == 1
+
+
+def test_bridges_path_quality_hold_behavior_unchanged(tmp_path, empty_datasets_dir):
+    """(b) Pins that this change does not alter the bridges path
+    (``publish.assemble_staging``) at all: a license-approved but quality-held
+    bridge dataset is still excluded with the hold as its reason, and an
+    un-held approved dataset still publishes."""
+    factory_root = tmp_path / "factory"
+    _make_bridges_factory_dataset(factory_root, "us_ok_roads")
+    _make_bridges_factory_dataset(factory_root, "us_held_roads")
+    _write_dataset_yaml(empty_datasets_dir, "us_held_roads", quality_hold=HOLD)
+
+    registry = LicenseRegistry(
+        {
+            "overture": {"attribution": "O", "url": "u", "license": "ODbL-1.0"},
+            "datasets": {
+                "us_ok_roads": {"status": "approved", "license": "L", "attribution": "A"},
+                "us_held_roads": {"status": "approved", "license": "L", "attribution": "A"},
+            },
+        }
+    )
+    report = assemble_staging(
+        factory_root,
+        tmp_path / "staging",
+        registry,
+        datasets_dir=empty_datasets_dir,
+        generated_at="fixed",
+    )
+
+    ok = next(d for r in report.releases for d in r.datasets if d.dataset == "us_ok_roads")
+    held = next(d for r in report.releases for d in r.datasets if d.dataset == "us_held_roads")
+    assert ok.published
+    assert not held.published
+    assert held.reason == f"quality hold: {HOLD['reason']} (since 2026-07-06)"
+    assert held.license["approved"] is True
+    assert not (
+        tmp_path
+        / "staging"
+        / BRIDGES_PREFIX
+        / f"release={BRIDGES_RELEASE}"
+        / "dataset=us_held_roads"
+    ).exists()
 
 
 def test_dataset_filter_restricts_publication(raw_dir, tmp_path, empty_datasets_dir):

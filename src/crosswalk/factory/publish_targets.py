@@ -5,8 +5,10 @@ publishing turns factory *output* (matched bridge tables) into a public artifact
 target publishing turns factory *input* — the raw local dataset snapshot each
 bridge was matched against — into one. Both trees share the same license gate
 (``datasets/licenses.toml`` via :class:`~crosswalk.factory.licenses.LicenseRegistry`)
-and the same R2 sync layer (``publish_sync.py``); this module only handles
-target-specific discovery, snapshot-date resolution, and staging-tree layout:
+and the same declarative quality-hold gate (a ``quality_hold:`` block in
+``datasets/<name>.yaml``, see ``publish.py::dataset_quality_hold``) and the same
+R2 sync layer (``publish_sync.py``); this module only handles target-specific
+discovery, snapshot-date resolution, and staging-tree layout:
 
     <staging>/
       targets/
@@ -39,7 +41,7 @@ import yaml
 
 from ..config import DATA_VERSION
 from .licenses import LicenseRegistry
-from .publish import _load_dataset_yaml
+from .publish import _load_dataset_yaml, dataset_quality_hold
 
 TARGETS_PREFIX = "targets"
 TARGET_DATA_FILENAME = "data.parquet"
@@ -188,6 +190,7 @@ class TargetSnapshotPublication:
     source: str | None = None
     source_url: str | None = None
     provenance_from: str | None = None
+    quality_hold: dict[str, Any] | None = None  # declarative hold from the dataset YAML
 
     @property
     def published(self) -> bool:
@@ -228,12 +231,21 @@ def assemble_targets_staging(
 ) -> TargetsPublishReport:
     """Build the ``targets/`` staging tree from local target dataset snapshots.
 
-    Only datasets that are BOTH ``approved`` in the license registry AND have a
-    local ``data/raw/<name>_<DATA_VERSION>.parquet`` file are published; every
-    other discovered target is recorded as excluded (with its reason) but never
-    copied. Deterministic given identical inputs (files are copied verbatim);
-    only the resolved snapshot date can change run-to-run if the sidecar/mtime
-    provenance changes.
+    Only datasets that are ``approved`` in the license registry, NOT under a
+    declarative quality hold (``quality_hold:`` in ``datasets/<name>.yaml`` —
+    see ``publish.py::dataset_quality_hold``), and have a local
+    ``data/raw/<name>_<DATA_VERSION>.parquet`` file are published; every other
+    discovered target is recorded as excluded (with its reason) but never
+    copied. The hold is checked BEFORE the license, mirroring
+    ``publish.assemble_staging`` (the bridges path), so a held dataset stays
+    excluded no matter its license status — targets are the raw input a
+    defective bridge was matched against, and a hold on the bridge output
+    reflects a defect in matching them, not in the input snapshot itself, but
+    per the documented promise in the dataset YAML ("Blocks publishing
+    (crosswalk factory publish)") the hold blocks ALL publishing paths, not
+    only bridges. Deterministic given identical inputs (files are copied
+    verbatim); only the resolved snapshot date can change run-to-run if the
+    sidecar/mtime provenance changes.
     """
     raw_dir = Path(raw_dir)
     staging_dir = Path(staging_dir)
@@ -253,6 +265,26 @@ def assemble_targets_staging(
 
     for name, path in sorted(target_files.items()):
         decision = registry.decision(name)
+
+        # Quality hold: a declarative "do not ship" in the dataset YAML for a
+        # known-defective factory output (see publish.py::dataset_quality_hold).
+        # Checked BEFORE the license — same ordering as assemble_staging (the
+        # bridges path) — so a held dataset stays excluded (with the hold as
+        # its reason) no matter what happens to its license status.
+        hold = dataset_quality_hold(name, datasets_dir)
+        if hold is not None:
+            since = f" (since {hold['since']})" if hold.get("since") else ""
+            pubs.append(
+                TargetSnapshotPublication(
+                    dataset=name,
+                    status="excluded",
+                    reason=f"quality hold: {hold['reason']}{since}",
+                    license=decision.to_dict(),
+                    quality_hold=hold,
+                )
+            )
+            continue
+
         if not decision.approved:
             pubs.append(
                 TargetSnapshotPublication(dataset=name, status="excluded", reason=decision.reason)
