@@ -443,8 +443,18 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
     # Group-level #267 structural summary (present keys only; degrades gracefully).
     group_structure = {k: group[k] for k in _GROUP_STRUCT_KEYS if k in group}
 
+    # Decomposition provenance (#367 Mode B): a sub-problem pack records its
+    # parent group so votes.csv/consensus.csv rows (keyed by the sub-problem
+    # group_id) trace back to the decomposed group without external state.
+    decomposition_meta = {}
+    if group.get("parent_group_id"):
+        decomposition_meta["parent_group_id"] = group["parent_group_id"]
+        if group.get("n_subproblems"):
+            decomposition_meta["n_subproblems"] = group["n_subproblems"]
+
     return {
         "group_id": group.get("group_id"),
+        **decomposition_meta,
         "match_type": group.get("match_type"),
         "n_ref_segments": len(ref_ids),
         "n_target_segments": len(target_ids),
@@ -737,6 +747,12 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
         f"GROUP {metadata['group_id']}  (match_type={metadata['match_type']}, "
         f"{metadata['n_ref_segments']} ref x {metadata['n_target_segments']} target)"
     )
+    if metadata.get("parent_group_id"):
+        lines.append(
+            f"This group is one sub-problem of a larger group ({metadata['parent_group_id']}); "
+            "some nearby gray context roads belong to sibling sub-problems. Judge ONLY "
+            "the labeled segments and edges shown here."
+        )
     if opt_letter:
         lines.append(f"Optimizer's proposed option: {opt_letter}")
     struct_summary = _group_struct_str(metadata.get("structure"))
