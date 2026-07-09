@@ -98,6 +98,14 @@ class TestGetUnreviewedPerGroupDataset:
 class TestStitchBatchAllCombine:
     """The --no-refresh combine step (pure file IO)."""
 
+    def _patch_real_datasets(self, monkeypatch, names):
+        # The combine gates on DatasetLoader membership (CI has no data/raw), so
+        # control the "real datasets" set explicitly.
+        monkeypatch.setattr(
+            "crosswalk.datasets.loader.DatasetLoader.list_available",
+            lambda self: list(names),
+        )
+
     def test_combine_stamps_and_orders(self, tmp_path, monkeypatch):
         cache_dir = tmp_path / "stitch"
         cache_dir.mkdir()
@@ -116,6 +124,7 @@ class TestStitchBatchAllCombine:
         )
 
         monkeypatch.setattr("crosswalk.filenames.STITCH_CACHE_DIR", cache_dir)
+        self._patch_real_datasets(monkeypatch, ["co_bogota_roads", "de_berlin_roads", "empty_ds"])
 
         result = runner.invoke(app, ["data", "stitch-batch-all", "--no-refresh"])
         assert result.exit_code == 0, result.output
@@ -131,15 +140,61 @@ class TestStitchBatchAllCombine:
         ]
         assert combined["batch_size"] == 3
 
+    def test_combine_excludes_comparison_artifacts(self, tmp_path, monkeypatch):
+        """before_/after_ batch caches must never fold into the queue — their
+        labels would route to a junk labels/stitching/dataset=before_*/ partition."""
+        cache_dir = tmp_path / "stitch"
+        cache_dir.mkdir()
+        (cache_dir / "us_boston_streets_batch.json").write_text(
+            json.dumps(_batch("us_boston_streets", ["real1"]))
+        )
+        # A comparison artifact left behind by the change-tracking workflow.
+        (cache_dir / "before_us_boston_streets_batch.json").write_text(
+            json.dumps(_batch("before_us_boston_streets", ["junk1", "junk2"]))
+        )
+
+        monkeypatch.setattr("crosswalk.filenames.STITCH_CACHE_DIR", cache_dir)
+        # Only the real dataset is known to DatasetLoader.
+        self._patch_real_datasets(monkeypatch, ["us_boston_streets"])
+
+        result = runner.invoke(app, ["data", "stitch-batch-all", "--no-refresh"])
+        assert result.exit_code == 0, result.output
+
+        combined = json.loads((cache_dir / f"{STITCH_ALL_QUEUE}_batch.json").read_text())
+        owners = {g["dataset_id"] for g in combined["groups"]}
+        assert owners == {"us_boston_streets"}  # artifact excluded
+        assert [g["group_id"] for g in combined["groups"]] == ["real1"]
+
     def test_combine_empty_when_no_batches(self, tmp_path, monkeypatch):
         cache_dir = tmp_path / "stitch"
         cache_dir.mkdir()
         monkeypatch.setattr("crosswalk.filenames.STITCH_CACHE_DIR", cache_dir)
+        self._patch_real_datasets(monkeypatch, ["us_boston_streets"])
 
         result = runner.invoke(app, ["data", "stitch-batch-all", "--no-refresh"])
         assert result.exit_code == 0, result.output
         combined = json.loads((cache_dir / f"{STITCH_ALL_QUEUE}_batch.json").read_text())
         assert combined["groups"] == []
+
+
+class TestFindGroupCollisionSafe:
+    """Writer/lookup paths must disambiguate a shared group_id by owning dataset."""
+
+    def test_find_group_matches_owning_dataset(self):
+        from crosswalk.web.routes.stitching import _find_group
+
+        all_groups = [
+            {"group_id": "g1", "dataset_id": "ds_a"},
+            {"group_id": "g1", "dataset_id": "ds_b"},
+        ]
+        # Without a dataset hint, first match wins (per-dataset queue behavior).
+        assert _find_group(all_groups, "g1")["dataset_id"] == "ds_a"
+        # With the owning dataset, the correct occurrence is resolved.
+        assert _find_group(all_groups, "g1", "ds_b")["dataset_id"] == "ds_b"
+        assert _find_group(all_groups, "g1", "ds_a")["dataset_id"] == "ds_a"
+        # Unknown (id, dataset) pair -> no match.
+        assert _find_group(all_groups, "g1", "ds_c") is None
+        assert _find_group(all_groups, "missing") is None
 
 
 def test_panel_csv_field_limit_raised():

@@ -2507,33 +2507,28 @@ def stitch_batch_all(
     import json
     from datetime import UTC, datetime
 
+    from ..datasets.loader import DatasetLoader
     from ..filenames import PROJECT_ROOT, STITCH_ALL_QUEUE, stitch_batch_path
 
     output_dir = PROJECT_ROOT / "data" / "output"
 
-    if refresh:
-        # Regenerate every REAL dataset that has a groups sidecar, so the
-        # combined queue reflects the current optimizer/panel state. The sidecar
-        # glob also matches before_/after_/baseline_ comparison artifacts
-        # (data/output/before_us_boston_streets_groups.json etc.); those are not
-        # datasets, so gate on DatasetLoader membership to keep them out of the
-        # queue. A dataset that still has a real batch cache but no raw files is
-        # kept too (its queue is live even if inputs were cleaned up).
-        from ..datasets.loader import DatasetLoader
+    # Gate everything on real dataset membership. The sidecar glob and the batch
+    # cache both contain before_/after_/baseline_ comparison artifacts (from the
+    # CLAUDE.md change-tracking workflow); those are NOT datasets. Admitting one
+    # into the queue would route its review labels to a junk
+    # labels/stitching/dataset=before_*/ partition no consumer reads (silent
+    # loss), so they are excluded from BOTH the refresh and the combine.
+    real_datasets = set(DatasetLoader().list_available())
 
-        real_datasets = set(DatasetLoader().list_available())
-        cache_dir = stitch_batch_path(STITCH_ALL_QUEUE).parent
-        has_batch = {
-            f.stem.replace("_batch", "")
-            for f in cache_dir.glob("*_batch.json")
-            if f.stem.replace("_batch", "") != STITCH_ALL_QUEUE
-        }
+    if refresh:
+        # Regenerate every real dataset that has a groups sidecar, so the
+        # combined queue reflects the current optimizer/panel state.
         datasets_to_refresh = []
         skipped = []
         if output_dir.exists():
             for sidecar_file in sorted(output_dir.glob("*_groups.json")):
                 ds_name = sidecar_file.stem.replace("_groups", "")
-                if ds_name in real_datasets or ds_name in has_batch:
+                if ds_name in real_datasets:
                     datasets_to_refresh.append(ds_name)
                 else:
                     skipped.append(ds_name)
@@ -2573,6 +2568,7 @@ def stitch_batch_all(
     cache_dir = stitch_batch_path(STITCH_ALL_QUEUE).parent
     combined_groups: list[dict] = []
     source_summary: list[tuple[str, int]] = []
+    combine_skipped: list[str] = []
     if cache_dir.exists():
         for batch_file in sorted(cache_dir.glob("*_batch.json")):
             ds_name = batch_file.stem.replace("_batch", "")
@@ -2585,6 +2581,14 @@ def stitch_batch_all(
                 continue
             groups = batch.get("groups", [])
             owner = batch.get("dataset_id", ds_name)
+            # Never fold a non-dataset cache (comparison artifact, or an id that
+            # is no longer a known dataset) into the queue — its labels would
+            # route to a junk partition. Apply the gate to the resolved OWNER,
+            # not just the filename, so a mislabeled batch can't sneak in.
+            if owner not in real_datasets:
+                if groups:
+                    combine_skipped.append(owner)
+                continue
             for g in groups:
                 # Stamp the owning dataset so the UI can route labels back and
                 # resolve per-group spatial-context membership.
@@ -2610,6 +2614,11 @@ def stitch_batch_all(
     )
     for owner, n in source_summary:
         console.print(f"  {owner}: {n}")
+    if combine_skipped:
+        console.print(
+            f"[dim]Excluded {len(combine_skipped)} non-dataset batch caches "
+            f"(comparison artifacts): {', '.join(sorted(set(combine_skipped)))}[/dim]"
+        )
     if not combined_groups:
         console.print(
             "[yellow]Combined queue is empty — no per-dataset batches with groups. "

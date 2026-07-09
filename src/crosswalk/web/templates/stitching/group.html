@@ -118,7 +118,7 @@
              optimizer's proposal hidden (unbiased eval slice, session_id=deanchored_v1). -->
         <a class="scratch-row deanchor-toggle{% if deanchored %} active{% endif %}"
            id="deanchor-toggle"
-           href="/stitching-review?dataset={{ dataset }}{% if group.group_id %}&group_id={{ group.group_id }}{% endif %}{% if not deanchored %}&deanchored=1{% endif %}"
+           href="/stitching-review?dataset={{ dataset }}{% if group.group_id %}&group_id={{ group.group_id }}{% endif %}{% if group.dataset_id %}&group_dataset={{ group.dataset_id }}{% endif %}{% if not deanchored %}&deanchored=1{% endif %}"
            role="switch" aria-checked="{{ 'true' if deanchored else 'false' }}"
            title="From scratch: label from a blank slate with the optimizer's proposal hidden">
             <span class="scratch-label">From scratch
@@ -371,6 +371,10 @@
               hx-swap="innerHTML">
             <input type="hidden" name="dataset" value="{{ dataset }}">
             <input type="hidden" name="group_id" value="{{ group.group_id }}">
+            <!-- Owning dataset of THIS group. Empty for a per-dataset queue; for
+                 the combined __all__ queue it disambiguates a group_id that two
+                 datasets could share, so the label routes to the right partition. -->
+            <input type="hidden" name="group_dataset" value="{{ group.dataset_id or '' }}">
             <input type="hidden" name="group_index" value="{{ group_index }}">
             <input type="hidden" name="included_refs" id="included-refs" value="">
             <input type="hidden" name="included_targets" id="included-targets" value="">
@@ -397,6 +401,7 @@
               hx-swap="innerHTML">
             <input type="hidden" name="dataset" value="{{ dataset }}">
             <input type="hidden" name="group_id" value="{{ group.group_id }}">
+            <input type="hidden" name="group_dataset" value="{{ group.dataset_id or '' }}">
             <input type="hidden" name="deanchored" value="{{ 1 if deanchored else 0 }}">
             <button type="submit" class="btn-skip-stitch">
                 Skip

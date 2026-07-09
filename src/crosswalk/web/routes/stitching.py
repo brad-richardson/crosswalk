@@ -68,6 +68,25 @@ def _group_dataset(group: dict, page_dataset: str) -> str:
     return group.get("dataset_id") or page_dataset
 
 
+def _find_group(all_groups: list[dict], group_id: str, group_dataset: str = "") -> dict | None:
+    """Find a group by id, disambiguated by owning dataset when provided.
+
+    ``group_id`` is only unique WITHIN a dataset (a 32-bit content hash of the
+    group's segment ids), so in the combined ``__all__`` queue two datasets can
+    in principle carry the same id. When the caller knows the owning dataset
+    (the forms submit it as ``group_dataset``), match on BOTH so a label can
+    never resolve to a same-id group in the wrong dataset. Falls back to
+    id-only match for the per-dataset queues (which submit no owning dataset).
+    """
+    for g in all_groups:
+        if g.get("group_id") != group_id:
+            continue
+        if group_dataset and (g.get("dataset_id") or "") != group_dataset:
+            continue
+        return g
+    return None
+
+
 # Display-only cap on how many spatial-context segments are presented per side
 # (pills, map geometries, and the group-context-ids JSON blob). PR #262 expanded
 # the context clip envelope to a group's full bounds, which is correct for the
@@ -611,7 +630,11 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
 
 @router.get("/stitching-review", response_class=HTMLResponse)
 async def stitching_review(
-    request: Request, dataset: str = "", group_id: str = "", deanchored: bool = False
+    request: Request,
+    dataset: str = "",
+    group_id: str = "",
+    group_dataset: str = "",
+    deanchored: bool = False,
 ):
     """Main stitching review page.
 
@@ -680,9 +703,16 @@ async def stitching_review(
 
     if group_id:
         # Deep link: render the requested group (even if already reviewed)
-        # inside the full page so styles/map/JS load.
+        # inside the full page so styles/map/JS load. Match owning dataset too so
+        # a shared group_id in the combined queue resolves the right occurrence.
         deep_index = next(
-            (i for i, g in enumerate(all_groups) if g.get("group_id") == group_id), None
+            (
+                i
+                for i, g in enumerate(all_groups)
+                if g.get("group_id") == group_id
+                and (not group_dataset or (g.get("dataset_id") or "") == group_dataset)
+            ),
+            None,
         )
         if deep_index is None:
             logger.warning(f"Deep-link group not found in {dataset} batch: {group_id!r}")
@@ -751,6 +781,7 @@ async def stitching_group(
     request: Request,
     dataset: str = "",
     group_id: str = "",
+    group_dataset: str = "",
     group_index: int = 0,
     deanchored: bool = False,
 ):
@@ -784,7 +815,9 @@ async def stitching_group(
     display_total = batch_total
     if group_id:
         for i, g in enumerate(all_groups):
-            if g.get("group_id") == group_id:
+            if g.get("group_id") == group_id and (
+                not group_dataset or (g.get("dataset_id") or "") == group_dataset
+            ):
                 group, display_index, display_total = g, i, batch_total
                 break
     if group is None:
@@ -875,6 +908,7 @@ async def stitching_select(
     request: Request,
     dataset: str = Form(...),
     group_id: str = Form(...),
+    group_dataset: str = Form(""),
     group_index: int = Form(0),
     included_refs: str = Form(""),
     included_targets: str = Form(""),
@@ -910,15 +944,23 @@ async def stitching_select(
     if not batch:
         return HTMLResponse("<div>No batch found</div>")
 
-    # Find the group
+    # Find the group (disambiguated by owning dataset for the combined queue).
     all_groups = batch.get("groups", [])
-    group = None
-    for g in all_groups:
-        if g.get("group_id") == group_id:
-            group = g
-            break
+    group = _find_group(all_groups, group_id, group_dataset)
 
     if group:
+        # Resolve the owning dataset ONCE and refuse to write to the synthetic
+        # __all__ partition: a group that reached here without a dataset stamp
+        # in the combined queue would otherwise corrupt a labels/.../dataset=
+        # __all__/ partition no consumer reads. Never fires for a stamped group.
+        owner_dataset = _group_dataset(group, dataset)
+        if owner_dataset == STITCH_ALL_QUEUE or not _validate_dataset(owner_dataset):
+            logger.error(
+                "Refusing stitching label for group %s: unresolved owning dataset %r",
+                group_id,
+                owner_dataset,
+            )
+            return HTMLResponse("Unresolved group dataset", status_code=400)
         try:
             explicit_edges = _parse_explicit_edges(selected_edges, group)
         except ValueError as e:
@@ -1018,7 +1060,7 @@ async def stitching_select(
         record_stitching_label(
             # Route to the group's OWNING dataset partition — for the combined
             # __all__ queue this is the group's own dataset_id, not "__all__".
-            dataset_id=_group_dataset(group, dataset),
+            dataset_id=owner_dataset,
             group_id=group_id,
             selected_edges=final_edges,
             match_type=group.get("match_type", ""),
@@ -1069,6 +1111,7 @@ async def stitching_skip(
     request: Request,
     dataset: str = Form(...),
     group_id: str = Form(""),
+    group_dataset: str = Form(""),
     deanchored: bool = Form(False),
 ):
     """Skips current group, loads next unreviewed group after it."""
@@ -1099,12 +1142,16 @@ async def stitching_skip(
             {"request": request, "dataset": dataset, "all_reviewed": True},
         )
 
-    # Find the current group by ID within the unreviewed queue and advance past
-    # it (wrapping so skipping the last returns to the first still-unreviewed).
+    # Find the current group within the unreviewed queue and advance past it
+    # (wrapping so skipping the last returns to the first still-unreviewed).
+    # Match on owning dataset too so a shared group_id in the combined queue
+    # advances from the right occurrence.
     next_index = 0
     if group_id:
         for i, g in enumerate(groups):
-            if g.get("group_id") == group_id:
+            if g.get("group_id") == group_id and (
+                not group_dataset or (g.get("dataset_id") or "") == group_dataset
+            ):
                 next_index = (i + 1) % len(groups)
                 break
 
