@@ -170,6 +170,12 @@ F1 0.8858 / exact 0.5946; its 3 set labels are reported separately and not
 gated); `us_seattle_sidewalks` (20 mapped pair groups, all panel-labeled) has no
 gate block configured yet.
 
+**Allowlist lockstep.** A `[gate.<dataset>]` key must also exist in
+crosswalk's `resolver_prune_overrides` allowlist (`src/crosswalk/config.py`) —
+a gated dataset absent from that allowlist is never pruned, so the gate would
+silently measure an unpruned row set again (the #372 failure mode);
+`tests/unit/test_gate_allowlist_lockstep.py` pins this invariant in CI.
+
 **Adding / updating a floor.** Re-measure the baseline against fresh output
 (`mbench run crosswalk <dataset>` prints the stitch block), then set
 `f1_filtered_floor` / `exact_filtered_floor` to baseline − margin (LOO-gate
