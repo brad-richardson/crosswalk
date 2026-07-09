@@ -1,17 +1,23 @@
-"""Regression test for `crosswalk agent test-batch` MultiLineString handling.
+"""Regression tests for agent batch commands' MultiLineString handling.
 
 Every other geometry-load site flattens MultiLineStrings to LineStrings once at
 the load boundary via ``filter_to_linestrings`` (see #360, commit 7df47f3):
-never drop, never flatten per-feature deep in consumers. The raw-parquet load
-in ``generate_agent_test_batch`` (src/crosswalk/cli/agent.py) skipped that
-boundary call, so a target row whose raw geometry is still a MultiLineString
-(post-#360 these are matchable/labelable, no longer dropped at ingest) would
-reach ``SampledCandidate.target_geometry`` unflattened.
+never drop, never flatten per-feature deep in consumers. Two agent-batch load
+sites skipped that boundary call, so a row whose raw geometry is still a
+MultiLineString (post-#360 these are matchable/labelable, no longer dropped at
+ingest) would flow downstream unflattened:
 
-This test builds a small on-disk dataset with a MultiLineString target row,
-drives the actual `agent test-batch` CLI command against it, and asserts the
-geometry that reaches the renderer boundary (``write_candidate_package``) has
-already been flattened to a LineString.
+- the raw-parquet loads in ``generate_agent_test_batch``
+  (src/crosswalk/cli/agent.py, the `agent test-batch` command)
+- ``load_geodataframe`` in src/crosswalk/agent_labeling/sampler.py, through
+  which ``sample_candidates`` loads both reference and target for the
+  `agent batch` command
+
+The first test builds a small on-disk dataset with a MultiLineString target
+row, drives the actual `agent test-batch` CLI command against it, and asserts
+the geometry that reaches the renderer boundary (``write_candidate_package``)
+has already been flattened to a LineString. The second exercises the sampler
+load path directly.
 """
 
 import geopandas as gpd
@@ -20,6 +26,7 @@ from shapely.geometry import LineString, MultiLineString
 from typer.testing import CliRunner
 
 import crosswalk.agent_labeling.context_generator as context_generator_module
+from crosswalk.agent_labeling.sampler import load_geodataframe
 from crosswalk.cli import app
 
 runner = CliRunner()
@@ -117,3 +124,36 @@ def test_agent_test_batch_flattens_multilinestring_target_geometry(tmp_path, mon
     candidate = captured["candidate"]
     assert candidate.target_geometry.geom_type == "LineString"
     assert not isinstance(candidate.target_geometry, MultiLineString)
+
+
+def test_sampler_load_geodataframe_flattens_multilinestrings(tmp_path):
+    """The `agent batch` sampler load path must flatten MultiLineStrings too.
+
+    ``sample_candidates`` loads both reference and target through
+    ``sampler.load_geodataframe``; this is the load boundary for the
+    `crosswalk agent batch` command, so it must apply the same
+    ``filter_to_linestrings`` normalization as every other load site.
+    """
+    mls = MultiLineString(
+        [
+            [(-71.06, 42.36), (-71.055, 42.36)],
+            [(-71.055, 42.36), (-71.05, 42.36)],
+        ]
+    )
+    path = tmp_path / "test_dataset.parquet"
+    gpd.GeoDataFrame(
+        {
+            "id": ["target1", "target2"],
+            "geometry": [
+                mls,
+                LineString([(-71.06, 42.37), (-71.05, 42.37)]),
+            ],
+        },
+        crs="EPSG:4326",
+    ).to_parquet(path)
+
+    gdf = load_geodataframe(path)
+
+    # Both rows survive (flattened, not dropped) and are plain LineStrings.
+    assert len(gdf) == 2
+    assert set(gdf.geometry.geom_type) == {"LineString"}
