@@ -216,6 +216,26 @@ def test_rejected_edges_deduped_against_edges():
     assert len(df) == 2  # A, B — not 3
 
 
+def test_review_reason_key_is_tolerated_and_round_trips_group_unchanged():
+    """The additive ``review_reason`` sidecar key (optimizer demotion reasons,
+    see runner.py::_export_groups_sidecar) is not part of this module's
+    declared edge schema. It must be silently ignored -- present on the raw
+    edge dict but absent from ``_edge_row``'s output -- and every existing
+    extracted field (``keep``, ``selected``, row count) must be byte-identical
+    to the same group without the key."""
+    grp_plain = _group("g1", [_edge("A", "T", 0.99), _edge("B", "T", 0.4)])
+    grp_demoted = _group(
+        "g1", [_edge("A", "T", 0.99), _edge("B", "T", 0.4, review_reason="parallel_sibling")]
+    )
+    human = _labels([_label_row("hg1", [("A", "T")])])
+
+    df_plain = build_edge_table([grp_plain], human, "ds")
+    df_demoted = build_edge_table([grp_demoted], human, "ds")
+
+    pd.testing.assert_frame_equal(df_plain, df_demoted)
+    assert "review_reason" not in df_demoted.columns
+
+
 # --- #344 candidate_edges (design §3 stage-1 consumer) ----------------------
 
 
