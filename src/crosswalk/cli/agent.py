@@ -1228,14 +1228,17 @@ def run_stitch_panel(
         "--panel",
         help="Named panel config: 'default'/'v2' (3 voters: claude+codex+agy), "
         "'v3-candidate' (adds a 4th opencode/Qwen3-VL voter — OFF by default, "
-        "opt-in only; does not affect production waves), or 'no-agy' "
+        "opt-in only; does not affect production waves), 'no-agy' "
         "(claude+codex+opencode quota-outage fallback; its labels are refused by "
-        "stitch-export without --allow-nonstandard-panel).",
+        "stitch-export without --allow-nonstandard-panel), or 'v4-candidate' "
+        "(claude+codex+opencode/Kimi K2.6 — third-voter replacement candidate; "
+        "same export refusal until blessed as v4; use --timeout 480).",
     ),
     opencode_model: str = typer.Option(
-        "openrouter/qwen/qwen3-vl-235b-a22b-instruct",
+        None,
         "--opencode-model",
-        help="Model string for the opencode voter (used by --panel v3-candidate and no-agy).",
+        help="Override the opencode voter's model string (default: the named panel's "
+        "spec — Qwen3-VL for v3-candidate/no-agy, Kimi K2.6 for v4-candidate).",
     ),
     resume: bool = typer.Option(
         False,
@@ -1279,7 +1282,11 @@ def run_stitch_panel(
         "claude": {"model": claude_model, "effort": claude_effort},
         "codex": {"model": codex_model, "effort": codex_effort},
         "agy": {"model": agy_model},
-        "opencode": {"model": opencode_model},
+        # Only override opencode when the flag was passed: unlike the other
+        # providers (one fixed model each), opencode's model comes from the
+        # NAMED panel spec (Qwen3-VL vs Kimi K2.6), and an unconditional typer
+        # default would silently clobber it for every composition.
+        **({"opencode": {"model": opencode_model}} if opencode_model else {}),
     }
     panel = [
         ProviderSpec(
