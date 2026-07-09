@@ -487,6 +487,7 @@ def _find_contiguous_id_groups(
 def _create_group_results(
     results: list[MatchResult],
     match_type: MatchType,
+    review_pairs: set[tuple[Any, Any]] | None = None,
 ) -> list[MatchResult]:
     """Tag MatchResult objects with group metadata.
 
@@ -499,12 +500,20 @@ def _create_group_results(
     Args:
         results: MatchResult objects belonging to this group
         match_type: MatchType value (ONE_TO_N, N_TO_ONE, M_TO_N)
+        review_pairs: Optional set of ``(ref_id, target_id)`` pairs whose
+            decision is forced to REVIEW regardless of the group decision (the
+            #367 anti-crossing demote-to-REVIEW; see
+            ``_contested_small_span_review_pairs``). These edges stay in the
+            group — only their decision is demoted — and carry the
+            ``PARALLEL_SIBLING_REVIEW_FLAG`` feature.
 
     Returns:
         List of tagged MatchResult objects (same objects, mutated features)
     """
     if not results:
         return []
+
+    review_pairs = review_pairs or set()
 
     avg_confidence = np.mean([r.confidence for r in results])
     group_decision = (
@@ -519,22 +528,27 @@ def _create_group_results(
 
     tagged: list[MatchResult] = []
     for r in results:
+        demoted = (r.ref_id, r.target_id) in review_pairs
+        decision = MatchDecision.REVIEW if demoted else group_decision
+        features = {
+            **r.features,
+            "match_type": match_type,
+            "group_id": group_id,
+            "group_size": len(results),
+            "group_ref_count": len(ref_ids),
+            "group_target_count": len(target_ids),
+        }
+        if demoted:
+            features[PARALLEL_SIBLING_REVIEW_FLAG] = 1.0
         # Create new MatchResult preserving all original fields
         tagged.append(
             MatchResult(
                 ref_id=r.ref_id,
                 target_id=r.target_id,
-                decision=group_decision,
+                decision=decision,
                 confidence=r.confidence,
                 score_breakdown=r.score_breakdown,
-                features={
-                    **r.features,
-                    "match_type": match_type,
-                    "group_id": group_id,
-                    "group_size": len(results),
-                    "group_ref_count": len(ref_ids),
-                    "group_target_count": len(target_ids),
-                },
+                features=features,
                 ref_idx=r.ref_idx,
                 target_idx=r.target_idx,
                 gers_start_frac=r.gers_start_frac,
@@ -763,6 +777,117 @@ def _merge_singletons_by_alignment(
     return merged, remaining
 
 
+# Anti-crossing / mutual-exclusion guard for M:N groups (#367 "Mode A —
+# parallel-sibling crossing swap"): two near-parallel refs are each plausible
+# for two nearby targets, and a small segmentation-boundary-mismatch edge
+# (covering only a sliver of BOTH its ref and its target) can still score
+# confidently (~0.97-0.99) and survive the confidence-drop prune, over-merging
+# the group with a spurious extra MATCH edge. See
+# ``_contested_small_span_review_pairs``.
+#
+# Disposition is DEMOTE-TO-REVIEW, not drop: a flagged stub stays in the group
+# (retained as a candidate edge, never silently removed) but its decision is
+# demoted from MATCH to REVIEW — mirroring ``_validate_assignment_coverage`` —
+# so it surfaces in /stitching-review for human adjudication instead of being
+# auto-accepted into the production MATCH set. This keeps the guard safe on the
+# genuine-but-contested N:1 fans it cannot geometrically distinguish from a true
+# over-merge: those keep their real edge (as REVIEW), never losing coverage.
+#
+# The trigger is deliberately narrower than loosening ``SLIVER_SPAN_THRESHOLD``
+# (config.py documents that as rejected: it risks dropping legitimate short
+# matches). The span test only fires for edges that are ALSO contested — a rival
+# edge sharing the same ref or target scores strictly higher — so an edge with no
+# competing claim (the case the existing sliver / confidence machinery already
+# governs) is never touched. And using max(ref_span, tgt_span) rather than min
+# keeps every genuine asymmetric-coverage match (one side's span near 1.0 — e.g.
+# a short ref fully consumed by a long target) exempt, no matter how small its
+# OTHER side's span is.
+MN_CONTESTED_EDGE_MAX_SPAN = 0.3
+
+# Feature-dict flag set on a MatchResult whose decision this guard demoted to
+# REVIEW, so downstream (review UI / audit) can identify the reason.
+PARALLEL_SIBLING_REVIEW_FLAG = "parallel_sibling_stub_review"
+
+
+def _edge_span_fracs(r: MatchResult) -> tuple[float, float]:
+    """Alignment span fractions (ref_span, tgt_span) for a MatchResult.
+
+    Mirrors ``matching.sliver.edge_span_fracs`` (which reads the same fractions
+    off a serialized edge dict) for the in-memory ``MatchResult`` object.
+    Missing fractions default to a full [0, 1] span so an unmeasurable edge is
+    never mistaken for a small/contested one.
+    """
+    ref_span = 1.0
+    if r.gers_start_frac is not None and r.gers_end_frac is not None:
+        ref_span = abs(r.gers_end_frac - r.gers_start_frac)
+    tgt_span = 1.0
+    if r.local_start_frac is not None and r.local_end_frac is not None:
+        tgt_span = abs(r.local_end_frac - r.local_start_frac)
+    return ref_span, tgt_span
+
+
+def _contested_small_span_review_pairs(
+    component_results: list[MatchResult],
+) -> set[tuple[Any, Any]]:
+    """Identify contested small-span M:N edges to demote to REVIEW (module note above).
+
+    An edge is flagged when BOTH:
+      - it is small on both alignment axes: ``max(ref_span, tgt_span) <
+        MN_CONTESTED_EDGE_MAX_SPAN``; and
+      - it is contested: another edge sharing its ``ref_id`` OR its
+        ``target_id`` has strictly higher confidence.
+
+    Orphan-guard: a node (ref or target) is never left with zero MATCH edges. If
+    demoting a flagged candidate would orphan its ref or its target (leave it
+    with no un-flagged edge), the highest-confidence orphaning candidate is kept
+    as MATCH instead (processed highest-confidence first, so at most one edge is
+    rescued per orphaned node).
+
+    Returns the set of ``(ref_id, target_id)`` pairs to demote to REVIEW. The
+    edges themselves are NOT removed — the caller keeps them in the group and
+    flips only their decision.
+    """
+    best_by_ref: dict[Any, float] = {}
+    best_by_target: dict[Any, float] = {}
+    for r in component_results:
+        if r.confidence > best_by_ref.get(r.ref_id, -1.0):
+            best_by_ref[r.ref_id] = r.confidence
+        if r.confidence > best_by_target.get(r.target_id, -1.0):
+            best_by_target[r.target_id] = r.confidence
+
+    kept: list[MatchResult] = []
+    candidate_demote: list[MatchResult] = []
+    for r in component_results:
+        ref_span, tgt_span = _edge_span_fracs(r)
+        if max(ref_span, tgt_span) >= MN_CONTESTED_EDGE_MAX_SPAN:
+            kept.append(r)
+            continue
+        contested = (
+            best_by_ref[r.ref_id] > r.confidence or best_by_target[r.target_id] > r.confidence
+        )
+        if contested:
+            candidate_demote.append(r)
+        else:
+            kept.append(r)
+
+    if not candidate_demote:
+        return set()
+
+    kept_refs = {r.ref_id for r in kept}
+    kept_targets = {r.target_id for r in kept}
+    demote: set[tuple[Any, Any]] = set()
+    for r in sorted(candidate_demote, key=lambda r: -r.confidence):
+        if r.ref_id not in kept_refs or r.target_id not in kept_targets:
+            # Rescue: demoting this would leave its ref or target with no MATCH
+            # edge — keep it MATCH instead.
+            kept_refs.add(r.ref_id)
+            kept_targets.add(r.target_id)
+        else:
+            demote.add((r.ref_id, r.target_id))
+
+    return demote
+
+
 def _classify_and_resolve_component(
     component_results: list[MatchResult],
     ref_geoms: dict[Any, LineString],
@@ -913,8 +1038,13 @@ def _classify_and_resolve_component(
     targets_fully_contiguous = len(target_groups) == 1 and len(target_groups[0]) == n_targets
 
     if refs_fully_contiguous and targets_fully_contiguous:
-        # Both sides fully contiguous → M:N group
-        return _create_group_results(component_results, MatchType.M_TO_N), []
+        # Both sides fully contiguous → M:N group. Anti-crossing guard (#367
+        # Mode A): demote contested small-span edges to REVIEW so a
+        # confident-but-spurious boundary-mismatch edge doesn't over-merge the
+        # MATCH set — the edge stays in the group for human adjudication (see
+        # ``_contested_small_span_review_pairs``).
+        review_pairs = _contested_small_span_review_pairs(component_results)
+        return _create_group_results(component_results, MatchType.M_TO_N, review_pairs), []
 
     # Decompose into sub-components by matching contiguity groups on each side.
     # For each (ref_group, target_group) pair, collect connecting edges.
@@ -952,8 +1082,13 @@ def _classify_and_resolve_component(
                 # N:1 sub-component
                 group_results.extend(_create_group_results(sub_edges, MatchType.N_TO_ONE))
             else:
-                # Smaller M:N sub-component
-                group_results.extend(_create_group_results(sub_edges, MatchType.M_TO_N))
+                # Smaller M:N sub-component. Same anti-crossing guard as the
+                # single-corridor M:N case above (#367 Mode A): demote contested
+                # small-span edges to REVIEW, keeping them in the group.
+                sub_review_pairs = _contested_small_span_review_pairs(sub_edges)
+                group_results.extend(
+                    _create_group_results(sub_edges, MatchType.M_TO_N, sub_review_pairs)
+                )
 
             for e in sub_edges:
                 used_edges.add((e.ref_id, e.target_id))
