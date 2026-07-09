@@ -1130,9 +1130,7 @@ def test_recover_labeled_groups_tie_breaks_to_smallest_group_id():
         {"group_id": "g_zzz", "edges": [shared_edge]},
         {"group_id": "g_aaa", "edges": [shared_edge]},
     ]
-    human_df = pd.DataFrame(
-        [{"group_id": "h_tie", "selected_edges": json.dumps([shared_edge])}]
-    )
+    human_df = pd.DataFrame([{"group_id": "h_tie", "selected_edges": json.dumps([shared_edge])}])
     rec = recover_labeled_groups(groups, human_df)
     # single edge fully contained in the chosen group -> clean recovery
     assert ("h_tie", "g_aaa") in rec["clean"]
