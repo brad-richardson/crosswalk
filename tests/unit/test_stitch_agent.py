@@ -1857,6 +1857,59 @@ def test_run_batch_timeout_breaker_halts_after_consecutive(tmp_path, monkeypatch
     assert set(votes["group_id"]) == {"g1", "g2"}
 
 
+def test_run_batch_cli_internal_timeout_abstains_trip_breaker(tmp_path, monkeypatch):
+    """BUG 1 regression: agy's CLI-INTERNAL response timeout must trip the breaker.
+
+    A network-blackholed agy fails every group with its OWN clean timeout — the
+    CLI exits nonzero and _check_exit raises GroupScopedProviderError(kind=TIMEOUT)
+    — NOT a subprocess SIGKILL. The breaker previously string-matched only
+    "timeout after" (the subprocess flavor) and reset on this flavor, so it never
+    tripped for the provider it was built for (the #334 silent-degradation mode).
+    Now it counts AbstainReason.TIMEOUT and halts after N consecutive.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    for gid in ("g1", "g2", "g3", "g4"):
+        _write_min_pack(batch_dir, gid)
+
+    def always_cli_timeout(prompt, group_dir, letters, model, timeout, effort=""):
+        # Same exception _check_exit raises for agy's "timeout waiting for response".
+        raise sr.GroupScopedProviderError(
+            "agy CLI-internal response timeout", kind=sr.AbstainReason.TIMEOUT
+        )
+
+    panel = _breaker_panel_and_invokers(monkeypatch, always_cli_timeout)
+    with pytest.raises(sr.ProviderInvocationError, match="consecutive"):
+        sr.run_batch(batch_dir, panel=panel)
+    # Completed groups flushed before the halt -> resumable (breaker trips on g3).
+    votes = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
+    assert set(votes["group_id"]) == {"g1", "g2"}
+
+
+def test_run_batch_cli_internal_timeout_breaker_resets_on_success(tmp_path, monkeypatch):
+    """A success between CLI-internal timeouts resets the count — no false halt."""
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    for gid in ("g1", "g2", "g3", "g4", "g5"):
+        _write_min_pack(batch_dir, gid)
+
+    calls = {"n": 0}
+
+    def intermittent(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        if calls["n"] == 3:  # succeed on the 3rd group only, breaking the streak
+            return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+        raise sr.GroupScopedProviderError(
+            "agy CLI-internal response timeout", kind=sr.AbstainReason.TIMEOUT
+        )
+
+    panel = _breaker_panel_and_invokers(monkeypatch, intermittent)
+    votes_df, cons_df = sr.run_batch(batch_dir, panel=panel)  # must NOT raise
+    assert set(cons_df["group_id"]) == {"g1", "g2", "g3", "g4", "g5"}
+    agy = votes_df[votes_df["provider"] == "agy"]
+    assert (agy["choice"] == "ABSTAIN").sum() == 4
+
+
 def test_run_batch_timeout_breaker_resets_on_success(tmp_path, monkeypatch):
     """A successful vote resets the consecutive-timeout count — no false halt."""
     batch_dir = tmp_path / "batch"
@@ -2143,8 +2196,34 @@ def test_timeout_abstains_immediately_without_retry(monkeypatch):
     vote = _attempt(always_timeout, budget=300.0)
     assert vote.choice == "ABSTAIN"
     assert "timeout after" in vote.error
+    assert vote.abstain_reason == sr.AbstainReason.TIMEOUT  # counts toward the breaker
     assert calls["n"] == 1  # single attempt, no retry
     assert clock.sleeps == []  # and no backoff sleeps
+
+
+def test_cli_internal_timeout_abstains_and_is_breaker_countable(monkeypatch):
+    """BUG 1: agy's CLI-internal response timeout abstains immediately AND is marked
+    AbstainReason.TIMEOUT so the run_batch breaker counts it (not a reset).
+
+    This is the path a network-blackholed agy takes: its own --print-timeout fires
+    first, the CLI exits nonzero, and _check_exit raises GroupScopedProviderError
+    with kind=TIMEOUT — distinct from a subprocess SIGKILL but the same fate.
+    """
+    clock = _install_fake_clock(monkeypatch)
+    calls = {"n": 0}
+
+    def cli_timeout(*_a, **_k):
+        calls["n"] += 1
+        raise sr.GroupScopedProviderError(
+            "agy CLI-internal response timeout", kind=sr.AbstainReason.TIMEOUT
+        )
+
+    vote = _attempt(cli_timeout, budget=300.0)
+    assert vote.choice == "ABSTAIN"
+    assert vote.abstain_reason == sr.AbstainReason.TIMEOUT
+    assert "response timeout" in vote.error
+    assert calls["n"] == 1  # deterministic per group -> single attempt, no retry
+    assert clock.sleeps == []  # no backoff
 
 
 def test_context_overflow_abstains_and_continues(monkeypatch):
@@ -2161,6 +2240,8 @@ def test_context_overflow_abstains_and_continues(monkeypatch):
     vote = _attempt(overflowing, budget=300.0)
     assert vote.choice == "ABSTAIN"
     assert "context overflow" in vote.error
+    # Overflow resets (does NOT count toward) the timeout breaker.
+    assert vote.abstain_reason == sr.AbstainReason.CONTEXT_OVERFLOW
     assert calls["n"] == 1
     assert clock.sleeps == []
 
@@ -2178,17 +2259,25 @@ def test_check_exit_classifies_context_overflow_beyond_snippet():
         stdout="",
         stderr=banner + "ERROR: Codex ran out of room in the model's context window.",
     )
-    with pytest.raises(sr.GroupScopedProviderError, match="context overflow"):
+    with pytest.raises(sr.GroupScopedProviderError, match="context overflow") as exc_info:
         sr._check_exit("codex", result)
+    # kind rides onto the abstain so the breaker can distinguish it from a timeout.
+    assert exc_info.value.kind == sr.AbstainReason.CONTEXT_OVERFLOW
 
 
 def test_check_exit_classifies_cli_internal_timeout():
-    """agy's own 'timeout waiting for response' is group-scoped, not provider-down."""
+    """agy's own 'timeout waiting for response' is group-scoped, not provider-down.
+
+    It carries kind=TIMEOUT so run_batch's consecutive-timeout breaker COUNTS it
+    (BUG 1): a network-blackholed agy fails every group this way, and resetting on
+    it would leave the breaker unreachable for the provider it was built for.
+    """
     result = subprocess.CompletedProcess(
         args=["agy"], returncode=1, stdout="", stderr="Error: timeout waiting for response"
     )
-    with pytest.raises(sr.GroupScopedProviderError, match="response timeout"):
+    with pytest.raises(sr.GroupScopedProviderError, match="response timeout") as exc_info:
         sr._check_exit("agy", result)
+    assert exc_info.value.kind == sr.AbstainReason.TIMEOUT
 
 
 def test_check_exit_generic_failure_still_runtime_error():
@@ -2212,9 +2301,33 @@ def test_invoke_agy_print_timeout_derived_from_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(sr.subprocess, "run", fake_run)
     sr.invoke_agy("PROMPT", tmp_path, ["A"], "Gemini 3.5 Flash (Medium)", timeout=240)
     assert "--print-timeout=225s" in captured["cmd"]
-    # Floor: never below 30s even with a tiny caller timeout.
+    # Small caller timeout: derived timer stays STRICTLY BELOW the subprocess
+    # deadline (was max(30, timeout-15), which inverted to 30s >= a 20s deadline
+    # so the SIGKILL fired first and agy's clean-error path never engaged).
     sr.invoke_agy("PROMPT", tmp_path, ["A"], "Gemini 3.5 Flash (Medium)", timeout=20)
-    assert "--print-timeout=30s" in captured["cmd"]
+    assert "--print-timeout=10s" in captured["cmd"]
+
+
+@pytest.mark.parametrize("timeout", [30, 45, 60, 240])
+def test_agy_print_timeout_strictly_below_subprocess_timeout(timeout):
+    """BUG 2 regression: the derived agy timer must fire before the subprocess kill.
+
+    If the internal timer >= the subprocess timeout, SIGKILL wins and agy never
+    emits its clean 'timeout waiting for response' — the whole point of deriving
+    the timer (#343). The old max(30, timeout-15) tied at 30s for timeout=30.
+    """
+    derived = sr._agy_print_timeout(timeout)
+    assert derived < timeout, f"{derived} not < {timeout}"
+    assert derived >= 1
+    # Production 240s is unchanged from the original 15s-margin intent.
+    if timeout == 240:
+        assert derived == 225
+
+
+def test_agy_print_timeout_tiny_caller_timeout_still_strictly_below():
+    """Even absurdly small caller timeouts keep a strictly-less internal timer."""
+    for t in (1, 5, 11, 15, 25):
+        assert sr._agy_print_timeout(t) < t
 
 
 def test_invocation_error_recovers_within_budget(monkeypatch):
@@ -2256,6 +2369,9 @@ def test_parse_error_still_abstains_not_hard_fail():
     vote = _attempt(garbage, retries=1)
     assert vote.choice == "ABSTAIN"
     assert "parse/validation" in vote.error
+    # A parse failure is a property of the response, not provider health -> resets
+    # (does NOT count toward) the timeout breaker.
+    assert vote.abstain_reason == sr.AbstainReason.PARSE
 
 
 def test_hard_fail_propagates_through_run_provider_on_group(monkeypatch):

@@ -21,6 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 
 import pandas as pd
@@ -93,6 +94,32 @@ def get_panel(name: str | None) -> list[ProviderSpec]:
     return PANELS.get(name, DEFAULT_PANEL)
 
 
+class AbstainReason(StrEnum):
+    """Why a provider produced an ABSTAIN vote — drives the run_batch circuit breaker.
+
+    ``TIMEOUT`` deliberately covers BOTH timeout flavors, which are the SAME
+    failure (no answer before the deadline) surfaced two different ways:
+
+    * a subprocess ``TimeoutExpired`` — the caller's ``timeout`` SIGKILLs the CLI; and
+    * agy's CLI-internal response timeout (#343) — agy's own ``--print-timeout``,
+      derived as strictly less than the subprocess timeout so it fires FIRST, and
+      the CLI then exits nonzero with a clean ``timeout waiting for response``
+      that ``_check_exit`` classifies as a :class:`GroupScopedProviderError`.
+
+    Both MUST count toward the consecutive-timeout breaker: a provider network-
+    blackholed mid-wave fails every group with the CLI-internal flavor, so if that
+    flavor reset the counter the breaker (built for exactly this #334 silent-
+    degradation mode) would never trip. Every OTHER abstain reason (context
+    overflow, parse/validation) RESETS the breaker — those are a property of the
+    group, not of provider health.
+    """
+
+    UNSET = ""
+    TIMEOUT = "timeout"
+    CONTEXT_OVERFLOW = "context_overflow"
+    PARSE = "parse"
+
+
 @dataclass
 class Vote:
     """One provider's vote on one group."""
@@ -108,6 +135,10 @@ class Vote:
     timestamp: str = ""
     raw: str = ""
     error: str = ""
+    # Structured abstain classification (runtime-only; not serialized to votes.csv).
+    # The circuit breaker in run_batch keys on this instead of string-matching the
+    # free-text ``error`` — see :class:`AbstainReason`.
+    abstain_reason: AbstainReason = AbstainReason.UNSET
     pack_feedback: str = ""  # diagnostic self-report JSON (wave-local; usually "")
 
 
@@ -309,8 +340,12 @@ _CONTEXT_OVERFLOW_MARKERS = (
 )
 
 #: CLI-internal response-timeout messages (the CLI exits nonzero after its own
-#: timer fires, e.g. agy's ``Error: timeout waiting for response``). Same fate
-#: as a subprocess timeout: abstain on this group, keep the run going.
+#: timer fires, e.g. agy's ``Error: timeout waiting for response``). Same fate as
+#: a subprocess timeout in BOTH senses: abstain on this group AND count toward the
+#: consecutive-timeout breaker (they are the same "no answer in time" failure —
+#: agy's ``--print-timeout`` is derived to fire before the subprocess kill, #343).
+#: Classified as ``GroupScopedProviderError(kind=AbstainReason.TIMEOUT)`` so the
+#: breaker in ``run_batch`` counts it rather than resetting on it.
 _CLI_TIMEOUT_MARKERS = ("timeout waiting for response",)
 
 #: Consecutive timeout-abstentions from ONE provider before ``run_batch``
@@ -328,26 +363,41 @@ class GroupScopedProviderError(RuntimeError):
     halting the run would let one monster group kill a whole wave — instead the
     runner records an ABSTAIN vote (with the error trail) and continues; the
     group then routes to human review via the abstention/below-quorum path.
+
+    ``kind`` carries the structured abstain classification (see
+    :class:`AbstainReason`) so the caller can stamp it on the abstain vote without
+    re-parsing the message. It defaults to ``CONTEXT_OVERFLOW`` (breaker-resetting):
+    only a CLI-internal response timeout, raised explicitly with
+    ``kind=AbstainReason.TIMEOUT``, counts toward the consecutive-timeout breaker.
     """
+
+    def __init__(self, message: str, *, kind: AbstainReason = AbstainReason.CONTEXT_OVERFLOW):
+        super().__init__(message)
+        self.kind = kind
 
 
 def _check_exit(provider: str, result: subprocess.CompletedProcess) -> None:
     """Raise on non-zero CLI exit so failures don't masquerade as parse errors.
 
     Group-scoped failures (context overflow, CLI-internal response timeout) are
-    classified from the full output and raised as :class:`GroupScopedProviderError`;
-    everything else raises ``RuntimeError`` with truncated stderr, which the
-    runner treats as potential provider-down (backoff, then halt).
+    classified from the full output and raised as :class:`GroupScopedProviderError`
+    with the matching :class:`AbstainReason` ``kind``; everything else raises
+    ``RuntimeError`` with truncated stderr, which the runner treats as potential
+    provider-down (backoff, then halt).
     """
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         combined = f"{result.stdout or ''}\n{stderr}".lower()
         if any(m in combined for m in _CONTEXT_OVERFLOW_MARKERS):
             raise GroupScopedProviderError(
-                f"{provider} context overflow: prompt exceeds the model's context window"
+                f"{provider} context overflow: prompt exceeds the model's context window",
+                kind=AbstainReason.CONTEXT_OVERFLOW,
             )
         if any(m in combined for m in _CLI_TIMEOUT_MARKERS):
-            raise GroupScopedProviderError(f"{provider} CLI-internal response timeout")
+            raise GroupScopedProviderError(
+                f"{provider} CLI-internal response timeout",
+                kind=AbstainReason.TIMEOUT,
+            )
         raise RuntimeError(f"{provider} exited with code {result.returncode}: {stderr[:500]}")
 
 
@@ -455,6 +505,42 @@ def invoke_codex(
     return result.stdout
 
 
+# agy's CLI-internal response timer (``--print-timeout``) must fire strictly
+# BEFORE the subprocess SIGKILL so agy exits with its own clean "timeout waiting
+# for response" (a group-scoped abstain, #343) rather than being killed — a kill
+# surfaces as a spurious provider-down. We aim to LEAD the subprocess deadline by
+# this margin.
+_AGY_TIMEOUT_MARGIN_S = 15
+# Floor for the normal range (agy needs a few seconds to read the pack and answer).
+# The strictly-less-than guarantee still wins for tiny caller timeouts, capping
+# the derived timer below this floor when the floor itself would exceed the deadline.
+_AGY_TIMEOUT_FLOOR_S = 10
+
+
+def _agy_print_timeout(timeout: int) -> int:
+    """Derive agy's ``--print-timeout`` (seconds) from the caller's subprocess timeout.
+
+    The internal timer MUST be strictly less than ``timeout`` so agy fails first
+    with a clean error (classified group-scoped and abstained, and counted by the
+    consecutive-timeout breaker) rather than being SIGKILLed as a spurious
+    provider-down. We lead the deadline by ``_AGY_TIMEOUT_MARGIN_S``, floored at
+    ``_AGY_TIMEOUT_FLOOR_S`` for the normal range; the final ``min(..., timeout - 1)``
+    guarantees strictly-less-than for ALL caller timeouts.
+
+    Small-timeout behavior: at/under ~25s the 15s margin collapses to the floor,
+    and under ~11s even the floor is capped down to ``timeout - 1`` — the clean-
+    error window shrinks to seconds and the subprocess kill is the effective
+    backstop. Production runs at 240s (-> 225s), unaffected.
+
+    (Before this fix the derivation was ``max(30, timeout - 15)``, which INVERTED
+    for caller timeouts <= 30: the internal timer met or exceeded the subprocess
+    deadline, so the kill always won first and the clean-error design — the whole
+    point of deriving the timer — never engaged.)
+    """
+    derived = max(timeout - _AGY_TIMEOUT_MARGIN_S, _AGY_TIMEOUT_FLOOR_S)
+    return min(derived, timeout - 1)
+
+
 def invoke_agy(
     prompt: str,
     group_dir: Path,
@@ -482,11 +568,11 @@ def invoke_agy(
     try:
         prompt_file = work / "panel_prompt.txt"
         prompt_file.write_text(prompt)
-        # agy's internal response timer must be derived from the caller's timeout
-        # (with margin so agy fails with its own clean error before the subprocess
-        # kill): the old hardcoded 2m silently starved large groups that Gemini
-        # needs >120s to answer, surfacing as a spurious "provider down".
-        print_timeout_s = max(30, timeout - 15)
+        # agy's internal response timer is derived from the caller's timeout so it
+        # fires with a clean error strictly BEFORE the subprocess kill (see
+        # _agy_print_timeout): the old hardcoded 2m silently starved large groups
+        # that Gemini needs >120s to answer, surfacing as a spurious "provider down".
+        print_timeout_s = _agy_print_timeout(timeout)
         cmd = [
             "agy",
             f"--print-timeout={print_timeout_s}s",
@@ -710,7 +796,7 @@ def _attempt_provider(
       times, then ABSTAIN. A single bad response should not kill a whole sweep.
     """
 
-    def _abstain(error: str, raw: str = "") -> Vote:
+    def _abstain(error: str, raw: str = "", reason: AbstainReason = AbstainReason.UNSET) -> Vote:
         return Vote(
             group_id=group_id,
             provider=provider.name,
@@ -723,6 +809,7 @@ def _attempt_provider(
             timestamp=datetime.now(UTC).isoformat(),
             raw=raw[:2000],
             error=error,
+            abstain_reason=reason,
         )
 
     last_parse_err = ""
@@ -736,21 +823,25 @@ def _attempt_provider(
             raw = invoker(prompt, group_dir, letters, provider.model, timeout, provider.effort)
         except GroupScopedProviderError as e:
             # Deterministic for this (group, provider): same prompt, same fate.
-            # Abstain loudly and let the run continue.
+            # Abstain loudly and let the run continue. The exception's ``kind``
+            # (context overflow vs CLI-internal timeout) rides onto the abstain so
+            # run_batch's breaker counts CLI-internal timeouts but not overflows.
             logger.warning(
                 f"{provider.name} group {group_id}: {e}; abstaining (group-scoped, "
                 f"not retryable) and continuing the run"
             )
-            return _abstain(f"group-scoped: {e}")
+            return _abstain(f"group-scoped: {e}", reason=e.kind)
         except subprocess.TimeoutExpired:
             # Retrying a timeout just burns another full timeout window, and a
             # group whose prompt is too slow for this provider is a property of
-            # the group, not provider health -> abstain, don't halt the wave.
+            # the group, not provider health -> abstain, don't halt the wave. The
+            # consecutive-timeout breaker in run_batch still catches a provider
+            # that times out on EVERY group (via AbstainReason.TIMEOUT).
             logger.warning(
                 f"{provider.name} group {group_id}: timeout after {timeout}s; "
                 f"abstaining and continuing the run"
             )
-            return _abstain(f"timeout after {timeout}s")
+            return _abstain(f"timeout after {timeout}s", reason=AbstainReason.TIMEOUT)
         except (subprocess.SubprocessError, OSError, RuntimeError) as e:
             # Expected external failure (nonzero exit incl. quota/auth, missing
             # binary, network). Unexpected exception types are NOT caught
@@ -828,8 +919,9 @@ def _attempt_provider(
             if parse_attempts > retries:
                 break  # exhausted parse retries -> abstain (keep the panel going)
 
-    # Parse retries exhausted -> abstention.
-    return _abstain(last_parse_err, raw=last_raw)
+    # Parse retries exhausted -> abstention. Parse failures are a property of the
+    # response, not provider health, so this reason resets the timeout breaker.
+    return _abstain(last_parse_err, raw=last_raw, reason=AbstainReason.PARSE)
 
 
 def run_panel_on_group(
@@ -1249,9 +1341,15 @@ def run_batch(
     # provider-down halt. Per-group timeout abstains keep a wave alive when one
     # oversized group is slow; a hang on EVERY group is provider health, and
     # letting it degrade the panel silently is exactly what #334 forbids.
-    # Context-overflow abstains do NOT count: overflow is a property of the
-    # group's prompt size, and several monsters in a row say nothing about the
-    # provider. Any successful vote (or non-timeout abstain) resets the count.
+    # BOTH timeout flavors count (AbstainReason.TIMEOUT): the subprocess-kill
+    # timeout AND agy's CLI-internal response timeout (#343). The latter is the
+    # common case for a network-blackholed agy — its own --print-timeout fires
+    # first with a clean error — so counting only the subprocess flavor would
+    # leave the breaker unreachable for the very provider it was built for.
+    # Context-overflow and parse abstains do NOT count: overflow is a property of
+    # the group's prompt size and parse failures a property of the response, and
+    # several in a row say nothing about the provider. Any successful vote (or a
+    # non-timeout abstain) resets the count.
     consecutive_timeouts: dict[str, int] = {}
     for i, gdir in enumerate(pending):
         gid = gdir.name
@@ -1265,7 +1363,7 @@ def run_batch(
             invocation_budget_s=invocation_budget_s,
         )
         for v in votes:
-            if v.choice == "ABSTAIN" and v.error.startswith("timeout after"):
+            if v.choice == "ABSTAIN" and v.abstain_reason == AbstainReason.TIMEOUT:
                 consecutive_timeouts[v.provider] = consecutive_timeouts.get(v.provider, 0) + 1
                 if consecutive_timeouts[v.provider] >= _TIMEOUT_BREAKER_N:
                     _flush()  # keep completed groups resumable past the halt
