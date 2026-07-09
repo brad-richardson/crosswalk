@@ -1,7 +1,8 @@
 # Unmatched-Segment Export: Design
 
-**Date:** 2026-07-06
-**Status:** Proposed (design only — no implementation in this PR)
+**Date:** 2026-07-06 (§7 decisions + layout-cohesion review recorded 2026-07-09)
+**Status:** Proposed (design only — no implementation in this PR); all §7
+questions decided
 **Owner:** Brad
 
 ## Motivation
@@ -53,9 +54,9 @@ real outputs, and a phased build plan.
   `unmatched.parquet` per `release=/dataset=` dir
   (`src/crosswalk/factory/runner.py:34`, [FACTORY.md](../FACTORY.md) "Output
   layout"), and the manifest records `n_unmatched`
-  (`src/crosswalk/factory/manifest.py:218`). The publisher currently copies
+  (`src/crosswalk/factory/manifest.py:218`). The bridges publisher copies
   only `bridge.parquet` + `manifest.json`
-  (`src/crosswalk/factory/publish.py:357-364`).
+  (`publish.py::assemble_staging`).
 - **"No candidate" is derivable.** `scored_candidates.parquet` caches every
   scored pair with `ref_id, target_id, decision, confidence, …`
   (`src/crosswalk/factory/scored_cache.py:89-101`). A target absent from it had
@@ -76,13 +77,28 @@ real outputs, and a phased build plan.
   `FringeTest` (`src/crosswalk/screen/__init__.py`).
 - **License gate v1.** `datasets/licenses.toml` has a single `status` field;
   `LicenseRegistry.decision()` is default-deny
-  (`src/crosswalk/factory/licenses.py:77-119`). 5 datasets are `approved`
-  (all US public domain: usfs flathead/lolo, montana missoula/helena/bozeman);
-  the rest `pending_review`. Registry entries now also carry
-  `panel_recommendation` / `panel_confidence` / `proposed_attribution` fields
-  from the license research panel (#320) — the `geometry_status` addition below
-  slots alongside those, and geometry-level review can reuse the panel's
-  evidence dossiers.
+  (`src/crosswalk/factory/licenses.py:77-119`). *(Updated 2026-07-09:)* the
+  registry now holds 45 entries: **26 `approved`** (the 5 US-PD
+  federal/Montana datasets plus the license-panel burndown approvals — CC-BY,
+  OGL, KOGL, PDDL, CC0, ODbL, …) and 19 `pending_review`. Registry entries
+  also carry `panel_recommendation` / `panel_confidence` /
+  `proposed_attribution` fields from the license research panel (#320) — the
+  `geometry_status` addition below slots alongside those, and geometry-level
+  review can reuse the panel's evidence dossiers. Orthogonal to the license: a
+  declarative `quality_hold:` block in `datasets/<name>.yaml` excludes a
+  dataset from **both** publish paths (bridges and targets) since #380,
+  checked before the license.
+- **Target snapshots shipped after this design was drafted (#370,
+  2026-07-08).** `crosswalk factory publish --targets` publishes the raw
+  ingested target parquets under a sibling
+  `targets/dataset=<name>/snapshot=<fetch-date>/` prefix
+  (`src/crosswalk/factory/publish_targets.py`), immutable per snapshot, gated
+  by the same `status` + quality hold. Crucially, those snapshots are
+  **geometry-bearing and carry the full verbatim `source_tags` attribute
+  dict** (`fetch/target.py` preserves every original source column there) —
+  i.e. the project already redistributes source geometry + attributes under
+  the single-field gate this section calls v1. §3's geometry gate must
+  therefore cover `targets/` too — see "Layout cohesion" in §4.
 - **Publisher layout.** Hive `bridges/release=<R>/dataset=<name>/`, immutable
   releases, per-release `index.json` + `checksums.txt`, top-level `index.json`
   + credibility `index.html`, Pages browser in `site/` (DuckDB-WASM)
@@ -104,7 +120,7 @@ H3-suffixed and stable across releases:
 | `below_threshold` | Candidates existed but none survived scoring/optimization (best confidence < floors, or optimizer dropped it) | in scored cache, not in bridge MATCH/REVIEW sets |
 | `review` | In the bridge with `match_decision = 'review'` — a *plausible* Overture counterpart exists | bridge rows |
 
-**Recommendation: ship all three tiers in one artifact**, because the split is
+**Decision (2026-07-09, §7 Q1): ship all three tiers in one artifact**, because the split is
 the single most useful column for both audiences: mappers should work
 `no_candidate` first (highest precision "genuinely missing"), treat
 `below_threshold` as "verify against imagery", and generally **not** map
@@ -176,6 +192,7 @@ parquet (WGS84), same provenance discipline as the bridge's verbatim copy.
 | `name` | string, nullable | extracted `names.primary` from the Overture-normalized struct |
 | `class` | string, nullable | Overture vocab (already normalized at ingestion) |
 | `subtype` | string, nullable | Overture vocab (`road` / `footway` / …) |
+| `source_tags` | struct/map, nullable | **decided 2026-07-09 (§7 Q2):** verbatim original source attributes, copied unchanged from the ingested target parquet's `source_tags` column — the same bytes the `targets/` snapshots already publish. Per-dataset key sets vary (schema is stable within a dataset file) |
 | `length_m` | float64 | computed in UTM at export |
 | `is_short` | bool | 5 ≤ length < 10 m |
 | `reason` | string | `no_candidate` \| `below_threshold` \| `review` |
@@ -197,7 +214,23 @@ pure proximity (meaningful even with zero candidates — "nearest mapped road is
 rejected hypothesis ("there is a segment 8 m away but it scored 0.2" reads as
 *geometry disagreement — verify against imagery*).
 
-No `source_tags` / raw source attributes in v1 — see Open Questions.
+**`source_tags` ships verbatim** (decided 2026-07-09, §7 Q2) in every
+published file — the artifact only publishes `geometry_status = "approved"`
+datasets, and that review now includes an attribute/PII glance (§3). The
+column name deliberately matches **Overture's own schema property
+`source_tags`** — defined in `OvertureMaps/schema` `schema/base/defs.yaml`
+(`sourceTags`: *"Any attributes/tags from the original source data that should
+be passed through"*, `type: object`) and described in the docs as *"key-value
+pairs imported directly from the source data without change"*
+(<https://docs.overturemaps.org/schema/reference/base/land/>). It is also
+already this codebase's internal name for exactly this data
+(`fetch/target.py` writes it at ingestion; the published `targets/` snapshots
+carry it). `original_source_tags` was considered and rejected — it matches
+neither Overture nor the existing artifacts. Representation: copy the
+ingested column as-is (per-dataset struct); if cross-dataset uniformity ever
+matters, Overture's Parquet encoding (`map<string,string>`, stringified
+values) is the normalization target. The GeoJSON sidecar carries it as a
+nested JSON object — lossless.
 
 ---
 
@@ -232,12 +265,28 @@ attribution = "Montana State Library (MSDI Transportation Framework)"
   two booleans with a strict ordering (geometry ⇒ ids) is the actual decision
   space; a list invites invalid states (`["unmatched"]` without bridge) and
   more parsing. If a third artifact class ever appears, migrate then.
-- Review guidance for the human: `geometry_status = "approved"` requires the
-  source terms to permit **redistribution of the data itself** (not merely
-  "use"), with attribution obligations we can satisfy in-artifact. The 8
-  current US-PD datasets trivially qualify. "Open data licence" portals
-  (Singapore LTA, OGL, etc.) need actual reading — exactly what the registry's
-  `note`/`likely_license` hints exist for.
+- Review guidance for the human (wording per §7 Q3, decided 2026-07-09):
+  `geometry_status = "approved"` requires the source terms to permit
+  **redistribution of the data itself** (not merely "use"), with attribution
+  obligations we can satisfy in-artifact. The checklist additionally **screens
+  for share-alike / derivative-database clauses and assesses
+  ODbL-compatibility** — ODbL is the compatibility bar, so
+  roughly-ODbL-compatible share-alike terms (e.g. ODbL itself, as with
+  `tn_tunis_ml_roads`) are acceptable rather than hard-rejected; the finding
+  is recorded in the registry note and surfaced in `unmatched_meta.json`.
+  Because §7 Q2 ships `source_tags` verbatim, the review also includes a quick
+  PII / attribute-sensitivity glance at the source columns. The ~10
+  PD / PD-equivalent datasets (5 US-PD federal/Montana, Boston PDDL ×3,
+  Seattle — whose registry note already records geometry-redistribution
+  clearance — and Amsterdam CC0) trivially qualify. "Open data licence"
+  portals (Singapore LTA, OGL, etc.) need actual reading — exactly what the
+  registry's `note`/`likely_license` hints exist for.
+- **Scope coherence:** this gate is not unmatched-specific. `targets/`
+  (#370) already redistributes full geometry + `source_tags` for every
+  `status = "approved"` dataset — a larger exposure than the unmatched
+  complement. `geometry_status` therefore gates **every geometry-bearing
+  artifact** (`targets/` and `unmatched/`) in the same
+  `LicenseRegistry.decision()` change; see "Layout cohesion" (§4), finding 1.
 
 ### Attribution ships inside the artifact
 
@@ -264,6 +313,7 @@ oversight. We are not, and must not claim to be, any of that.
   "dataset": "us_montana_missoula",
   "release": "2026-01-21.0",
   "source_license": "US-PD",              // SPDX-ish, from the registry
+  "source_license_share_alike": false,     // from the §7 Q3 geometry-review checklist
   "source_attribution": "Montana State Library (MSDI Transportation Framework)",
   "source_url": "https://gisservicemt.gov/...",
   "geometry_redistribution": "approved",   // what OUR gate verified
@@ -344,6 +394,82 @@ r2://<bucket>/
   Leaflet, reusing the existing DuckDB-WASM plumbing in `browse.js`).
 - **Credibility page:** per-dataset unmatched counts + the §3 disclaimer
   paragraph in the licensing block.
+
+### Layout cohesion — align the artifact family BEFORE Phase 1 ships (review 2026-07-09)
+
+`unmatched/` will be the **third artifact family** on the bucket. The first
+two (`bridges/`, then `targets/` via #370) grew up two days apart and have
+already drifted; because published paths are immutable and the sync is
+no-delete, every misalignment becomes permanent the moment
+`unmatched/release=…` first syncs. Findings, ranked by what they cost *after*
+that point:
+
+1. **Geometry-gate asymmetry (highest cost — it is the legal surface).**
+   `targets/` redistributes full geometry + verbatim `source_tags` gated only
+   by `status` + quality hold; this design as first drafted put
+   `geometry_status` on `unmatched/` alone. The cost is not hypothetical:
+   `co_bogota_bike_network`'s target snapshot (`snapshot=2026-07-05`) synced
+   to the public bucket on 2026-07-08 — one day before #380 taught the
+   targets path about quality holds — and the no-delete design means #380
+   only *delists* it from `targets/index.json` at the next publish; the
+   parquet itself stays live until deleted by hand. The same shape of mistake
+   awaits geometry licensing. **Fix (Phase 1, blocking):** `geometry_status`
+   gates every geometry-bearing artifact (`targets/` AND `unmatched/`) in one
+   `LicenseRegistry` change; before the first `unmatched/` sync, audit the
+   already-live `targets/` objects against the new gate and decide
+   delist-vs-delete per dataset (Brad's call — deletion breaks the
+   immutability promise, delisting leaves geometry live).
+2. **Index-shape divergence.** The root `index.json` is written by the
+   *bridges* assembler but is named/positioned as THE bucket index — the
+   Pages site reads only it, so `targets/` is invisible to the browser.
+   `targets/index.json` diverges from the bridges indexes: no
+   `schema_version`, no `generated_at`, no excluded-dataset records (the
+   deliberate-exclusion honesty the bridges index already has), no checksums
+   — and `generated_from` leaks a local filesystem path into a public
+   object. **Fix:** bump the root index to `schema_version: 2` with an
+   `artifacts` block pointing at per-family indexes (`bridges`, `targets`,
+   `unmatched`); every per-family index carries
+   `schema_version`/`generated_at`/exclusion records; the `unmatched/`
+   per-release index (tree above) follows the bridges shape from day one;
+   drop or relativize `generated_from`.
+3. **Metadata-sidecar drift.** Three conventions in flight: bridges publish
+   `manifest.json` (verbatim factory provenance, JSON); targets publish
+   `meta.yaml` (normalized provenance, YAML); this design proposes
+   `unmatched_meta.json` + `ATTRIBUTION.txt`. **Fix:** JSON +
+   `ATTRIBUTION.txt` is the convention for new artifacts; retrofit `targets/`
+   additively (new snapshots gain `ATTRIBUTION.txt`; existing `meta.yaml`
+   stays — snapshots are immutable).
+4. **Integrity-manifest gap.** Bridges ship per-release `checksums.txt` +
+   per-file sha256 in the index; targets ship neither. `unmatched/` must ship
+   both (already specified above); add checksums to future target snapshots
+   while touching that code.
+5. **Sync-guard duplication.** `publish_sync.py` already holds two
+   near-identical immutability guards (`SyncPlan`, release-keyed;
+   `TargetSyncPlan`, dataset+snapshot-keyed); `unmatched/` needs a third
+   (release-keyed under a different prefix). **Fix:** generalize to one
+   prefix-keyed plan *before* adding the third copy, so the immutability unit
+   is data, not copy-pasted code.
+6. **Storefront-copy drift.** README ("deliberately *not* a geometry-import…
+   project"), `site/browse.html` ("the bridge tables are ID-only (no
+   geometry)…"), and PUBLISHING.md's bucket layout (bridges-only — `targets/`
+   is never mentioned) all predate #370 and become doubly wrong once
+   `unmatched/` ships geometry. `datasets/licenses.toml`'s header still says
+   the registry gates "the R2 bridge tables". **Fix:** PUBLISHING.md owns the
+   full three-prefix bucket layout; one "what we publish" paragraph reused by
+   README + credibility page; the registry header says it gates all published
+   artifacts.
+7. **Staging split — record as deliberate.** Bridges stage to
+   `data/publish_staging`, targets to `data/publish_staging_targets`; this
+   design puts `unmatched/` in the bridges staging tree. That is the right
+   grouping — release-keyed artifacts (`bridges/`, `unmatched/`) share one
+   staging root + one sync pass; snapshot-keyed (`targets/`) keeps its own —
+   but write it down in PUBLISHING.md so it reads as architecture, not
+   accident.
+
+One asymmetry is **correct and should stay**: bridges/unmatched key
+`release=` first (Overture-release cadence, whole-release immutability);
+targets key `dataset=`/`snapshot=` (per-dataset fetch cadence, snapshot
+immutability). Record it as deliberate rather than "aligning" it.
 
 ### QA feedback loop (`/qa` → artifact)
 
@@ -440,16 +566,21 @@ gzipped GeoJSON) — no partitioning concerns.
 **Phase 1 — minimal shippable artifact (~2–3 days)**
 1. `export_unmatched()` in `resolution/unmatched.py`: fix the id/attribute bug,
    reason tiers from scored results + bridge rows, `length_m` + `<5 m` drop +
-   `is_short`, `nearest_gers_*`, `best_candidate_*`, provenance columns. Wire
+   `is_short`, `nearest_gers_*`, `best_candidate_*`, `source_tags` verbatim
+   (§7 Q2), provenance columns. Wire
    into `optimize_and_export()` (`pipeline/runner.py:1177`) AND into the
    second `generate_unmatched_report` call site at the zero-candidate
    early-return (`pipeline/runner.py:1050`), which must emit the same schema
    (every row `no_candidate` there).
-2. `geometry_status` in `licenses.toml` + `LicenseRegistry` (default-deny);
-   set `approved` only for the US-public-domain entries already
-   bridge-approved (the 5 federal/Montana datasets). The other factory
-   datasets (Singapore ×2, Bogotá) are not US-PD and stay default-deny until
-   their geometry-redistribution terms pass human review.
+2. `geometry_status` in `licenses.toml` + `LicenseRegistry` (default-deny),
+   gating **both** geometry-bearing artifacts — `unmatched/` and the existing
+   `targets/` path (§4 "Layout cohesion", finding 1). Set `approved` for the
+   PD / PD-equivalent entries as each passes the §3 checklist (5 US-PD
+   federal/Montana; Boston PDDL ×3; Seattle — geometry clearance already
+   recorded in its registry note; Amsterdam CC0). The Singapore datasets stay
+   default-deny (license itself still `pending_review`); Bogotá bike network
+   is license-approved but quality-held (#338) — and its pre-#380 target
+   snapshot is already live on the bucket, see the cohesion audit item.
 3. `assemble_staging()` unmatched pass: `unmatched/release=…` tree, geojson.gz,
    `unmatched_meta.json` (with the non-import disclaimer), `ATTRIBUTION.txt`,
    index.json + checksums extensions; credibility page counts + disclaimer.
@@ -458,6 +589,10 @@ gzipped GeoJSON) — no partitioning concerns.
    geometry), publish-tree golden test alongside the existing publish tests.
    Regenerate factory outputs via `factory reoptimize --all` (cache-valid,
    ~2 s/dataset).
+6. Layout-cohesion pre-work (§4, blocking the first `unmatched/` sync):
+   geometry gate extended to `targets/` + audit of already-live target
+   snapshots; generalized prefix-keyed sync immutability guard; root-index
+   `artifacts` pointers (`schema_version: 2`).
 
 **Phase 2 — QA feedback + browsing (~2–3 days)**
 1. `qa_status` join at staging time from the QA decision stores; surface
@@ -482,25 +617,43 @@ gzipped GeoJSON) — no partitioning concerns.
 
 ## 7. Open questions for Brad
 
-1. **Review-tier rows: in or out of the public artifact?** Design says *in,
-   reason-coded* (completeness + the browser default-filters them). The
-   counterargument: a mapper who ignores the docs and maps `review` rows
-   creates OSM duplicates. If that risk feels real, ship `no_candidate` +
-   `below_threshold` only and keep `review` in the internal factory file.
-2. **Attribute breadth.** v1 ships `name`/`class`/`subtype` only. Municipal
-   extras (surface, width, install year — often present in `source_tags`)
-   are high-value for mappers *and* higher license/PII exposure, and vocab
-   varies wildly per dataset. Ship `source_tags` verbatim for
-   `geometry_status=approved` datasets, or hold at the normalized trio?
-3. **Gate strictness for `geometry_status`.** Is "source terms permit
-   redistribution with attribution" sufficient, or do you also want an
-   explicit check for share-alike/derivative-database clauses (which would
-   complicate the *consumer's* ODbL story even when redistribution by us is
-   fine)? This changes the review checklist wording, not the mechanism.
-4. **Naming.** `unmatched/` (pipeline-truthful) vs `gaps/` (audience-truthful)
-   as the public prefix + product name. Design assumes `unmatched/` to match
-   internal vocabulary; a rename is cheap only before first publish.
-5. **Overture outreach timing.** Publish quietly and let the artifact
-   accumulate releases first, or pair Phase 1 with a post to the Overture
-   community forum? (Affects nothing technical; Phase 3 outreach doc either
-   way.)
+**All five decided by Brad, 2026-07-09.** Recorded here with rationale; the
+decisions are applied through §§1–6 above.
+
+1. **Review-tier rows: in or out of the public artifact?** —
+   **DECIDED: in, reason-coded**, as the design proposed (§1). The artifact
+   partitions the whole target set; consumers default-filter on `reason`; the
+   headline "unmatched" count stays `no_candidate + below_threshold`; and the
+   duplicate-mapping risk is mitigated by the tier docs plus each `review`
+   row carrying its `best_candidate_gers` (the likely existing counterpart).
+2. **Attribute breadth.** — **DECIDED: ship raw source attributes verbatim**
+   for `geometry_status = "approved"` datasets, not just the normalized
+   name/class/subtype trio. Column name: **`source_tags`** — exactly
+   Overture's schema property (`OvertureMaps/schema`,
+   `schema/base/defs.yaml` `sourceTags`: *"Any attributes/tags from the
+   original source data that should be passed through"*; docs: *"key-value
+   pairs imported directly from the source data without change"*,
+   <https://docs.overturemaps.org/schema/reference/base/land/>), and already
+   the internal column name at ingestion (`fetch/target.py`) and in the
+   published `targets/` snapshots. `original_source_tags` rejected — it
+   matches neither Overture nor the existing artifacts. Representation +
+   gating applied in §2/§3.
+3. **Gate strictness for `geometry_status`.** — **DECIDED: screen, don't
+   hard-reject.** The review checklist screens for share-alike /
+   derivative-database clauses and **assesses ODbL-compatibility** — ODbL is
+   the compatibility bar, so roughly-ODbL-compatible licenses (ODbL itself,
+   PD/CC0, attribution-only) are acceptable; the finding is recorded in the
+   registry note and surfaced in `unmatched_meta.json` rather than blocking
+   publication. Checklist wording updated in §3.
+4. **Naming.** — **DECIDED: `unmatched/`** (pipeline-truthful) as the public
+   prefix + product name. Cohesion check (2026-07-09) found no
+   evidence-backed objection: it matches the internal vocabulary
+   (`unmatched.parquet`, manifest `n_unmatched`) and sits naturally beside
+   the sibling prefixes (`bridges/`, `targets/`). The one wrinkle —
+   `review`-tier rows are not literally unmatched — is already handled by the
+   §1 accounting (headline count excludes `review`). The rename window closes
+   permanently at first publish (immutable paths).
+5. **Overture outreach timing.** — **DECIDED: publish quietly.** No Overture
+   community-forum post with Phase 1 — too many questions still outstanding;
+   let the artifact accumulate releases first. The Phase 3 outreach doc is
+   unaffected.
