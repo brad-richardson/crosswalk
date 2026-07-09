@@ -922,6 +922,24 @@ def generate_stitch_batch(
         "group can ever export, so production waves must not burn quota on them "
         "(their verdicts route to human review via the size gate).",
     ),
+    decompose: bool = typer.Option(
+        False,
+        "--decompose",
+        help="Split over-backstop groups into panel-sized sub-problems (biconnected "
+        "decomposition of the candidate-edge graph; #367 Mode B). Each sub-problem "
+        "gets its own evidence pack and panel vote; a whole-group label is minted "
+        "at export only when EVERY sub-problem resolves unanimously. Over-backstop "
+        "groups stay ELIGIBLE for tier selection under this flag (decomposition "
+        "makes their verdicts exportable); an irreducible monster is still dropped "
+        "from the wave unless --include-oversize. Default off — the flow is "
+        "byte-identical without this flag.",
+    ),
+    decompose_max_edges: int = typer.Option(
+        0,
+        "--decompose-max-edges",
+        help="Sub-problem edge budget for --decompose "
+        "(0 = settings.stitch_export_backstop_max_edges, the panel's export envelope).",
+    ),
 ):
     """Generate evidence packs for agent stitching-group labeling.
 
@@ -938,6 +956,9 @@ def generate_stitch_batch(
 
         # Auto-recover the groups matching existing human labels
         crosswalk agent stitch-batch us_boston_streets --recover-labeled
+
+        # Split monster groups into panel-sized sub-problems
+        crosswalk agent stitch-batch co_bogota_roads --group-ids 3c3e6853 --decompose
     """
     import json
 
@@ -1030,7 +1051,14 @@ def generate_stitch_batch(
         # selecting them (the old Tier-1 rule ALWAYS took the single largest
         # group) burned quota on 50-570 KB prompts for unexportable verdicts.
         # --include-oversize restores them for deliberate calibration waves.
-        max_candidate = None if include_oversize else settings.stitch_export_backstop_max_edges
+        # --decompose ALSO lifts the exclusion: decomposition converts an
+        # over-backstop group into panel-sized sub-problems whose recomposed
+        # verdict CAN export, so the quota-void rationale no longer applies
+        # (an irreducible monster is re-dropped in the decompose block below
+        # unless --include-oversize keeps it as a calibration wave).
+        max_candidate = (
+            None if (include_oversize or decompose) else settings.stitch_export_backstop_max_edges
+        )
         if max_candidate is not None:
             n_over = sum(
                 1
@@ -1053,8 +1081,98 @@ def generate_stitch_batch(
         console.print("[red]No groups selected[/red]")
         raise typer.Exit(1)
 
-    # Ensure alternatives present, then fill spatial context.
-    for g in selected:
+    # Opt-in decomposition (#367 Mode B): replace each over-backstop group with
+    # panel-sized sub-problems (biconnected decomposition of its candidate-edge
+    # graph). Sub-problems flow through the existing machinery (alternatives,
+    # context, packs, votes) as ordinary groups keyed by their content-hash id;
+    # the parent group is kept in batch.json (pack-less, marked
+    # ``decomposed_parent``) as the export-time recomposition roster + gate
+    # data. Default off: without --decompose this block is a no-op.
+    decomposition_manifest: dict[str, dict] = {}
+    decomposed_parents: list[dict] = []
+    if decompose:
+        from ..matching.group_decomposition import (
+            REASON_SIZE_GATED,
+            build_subproblem_group,
+            decompose_group,
+        )
+
+        budget = decompose_max_edges or settings.stitch_export_backstop_max_edges
+        expanded: list[dict] = []
+        for g in selected:
+            d = decompose_group(g, budget)
+            if not d.is_decomposed:
+                if d.n_edges > budget:
+                    # Irreducible monster (single biconnected blob): splitting
+                    # achieved nothing, so #386's quota-void rule reapplies —
+                    # a whole-group verdict on it can never export. Drop it
+                    # from the wave unless --include-oversize deliberately
+                    # keeps it (calibration; its verdict size-gates to human).
+                    if include_oversize:
+                        console.print(
+                            f"[yellow]Group {g['group_id']}: {d.n_edges} edges but "
+                            f"irreducible (single biconnected blob) — kept whole "
+                            f"(--include-oversize)[/yellow]"
+                        )
+                        expanded.append(g)
+                    else:
+                        console.print(
+                            f"[yellow]Group {g['group_id']}: {d.n_edges} edges but "
+                            f"irreducible (single biconnected blob) — dropped from "
+                            f"the wave (its verdict cannot export; pass "
+                            f"--include-oversize to vote it anyway)[/yellow]"
+                        )
+                    continue
+                expanded.append(g)
+                continue
+            subs = [build_subproblem_group(g, s, len(d.subproblems)) for s in d.subproblems]
+            n_over = sum(1 for s in d.subproblems if s.oversized)
+            console.print(
+                f"[blue]Group {g['group_id']}: {d.n_edges} edges -> "
+                f"{len(subs)} sub-problems"
+                + (f" ({n_over} still over budget, human-routed)" if n_over else "")
+                + "[/blue]"
+            )
+            expanded.extend(subs)
+            parent_entry = {k: v for k, v in g.items() if k != "alternatives"}
+            parent_entry["decomposed_parent"] = True
+            parent_entry["subproblem_ids"] = [s.subproblem_id for s in d.subproblems]
+            parent_entry["decompose_max_edges"] = budget
+            decomposed_parents.append(parent_entry)
+            decomposition_manifest[str(g["group_id"])] = {
+                "n_edges": d.n_edges,
+                "max_edges": budget,
+                "subproblems": [
+                    {
+                        "id": s.subproblem_id,
+                        "n_edges": s.n_edges,
+                        "n_refs": len(s.ref_ids),
+                        "n_targets": len(s.target_ids),
+                        "n_blocks": s.n_blocks,
+                        "oversized": s.oversized,
+                        **(
+                            {"route": "human_review", "route_reason": REASON_SIZE_GATED}
+                            if s.oversized
+                            else {}
+                        ),
+                    }
+                    for s in d.subproblems
+                ],
+            }
+        selected = expanded
+        if not selected:
+            console.print(
+                "[red]No groups left after decomposition (all selected groups were "
+                "irreducible monsters)[/red]"
+            )
+            raise typer.Exit(1)
+
+    # Oversized irreducible sub-problems get no pack (they are size-gated to
+    # human review, like monster groups today); everything else is packed.
+    packable = [g for g in selected if not g.get("subproblem_oversized")]
+
+    # Ensure alternatives present, then fill spatial context (packed groups only).
+    for g in packable:
         if "alternatives" not in g:
             g["alternatives"] = generate_top_k_alternatives(
                 g.get("edges", []),
@@ -1062,19 +1180,24 @@ def generate_stitch_batch(
                 target_geoms=g.get("target_geometries", {}),
                 k=k_alternatives,
             )
-    console.print(f"[blue]Filling spatial context for {len(selected)} groups...[/blue]")
+    console.print(f"[blue]Filling spatial context for {len(packable)} groups...[/blue]")
     from .data import _fill_spatial_context
 
-    _fill_spatial_context(selected, dataset)
+    _fill_spatial_context(packable, dataset)
 
     name = batch_name or dataset
     batch_dir = output_dir / name
     batch_dir.mkdir(parents=True, exist_ok=True)
-    batch = {"dataset_id": dataset, "groups": selected}
+    batch = {"dataset_id": dataset, "groups": selected + decomposed_parents}
     (batch_dir / "batch.json").write_text(json.dumps(batch))
+    if decomposition_manifest:
+        (batch_dir / "decomposition.json").write_text(json.dumps(decomposition_manifest, indent=2))
+        console.print(f"  Decomposition manifest: {batch_dir / 'decomposition.json'}")
 
     console.print(f"[blue]Generating evidence packs -> {batch_dir}[/blue]")
-    generated = generate_stitch_evidence(batch, batch_dir)
+    generated = generate_stitch_evidence(
+        batch, batch_dir, group_ids=[str(g["group_id"]) for g in packable]
+    )
     console.print(f"[green]Generated {len(generated)} evidence packs[/green]")
     console.print(f"  Batch dir: {batch_dir}")
     console.print("Next: crosswalk agent stitch-run --batch " + str(batch_dir))
@@ -1529,14 +1652,25 @@ def export_stitch_panel(
     )
 
     none_note = f", {report.n_unanimous_none} unanimous-NONE candidates" if empty_set else ""
+    decomp_note = (
+        f", {report.n_decomposed_parents} decomposed parents "
+        f"({report.n_subproblem_rows} sub-problem rows)"
+        if report.n_decomposed_parents
+        else ""
+    )
     console.print(
         f"[bold]Panel export: {report.n_total_groups} merged groups, "
-        f"{report.n_auto_accept} auto_accept candidates{none_note}[/bold]"
+        f"{report.n_auto_accept} auto_accept candidates{none_note}{decomp_note}[/bold]"
     )
     console.print(f"  Batches (in precedence order): {', '.join(b.name for b in batch_dirs)}")
 
     # Per-group report.
     for g in report.groups:
+        recomposed = (
+            f" (recomposed {g.n_subproblems_resolved}/{g.n_subproblems} sub-problems)"
+            if g.from_decomposition
+            else ""
+        )
         if g.exported and g.is_empty_set:
             console.print(
                 f"  [green]EXPORT-EMPTY[/green] {g.group_id} [{g.source_batch}] "
@@ -1547,7 +1681,7 @@ def export_stitch_panel(
             console.print(
                 f"  [green]EXPORT[/green] {g.group_id} [{g.source_batch}] "
                 f"{g.match_type} {g.n_edges_final} edges{slivers} "
-                f"conf={g.mean_confidence:.3f}"
+                f"conf={g.mean_confidence:.3f}{recomposed}"
             )
         else:
             extra = ""
@@ -1558,7 +1692,8 @@ def export_stitch_panel(
             elif g.reason == "emptied_by_sliver":
                 extra = f" (-{g.n_slivers_dropped} sliver)"
             console.print(
-                f"  [yellow]SKIP[/yellow]   {g.group_id} [{g.source_batch}] -> {g.reason}{extra}"
+                f"  [yellow]SKIP[/yellow]   {g.group_id} [{g.source_batch}] -> "
+                f"{g.reason}{extra}{recomposed}"
             )
 
     empty_note = f" ({len(report.exported_empty)} empty-set)" if empty_set else ""
