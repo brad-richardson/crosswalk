@@ -601,7 +601,13 @@ def _export_groups_sidecar(
     # match output.
     best_by_pair: dict[tuple[str, str], Any] = {}
     for r in results:
-        if r.confidence < min_confidence:
+        # NaN comparisons are always False, so `r.confidence < min_confidence`
+        # alone would let a NaN-confidence candidate pass the floor and flow
+        # into the sidecar, where json.dump serializes it as a bare `NaN`
+        # token -- invalid strict JSON for non-Python consumers. Treat NaN as
+        # failing the floor (excluded), matching the `_is_nan` guard already
+        # used elsewhere in this module for other NaN-prone fields.
+        if _is_nan(r.confidence) or r.confidence < min_confidence:
             continue
         pair = (str(r.ref_id), str(r.target_id))
         prev = best_by_pair.get(pair)
