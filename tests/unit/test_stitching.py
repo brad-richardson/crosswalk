@@ -1541,8 +1541,49 @@ class TestDeriveRouteReason:
         assert self._derive(n_valid="2", minority="") == "below_quorum:2"
 
     def test_majority_no_dissent_with_quorum_is_abstention(self):
-        # 4-voter panel: 3 agree + 1 abstain — quorum met, abstention blocked it.
+        # LEGACY pre-v5 row shape (e.g. the 2026-07-10 quad calibration waves):
+        # 3 agree + 1 abstain under the old rule stayed "majority" and was
+        # blocked as "abstention". The v5 quorum rule never mints this row
+        # (it auto-accepts as "quorum"), but historical consensus.csv rows must
+        # keep deriving their original code.
         assert self._derive(n_votes="4", n_valid="3", minority="") == "abstention"
+
+    def test_auto_accept_with_abstention_is_quorum(self):
+        # v5 quorum accept: routing auto_accept with n_valid < n_votes. The
+        # fresh stamp carries the "quorum" tier; a tier-less row (hand-rolled /
+        # blanked stamp) still derives from the vote counts.
+        assert (
+            self._derive(consensus="quorum", routing="auto_accept", n_votes="4", n_valid="3")
+            == "quorum"
+        )
+        assert (
+            self._derive(consensus="unanimous", routing="auto_accept", n_votes="4", n_valid="3")
+            == "quorum"
+        )
+        # Full unanimity stays "unanimous" (n_valid == n_votes).
+        assert (
+            self._derive(consensus="unanimous", routing="auto_accept", n_votes="4", n_valid="4")
+            == "unanimous"
+        )
+        # Missing counts: never guess quorum — an auto_accept without count
+        # evidence derives the (historically correct) unanimous code.
+        assert (
+            self._derive(consensus="unanimous", routing="auto_accept", n_votes="", n_valid="")
+            == "unanimous"
+        )
+
+    def test_quorum_none(self):
+        # 3 valid NONE + 1 abstain (v5): the quorum analog of unanimous_none.
+        assert (
+            self._derive(
+                consensus="quorum",
+                choice="NONE",
+                routing="human_review",
+                n_votes="4",
+                n_valid="3",
+            )
+            == "quorum_none"
+        )
 
     def test_none_is_no_majority(self):
         assert self._derive(consensus="none", choice="D", minority="agy=A") == "no_majority"
@@ -1633,6 +1674,17 @@ class TestDeriveRouteReason:
             [vote("claude", "A"), vote("codex", "B"), vote("agy", "NONE")],
             [vote("claude", "A"), vote("codex", "A"), vote("agy", "ABSTAIN")],
             [vote("claude", "ABSTAIN"), vote("codex", "ABSTAIN"), vote("agy", "ABSTAIN")],
+            # 4-voter (v5 quad) shapes, incl. the quorum accept / quorum NONE.
+            [vote("claude", "A"), vote("codex", "A"), vote("kimi", "A"), vote("muse", "A")],
+            [vote("claude", "A"), vote("codex", "A"), vote("kimi", "A"), vote("muse", "ABSTAIN")],
+            [
+                vote("claude", "NONE"),
+                vote("codex", "NONE"),
+                vote("kimi", "NONE"),
+                vote("muse", "ABSTAIN"),
+            ],
+            [vote("claude", "A"), vote("codex", "A"), vote("kimi", "A"), vote("muse", "B")],
+            [vote("claude", "A"), vote("codex", "A"), vote("kimi", "ABSTAIN"), vote("muse", "B")],
         ]
         for votes in panels:
             c = compute_consensus(votes)
@@ -1662,8 +1714,11 @@ class TestHumanizeRouteReason:
         assert "cross-mode" in h("class-mismatch")
         assert h("no_majority") == "panel split — no majority choice"
         assert h("all_abstained") == "all panelists abstained"
+        # Legacy pre-v5 code: still rendered for historical rows.
         assert h("abstention") == "an abstention blocked unanimity"
         assert h("unanimous") == "panel unanimous — auto-accepted"
+        assert "quorum" in h("quorum") and "auto-accepted" in h("quorum")
+        assert "none of the options fit" in h("quorum_none")
 
     def test_unknown_and_blank(self):
         from crosswalk.agent_labeling.panel_routing import humanize_route_reason as h

@@ -1,11 +1,12 @@
 """Resolve the agent panel's per-group routing for a dataset.
 
-The 3-provider stitching panel (see :mod:`stitch_runner`) votes on M:N groups
+The stitching panel (see :mod:`stitch_runner`) votes on M:N groups
 and writes a ``consensus.csv`` per batch dir with a ``routing`` column whose
-values are ``auto_accept`` (unanimous, safe to promote) or ``human_review``
-(non-unanimous vote, NONE consensus, cross-mode flags, oversize, ...). A group
-that the panel could not auto-accept is exactly the kind of decision worth a
-human's 1-2 minutes.
+values are ``auto_accept`` (all valid votes agree at quorum — full unanimity,
+or a v5 quorum accept over an abstention; safe to promote) or ``human_review``
+(dissent, below quorum, NONE consensus, cross-mode flags, oversize, ...). A
+group that the panel could not auto-accept is exactly the kind of decision
+worth a human's 1-2 minutes.
 
 This module discovers a dataset's panel batch dirs (``{dataset}`` or
 ``{dataset}_*`` under ``data/agents/stitching/batches``), resolves the MOST
@@ -102,18 +103,34 @@ ROUTING_AUTO_ACCEPT = "auto_accept"
 # (historical waves predate the stamp).
 # ---------------------------------------------------------------------------
 
-#: Unanimous non-NONE verdict — the auto-accept path.
+#: Unanimous non-NONE verdict (every recorded vote valid and agreeing) — the
+#: auto-accept path.
 REASON_UNANIMOUS = "unanimous"
 #: All panelists voted NONE — every offered option was rejected.
 REASON_UNANIMOUS_NONE = "unanimous_none"
+#: QUORUM accept (v5 rule): all VALID votes agree, >=3 are valid, and >=1
+#: panelist abstained (e.g. 3-of-4 with one abstention) — the auto-accept
+#: path's second tier. Distinct from ``unanimous`` so a quorum accept stays
+#: distinguishable end-to-end (consensus.csv and the ``panel_quorum_*`` export
+#: labelers). Only reachable with >=4 voters; quorum forgives abstention only,
+#: never a dissenting valid vote.
+REASON_QUORUM = "quorum"
+#: All valid votes were NONE at quorum with >=1 abstention — the quorum analog
+#: of ``unanimous_none`` (routes to ``human_review``; exportable as a
+#: reject-all empty-set label under the quorum-NONE labeler).
+REASON_QUORUM_NONE = "quorum_none"
 #: Majority with dissenting valid vote(s); suffix is the minority summary,
 #: e.g. ``dissent:codex=B`` or ``dissent:codex=F,agy=A``.
 REASON_DISSENT_PREFIX = "dissent:"
 #: All valid votes agree but fewer than 3 were valid (quorum for unanimity);
 #: suffix is n_valid, e.g. ``below_quorum:2``.
 REASON_BELOW_QUORUM_PREFIX = "below_quorum:"
-#: >=3 valid votes all agree, but an abstention blocked full unanimity
-#: (only reachable with a 4-voter panel).
+#: LEGACY (pre-v5): >=3 valid votes all agree, but an abstention blocked full
+#: unanimity under the old ``agree == len(votes)`` rule (only reachable with a
+#: 4-voter panel, e.g. the 2026-07-10 quad calibration waves). The v5 quorum
+#: rule AUTO-ACCEPTS exactly this case (stamped ``quorum``), so this code is
+#: retired from live routing — kept only so historical consensus.csv rows keep
+#: deriving/rendering faithfully.
 REASON_ABSTENTION = "abstention"
 #: No choice reached 2 votes — the panel split.
 REASON_NO_MAJORITY = "no_majority"
@@ -190,19 +207,35 @@ def derive_route_reason(row: Mapping) -> str:
     choice = _clean(row.get("choice"))
     minority = _clean(row.get("minority"))
     n_valid = _int_or_none(row.get("n_valid"))
+    n_votes = _int_or_none(row.get("n_votes"))
 
     if routing == ROUTING_AUTO_ACCEPT:
+        # A QUORUM accept (v5 rule: all valid votes agree over >=1 abstention)
+        # is distinguishable from full unanimity by its tier stamp, or — for a
+        # row missing the tier — by the vote counts. Pre-v5 auto_accept rows
+        # always have n_valid == n_votes (the old rule required
+        # agree == len(votes)), so their derivation is unchanged.
+        if consensus == "quorum":
+            return REASON_QUORUM
+        if n_valid is not None and n_votes is not None and 0 < n_valid < n_votes:
+            return REASON_QUORUM
         return REASON_UNANIMOUS
-    if consensus == "unanimous":
+    if consensus in ("unanimous", "quorum"):
         if choice == "NONE":
-            return REASON_UNANIMOUS_NONE
-        # Unanimous non-NONE yet routed to human review: only the class gate
-        # does that (historical rows predating the gate's stamp).
+            return REASON_QUORUM_NONE if consensus == "quorum" else REASON_UNANIMOUS_NONE
+        # All-valid agreement on a non-NONE choice yet routed to human review:
+        # only the class gate does that (historical rows predating the gate's
+        # stamp; the quorum branch mirrors the unanimous one for shape-parity —
+        # quorum rows postdate the stamp, so it is unreachable in practice).
         return REASON_CLASS_MISMATCH
     if consensus == "majority":
         if minority:
             return REASON_DISSENT_PREFIX + minority.replace("; ", ",").replace(" ", "")
         if n_valid is not None and n_valid >= 3:
+            # LEGACY pre-v5 shape: all valid votes agreed at quorum but the old
+            # rule blocked the accept on the abstention. The v5 rule never
+            # mints this row (it auto-accepts as "quorum"); historical rows
+            # must keep deriving their original code.
             return REASON_ABSTENTION
         return f"{REASON_BELOW_QUORUM_PREFIX}{n_valid if n_valid is not None else '?'}"
     if consensus == "none":
@@ -220,6 +253,9 @@ def humanize_route_reason(code: str) -> str:
     fixed = {
         REASON_UNANIMOUS: "panel unanimous — auto-accepted",
         REASON_UNANIMOUS_NONE: "panel unanimous: none of the options fit",
+        REASON_QUORUM: "panel quorum — all valid votes agree (abstention forgiven); auto-accepted",
+        REASON_QUORUM_NONE: "panel quorum: none of the options fit (abstention forgiven)",
+        # LEGACY (pre-v5 rows only): the v5 quorum rule auto-accepts this case.
         REASON_ABSTENTION: "an abstention blocked unanimity",
         REASON_NO_MAJORITY: "panel split — no majority choice",
         REASON_ALL_ABSTAINED: "all panelists abstained",

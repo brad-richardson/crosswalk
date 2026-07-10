@@ -1,10 +1,13 @@
 """Consensus-panel runner for agent stitching-group labeling.
 
-Runs a heterogeneous 3-provider panel (claude + codex + kimi/Kimi K2.6 since the
-2026-07-09 v4 bless; previously claude + codex + agy) on each group's
+Runs a heterogeneous multi-provider panel (claude + codex + kimi/Kimi K2.6
+since the 2026-07-09 v4 bless; previously claude + codex + agy) on each group's
 evidence pack, in parallel. Each provider returns a JSON option pick; votes are
 validated (choice must be a real option letter or NONE), retried once on
-garbage, and recorded as audit data. A consensus rule routes each group.
+garbage, and recorded as audit data. A consensus rule routes each group: ALL
+VALID (non-abstaining) votes agreeing with at least 3 valid votes auto-accepts
+— full unanimity and a quorum accept (agreement over an abstention) stay
+distinguishable end-to-end (see :func:`compute_consensus`).
 
 Votes are audit data and are stored under the batch dir (``votes.csv``),
 deliberately separate from ``labels/``. This module writes NOTHING into
@@ -1337,7 +1340,12 @@ def has_cross_mode_edge(edge_classes: list[tuple[str | None, str | None]]) -> bo
 @dataclass
 class Consensus:
     group_id: str
-    consensus: str  # "unanimous" | "majority" | "none"
+    # Agreement tier. "unanimous": every recorded vote is valid and agrees.
+    # "quorum": every VALID vote agrees, >=3 are valid, but >=1 panelist
+    # abstained (reachable only with >=4 voters; introduced with the v5 quorum
+    # rule — pre-v5 rows never carry it). "majority"/"none": no all-valid
+    # agreement.
+    consensus: str  # "unanimous" | "quorum" | "majority" | "none"
     choice: str  # agreed choice letter/NONE, or "" when none
     edge_set: frozenset
     routing: str  # "auto_accept" | "human_review"
@@ -1346,9 +1354,10 @@ class Consensus:
     minority: str  # summary of dissenting votes
     mean_confidence: float
     # Machine-readable code for WHY the group routed the way it did, stamped on
-    # every row (codes enumerated in panel_routing: unanimous, unanimous_none,
-    # dissent:<provider>=<choice>, below_quorum:<n>, abstention, no_majority,
-    # all_abstained, class-mismatch).
+    # every row (codes enumerated in panel_routing: unanimous, quorum,
+    # unanimous_none, quorum_none, dissent:<provider>=<choice>,
+    # below_quorum:<n>, no_majority, all_abstained, class-mismatch, size_gated,
+    # low_confidence; plus the legacy pre-v5 "abstention").
     route_reason: str = ""
 
 
@@ -1358,10 +1367,27 @@ def compute_consensus(
     n_candidate_edges: int | None = None,
     min_voter_confidence: float | None = None,
 ) -> Consensus:
-    """Apply the 3/3, 2/3, else routing rule over a group's votes.
+    """Apply the quorum consensus rule over a group's votes.
 
-    Abstentions do not count toward agreement. Only unanimous agreement among
-    all (>=3) valid votes auto-accepts; everything else routes to human review.
+    Abstentions do not count toward agreement. A group auto-accepts when ALL
+    VALID (non-abstaining) votes agree AND at least 3 votes are valid
+    (``agree == n_valid >= 3``); everything else routes to human review. Two
+    accept tiers stay distinguishable end-to-end:
+
+    * ``unanimous`` — every recorded vote is valid and agrees (e.g. 4/4);
+    * ``quorum`` — all valid votes agree with >=1 abstention (e.g. 3-of-4
+      with one abstain). Quorum forgives ABSTENTION only, never disagreement:
+      any dissent among valid votes still routes to human review.
+
+    For any 3-voter panel (v2/v3/v4 composition re-runs) this is
+    routing-identical to the pre-v5 rule (``agree == len(votes) >= 3``): with 3
+    voters, all-valid agreement at quorum IS full unanimity, and any abstention
+    drops ``n_valid`` below 3 (``below_quorum``). The regression sweep
+    ``test_quorum_rule_is_noop_for_3voter_panels`` proves the equivalence over
+    every 3-vote combination. A NONE verdict never auto-accepts on either tier;
+    an all-valid-NONE at quorum is stamped ``quorum_none`` (the quorum analog
+    of ``unanimous_none``) so the export path can mint reject-all ground truth
+    with honest provenance.
 
     Size gate: when ``n_candidate_edges`` (the group's candidate-edge count) is
     supplied and exceeds the export backstop
@@ -1428,10 +1454,17 @@ def compute_consensus(
     mean_conf = round(sum(v.confidence for v in top_votes) / len(top_votes), 3)
     edge_set = top_votes[0].edge_set
 
-    # Unanimous requires all 3 panelists valid AND agreeing.
+    # Quorum rule (v5): auto-accept when ALL valid votes agree and >=3 are
+    # valid. Full unanimity (no abstentions) keeps the "unanimous" tier; an
+    # all-valid agreement over >=1 abstention is the distinct "quorum" tier so
+    # a 4/4 accept and a 3-of-4 accept stay distinguishable in consensus.csv
+    # and in the export labelers. agree == n_valid implies no dissenting valid
+    # vote, so quorum forgives abstention only — never disagreement. For any
+    # 3-voter panel this routes byte-identically to the pre-v5
+    # agree == len(votes) rule (see the docstring and the sweep test).
     route_reason = ""
-    if agree == len(votes) and agree >= 3 and not minority_votes:
-        consensus = "unanimous"
+    if agree == n_valid and n_valid >= 3:
+        consensus = "unanimous" if n_valid == len(votes) else "quorum"
         routing = "auto_accept" if top_choice != "NONE" else "human_review"
     elif agree >= 2:
         consensus = "majority"
