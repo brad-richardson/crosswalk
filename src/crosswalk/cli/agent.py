@@ -1229,11 +1229,36 @@ def run_stitch_panel(
     # the spec for every composition — the #397 opencode fix, now required for
     # every provider because specs differ across panel eras (codex is
     # gpt-5.6-sol/medium on the v4 default but gpt-5.5/low on the v3 panels).
-    claude_model: str = typer.Option(None, "--claude-model"),
-    claude_effort: str = typer.Option(None, "--claude-effort"),
-    codex_model: str = typer.Option(None, "--codex-model"),
-    codex_effort: str = typer.Option(None, "--codex-effort"),
-    agy_model: str = typer.Option(None, "--agy-model"),
+    claude_model: str = typer.Option(
+        None,
+        "--claude-model",
+        help="Override the claude voter's model (default: the named panel's spec — "
+        "claude-opus-4-8 on all current panels).",
+    ),
+    claude_effort: str = typer.Option(
+        None,
+        "--claude-effort",
+        help="Override the claude voter's reasoning effort (default: the named "
+        "panel's spec — medium on all current panels).",
+    ),
+    codex_model: str = typer.Option(
+        None,
+        "--codex-model",
+        help="Override the codex voter's model (default: the named panel's spec — "
+        "gpt-5.6-sol on default/v4, gpt-5.5 on the v3-era panels).",
+    ),
+    codex_effort: str = typer.Option(
+        None,
+        "--codex-effort",
+        help="Override the codex voter's reasoning effort (default: the named "
+        "panel's spec — medium on default/v4, low on the v3-era panels).",
+    ),
+    agy_model: str = typer.Option(
+        None,
+        "--agy-model",
+        help="Override the agy voter's model string (default: the named panel's "
+        "spec — 'Gemini 3.5 Flash (Medium)'; agy only sits on the v3-era panels).",
+    ),
     panel_name: str = typer.Option(
         "default",
         "--panel",
@@ -1308,7 +1333,14 @@ def run_stitch_panel(
             timeout=p.timeout,
         )
 
-    panel = [_with_overrides(p) for p in get_panel(panel_name)]
+    try:
+        named_panel = get_panel(panel_name)
+    except ValueError as e:
+        # Unknown panel names hard-error (era-load-bearing choice, see
+        # get_panel) — surface the valid names instead of a traceback.
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+    panel = [_with_overrides(p) for p in named_panel]
     gids = [g.strip() for g in group_ids.split(",") if g.strip()] if group_ids else None
 
     console.print(f"[blue]Running panel on batch {batch_dir}[/blue]")
@@ -1730,7 +1762,20 @@ def export_stitch_panel(
             "matches no blessed panel composition (v4: claude+codex/gpt-5.6-sol"
             "+opencode/Kimi; v3: claude+codex/gpt-5.5+agy). Labels are "
             "still stamped with the panel_unanimous_* labelers, so only use this "
-            "after an explicit provenance decision."
+            "after an explicit provenance decision. A composition with no known "
+            "era additionally needs --stamp-era to say WHICH labeler generation "
+            "to mint."
+        ),
+    ),
+    stamp_era: str = typer.Option(
+        None,
+        "--stamp-era",
+        help=(
+            "Explicitly declare the labeler era ('v3' or 'v4') to stamp for THIS "
+            "run, overriding per-batch era resolution. Required when a batch's "
+            "composition matches no blessed or known-historical era — export "
+            "refuses to guess which panel_* generation unknown provenance "
+            "belongs to."
         ),
     ),
 ):
@@ -1745,8 +1790,10 @@ def export_stitch_panel(
     vacuous on an empty set and are skipped there). Rows upsert by group_id
     (idempotent). Provenance is gated on (provider, model) voter pairs: batches
     matching the v3-era panel exactly still export, stamped with the v3
-    labelers; anything matching no blessed composition is refused unless
-    ``--allow-nonstandard-panel`` is passed (composition is provenance).
+    labelers (as do the known-historical v3 transport-swap batches); anything
+    matching no blessed composition is refused unless
+    ``--allow-nonstandard-panel`` is passed (composition is provenance), and a
+    composition with no known era additionally requires ``--stamp-era``.
 
     Examples:
         crosswalk agent stitch-export \\
@@ -1754,12 +1801,20 @@ def export_stitch_panel(
             -b data/agents/stitching/batches/us_boston_streets_phase3
     """
     from ..agent_labeling.stitch_export import (
+        LABELERS_BY_ERA,
         REASON_HUMAN_PRECEDENCE,
+        batch_panel_era,
         nonstandard_panel_batches,
         plan_exports,
         write_exports,
         write_vote_provenance,
     )
+
+    if stamp_era is not None and stamp_era not in LABELERS_BY_ERA:
+        console.print(
+            f"[red]--stamp-era must be one of {sorted(LABELERS_BY_ERA)}, got {stamp_era!r}[/red]"
+        )
+        raise typer.Exit(1)
 
     # Support both repeatable --batch and comma-separated values.
     batch_dirs: list[Path] = []
@@ -1768,6 +1823,19 @@ def export_stitch_panel(
             part = part.strip()
             if part:
                 batch_dirs.append(Path(part))
+
+    # Era stamping and vote-provenance archival key batches by BASENAME —
+    # duplicates would mis-attribute one dir's era/ballots to another. Refuse
+    # up front, before any planning.
+    names = [bd.name for bd in batch_dirs]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        console.print(
+            f"[red]Batch dirs have duplicate basenames {dupes} — era stamping "
+            f"and vote archival key on the basename and would collapse them. "
+            f"Pass uniquely-named batch dirs.[/red]"
+        )
+        raise typer.Exit(1)
 
     for bd in batch_dirs:
         if not (bd / "consensus.csv").exists():
@@ -1792,8 +1860,28 @@ def export_stitch_panel(
             )
         raise typer.Exit(1)
 
+    # Per-batch labeler era: resolved from votes.csv, or the explicit
+    # --stamp-era override. A batch with NO known era (and no override) is
+    # refused — export never guesses which panel_* generation to mint.
+    eras = {bd: (stamp_era or batch_panel_era(bd)) for bd in batch_dirs}
+    era_less = sorted(bd.name for bd, era in eras.items() if not era)
+    if era_less:
+        console.print(
+            f"[red]Batches {era_less} match no blessed or known-historical panel "
+            f"era — refusing to guess which panel_* labeler generation to mint. "
+            f"Re-run with an explicit --stamp-era "
+            f"{{{', '.join(sorted(LABELERS_BY_ERA))}}} after a provenance "
+            f"decision.[/red]"
+        )
+        raise typer.Exit(1)
+
     report = plan_exports(
-        batch_dirs, dataset, labels_dir, max_edges=max_edges, export_empty_set=empty_set
+        batch_dirs,
+        dataset,
+        labels_dir,
+        max_edges=max_edges,
+        export_empty_set=empty_set,
+        stamp_era=stamp_era,
     )
 
     none_note = f", {report.n_unanimous_none} unanimous-NONE candidates" if empty_set else ""
@@ -1808,6 +1896,17 @@ def export_stitch_panel(
         f"{report.n_auto_accept} auto_accept candidates{none_note}{decomp_note}[/bold]"
     )
     console.print(f"  Batches (in precedence order): {', '.join(b.name for b in batch_dirs)}")
+    # Per-batch resolved era + the labeler tags a (re-)export will mint, so an
+    # operator re-exporting an old batch SEES what it will be stamped as.
+    for bd in batch_dirs:
+        era = eras[bd]
+        accept_tag, none_tag, decomposed_tag = LABELERS_BY_ERA[era]
+        override = " (--stamp-era override)" if stamp_era else ""
+        # Parentheses, not square brackets: rich would swallow [tags] as markup.
+        console.print(
+            f"  Stamp era: {bd.name} -> {era}{override} "
+            f"(mints {accept_tag} / {none_tag} / {decomposed_tag})"
+        )
 
     # Per-group report.
     for g in report.groups:

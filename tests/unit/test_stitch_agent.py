@@ -1833,8 +1833,22 @@ def test_default_panel_is_v4():
     assert kimi.timeout == 480
     assert sr.get_panel("default") is sr.DEFAULT_PANEL
     assert sr.get_panel("v4") is sr.DEFAULT_PANEL
-    assert sr.get_panel("nonexistent") is sr.DEFAULT_PANEL
+    # Empty/None means "no choice made" -> the default panel.
     assert sr.get_panel(None) is sr.DEFAULT_PANEL
+    assert sr.get_panel("") is sr.DEFAULT_PANEL
+
+
+def test_get_panel_unknown_name_is_a_hard_error():
+    """Panel choice is era-load-bearing (it decides the export labeler
+    generation), so a typo must error listing the valid names — never silently
+    run the default panel (#398 review, finding 5)."""
+    with pytest.raises(ValueError, match="unknown panel 'v3-candiate'.*valid panels"):
+        sr.get_panel("v3-candiate")
+    # The error enumerates every valid name.
+    with pytest.raises(ValueError) as exc:
+        sr.get_panel("bogus")
+    for name in sr.PANELS:
+        assert name in str(exc.value)
 
 
 def test_v3_panels_remain_reproducible():

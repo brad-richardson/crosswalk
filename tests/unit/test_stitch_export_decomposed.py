@@ -19,9 +19,11 @@ import pytest
 
 from crosswalk.agent_labeling.stitch_export import (
     PANEL_DECOMPOSED_LABELER,
+    PANEL_DECOMPOSED_LABELER_V3,
     REASON_CLASS_MISMATCH,
     REASON_EXPORTED,
     REASON_HUMAN_PRECEDENCE,
+    REASON_SUBPROBLEM_ERA_MIXED,
     REASON_SUBPROBLEM_FAILED,
     REASON_SUBPROBLEMS_UNVOTED,
     plan_exports,
@@ -30,7 +32,14 @@ from crosswalk.agent_labeling.stitch_export import (
 from crosswalk.labeling.stitching_store import StitchingLabelStore
 from crosswalk.matching.group_decomposition import subproblem_id
 
-from .test_stitch_export import CONSENSUS_COLUMNS, _edge, _line
+from .test_stitch_export import (
+    _V3_VOTERS,
+    _V4_VOTERS,
+    CONSENSUS_COLUMNS,
+    _edge,
+    _line,
+    _write_votes_csv,
+)
 
 DATASET = "test_ds"
 PARENT = "beef0001"
@@ -49,6 +58,7 @@ def make_decomposed_batch(
     target_classes: dict | None = None,
     sliver_edges: set | None = None,
     roster_extra: list[str] | None = None,
+    voters: list[tuple[str, str]] | None = _V4_VOTERS,
 ) -> tuple[Path, list[str]]:
     """Write a synthetic decomposed batch dir.
 
@@ -60,10 +70,14 @@ def make_decomposed_batch(
       mean_confidence: consensus confidence.
 
     ``roster_extra`` appends extra ids to the parent's roster (e.g. a size-gated
-    oversized sub-problem that was never packed or voted). Returns the batch dir
-    and the ordered sub-problem ids.
+    oversized sub-problem that was never packed or voted). ``voters`` writes a
+    votes.csv so the batch resolves to a labeler era (default: the blessed v4
+    composition — write_exports refuses era-less batches); ``None`` omits it.
+    Returns the batch dir and the ordered sub-problem ids.
     """
     batch_dir.mkdir(parents=True, exist_ok=True)
+    if voters is not None:
+        _write_votes_csv(batch_dir, voters)
     ref_classes = ref_classes or {}
     target_classes = target_classes or {}
     sliver_edges = sliver_edges or set()
@@ -379,3 +393,77 @@ def test_superseded_sub_row_never_exports_individually(tmp_path, labels_dir):
     assert write_exports(report, DATASET, labels_dir) == 1
     df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
     assert list(df["group_id"]) == [PARENT]
+
+
+# --- era resolution across contributing batch dirs (#398 review, finding 3) ----
+
+
+def _revote_dir(
+    batch_dir: Path, sub_id: str, edges: list[tuple[str, str]], voters: list[tuple[str, str]]
+) -> Path:
+    """A follow-up batch dir carrying ONLY a re-voted sub-problem's consensus row.
+
+    Mirrors re-running a failed/unvoted sub-problem in a later wave: no roster
+    of its own, no batch.json — just consensus.csv (merged by precedence) and
+    votes.csv (era provenance).
+    """
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    _write_votes_csv(batch_dir, voters)
+    with (batch_dir / "consensus.csv").open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=CONSENSUS_COLUMNS)
+        w.writeheader()
+        w.writerow(
+            {
+                "group_id": sub_id,
+                "consensus": "unanimous",
+                "choice": "A",
+                "edge_set": json.dumps([[r, t] for r, t in edges]),
+                "routing": "auto_accept",
+                "n_votes": 3,
+                "n_valid": 3,
+                "minority": "",
+                "mean_confidence": 0.9,
+                "route_reason": "unanimous",
+            }
+        )
+    return batch_dir
+
+
+def test_recomposition_blocks_on_mixed_era_subproblems(tmp_path, labels_dir):
+    """A v3-era wave whose unvoted sub-problem is re-voted post-bless by a
+    v4-era batch dir must NOT mint a label: the union would mix panel
+    compositions under a single era tag. Blocked as subproblem_era_mixed."""
+    e1, e2 = [("r1", "t1")], [("r2", "t2")]
+    b1, sub_ids = make_decomposed_batch(
+        tmp_path / "b1",
+        [{"edges": e1}, {"edges": e2, "voted": False}],
+        voters=_V3_VOTERS,
+    )
+    b2 = _revote_dir(tmp_path / "b2", sub_ids[1], e2, voters=_V4_VOTERS)
+
+    report = _plan([b1, b2], labels_dir)
+    parent = _by_gid(report)[PARENT]
+    assert parent.exported is False
+    assert parent.reason == REASON_SUBPROBLEM_ERA_MIXED
+    assert parent.from_decomposition is True
+    assert write_exports(report, DATASET, labels_dir) == 0
+
+
+def test_recomposition_stamps_era_of_contributing_dirs(tmp_path, labels_dir):
+    """A sub-problem re-voted in a SECOND batch dir of the SAME era recomposes
+    fine — and the label is stamped with the contributing dirs' era (v3), even
+    though the current write-time default is v4."""
+    e1, e2 = [("r1", "t1")], [("r2", "t2")]
+    b1, sub_ids = make_decomposed_batch(
+        tmp_path / "b1",
+        [{"edges": e1}, {"edges": e2, "voted": False}],
+        voters=_V3_VOTERS,
+    )
+    b2 = _revote_dir(tmp_path / "b2", sub_ids[1], e2, voters=_V3_VOTERS)
+
+    report = _plan([b1, b2], labels_dir)
+    parent = _by_gid(report)[PARENT]
+    assert parent.exported is True and parent.panel_era == "v3"
+    assert write_exports(report, DATASET, labels_dir) == 1
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    assert list(df["labeler"]) == [PANEL_DECOMPOSED_LABELER_V3]

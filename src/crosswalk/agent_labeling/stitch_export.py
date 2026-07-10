@@ -31,9 +31,12 @@ A third class covers DECOMPOSED groups (#367 Mode B, ``stitch-batch
 recomposed here — a whole-group label (labeler ``panel_unanimous_decomposed_v4``,
 the union of the sub-selections) is minted ONLY when every sub-problem in the
 batch.json roster resolved as a unanimous accept; any failed or unvoted
-sub-problem blocks the group (``subproblem_failed`` / ``subproblems_unvoted``).
-Sub-problem consensus rows are consumed by that recomposition and never export
-individually. See :mod:`crosswalk.matching.group_decomposition`.
+sub-problem blocks the group (``subproblem_failed`` / ``subproblems_unvoted``),
+as does a sub-verdict set whose contributing batch dirs resolve to different
+panel eras (``subproblem_era_mixed`` — a mixed-composition union must not be
+stamped under a single era). Sub-problem consensus rows are consumed by that
+recomposition and never export individually. See
+:mod:`crosswalk.matching.group_decomposition`.
 
 The empty-set label uses the SAME on-disk representation as a human reject-all
 review (PAIR semantics, ``selected_edges == "[]"``, ``num_refs/num_targets == 0``),
@@ -173,6 +176,28 @@ STANDARD_PANEL_VOTERS: dict[str, frozenset[tuple[str, str]]] = {
     "v4": PANEL_VOTERS_V4,
 }
 
+#: STAMPING-ONLY historical compositions -> labeler era. These compositions
+#: were NEVER a blessed default — they still fail the export gate and require
+#: ``--allow-nonstandard-panel``, exactly as when they were first exported —
+#: but they DID mint committed labels under a specific era via an explicit
+#: operator decision, so era resolution must keep attributing them to that
+#: era: a re-export must re-stamp the SAME tag, never drift to the current one.
+#:
+#: * 2026-07-07 8-dataset wave (commit 80dbe1f, #356): the Gemini third voter
+#:   ran via the opencode transport instead of agy (Brad-approved swap during
+#:   the agy quota outage) — same model, different provider string. Six
+#:   datasets' committed ``*_v3`` labels trace to this composition (pairs
+#:   verified against ``labels/votes/dataset=*/votes.csv``).
+HISTORICAL_ERA_VOTERS: dict[frozenset[tuple[str, str]], str] = {
+    frozenset(
+        {
+            ("claude", "claude-opus-4-8"),
+            ("codex", "gpt-5.5"),
+            ("opencode", "openrouter/google/gemini-3.5-flash"),
+        }
+    ): "v3",
+}
+
 #: The (provider, model) composition of the CURRENT default panel — must stay
 #: in lockstep with ``stitch_runner.DEFAULT_PANEL`` (asserted in
 #: tests/unit/test_stitch_export.py, so a panel change without a provenance
@@ -209,12 +234,20 @@ def _batch_voters(batch_dir: Path) -> set[tuple[str, str]] | None:
 
 
 def batch_panel_era(batch_dir: Path) -> str | None:
-    """Return the labeler era ("v3"/"v4") whose blessed voter set a batch matches.
+    """Return the labeler era ("v3"/"v4") a batch's voter composition belongs to.
 
-    ``None`` means the batch is not attributable to any blessed composition:
-    a nonstandard panel, or no readable ``votes.csv``. Callers use this both to
-    gate exports (:func:`nonstandard_panel_batches`) and to stamp each era's
-    own labeler tags at write time (:func:`write_exports`).
+    Resolution order: the blessed sets (:data:`STANDARD_PANEL_VOTERS`), then the
+    stamping-only historical map (:data:`HISTORICAL_ERA_VOTERS`) — compositions
+    that minted committed labels under an era via an explicit operator decision
+    but were never a blessed default. The historical map affects STAMPING only;
+    the export gate (:func:`nonstandard_panel_batches`) still flags those
+    batches, exactly as it did when they were first exported.
+
+    ``None`` means the batch is attributable to NO known era: an unknown
+    composition, or no readable ``votes.csv``. Such batches are refused at
+    write time unless the operator declares an era explicitly
+    (``plan_exports(stamp_era=...)`` / CLI ``--stamp-era``); they never
+    silently default to the current era.
     """
     voters = _batch_voters(batch_dir)
     if voters is None:
@@ -222,7 +255,7 @@ def batch_panel_era(batch_dir: Path) -> str | None:
     for era, blessed in STANDARD_PANEL_VOTERS.items():
         if voters == blessed:
             return era
-    return None
+    return HISTORICAL_ERA_VOTERS.get(frozenset(voters))
 
 
 def nonstandard_panel_batches(
@@ -272,6 +305,11 @@ REASON_HUMAN_PRECEDENCE = "human_precedence"
 # blocks), blocks the whole-group label.
 REASON_SUBPROBLEM_FAILED = "subproblem_failed"
 REASON_SUBPROBLEMS_UNVOTED = "subproblems_unvoted"
+# The batch dirs contributing a parent's consumed sub-problem verdicts resolve
+# to DIFFERENT panel eras (e.g. a v3-era wave completed by post-bless v4
+# re-votes): the union label would mix compositions under a single era tag, so
+# the group is blocked rather than stamped.
+REASON_SUBPROBLEM_ERA_MIXED = "subproblem_era_mixed"
 
 
 @dataclass
@@ -298,10 +336,13 @@ class GroupExport:
     from_decomposition: bool = False
     n_subproblems: int = 0
     n_subproblems_resolved: int = 0
-    # Labeler era of the SOURCE BATCH ("v3"/"v4", from batch_panel_era), or ""
-    # when the batch matches no blessed composition (nonstandard panels exported
-    # under --allow-nonstandard-panel, or no readable votes.csv). write_exports
-    # stamps each era's own labeler tags; "" falls back to the current (v4) tags.
+    # Labeler era of the SOURCE BATCH ("v3"/"v4", from batch_panel_era or an
+    # explicit stamp_era), or "" when the batch matches no known composition.
+    # write_exports stamps each era's own labeler tags and REFUSES to write an
+    # exported group with era "" — an unknown composition never silently mints
+    # the current era's provenance (declare one via plan_exports(stamp_era=...)
+    # / CLI --stamp-era). Recomposed groups resolve era across every batch dir
+    # contributing a consumed sub-problem verdict.
     panel_era: str = ""
 
 
@@ -468,11 +509,20 @@ def plan_exports(
     soft_max_edges: int | None = None,
     backstop_max_edges: int | None = None,
     export_empty_set: bool = True,
+    stamp_era: str | None = None,
 ) -> ExportReport:
     """Run the export gates over merged consensus and return a full plan.
 
     Pure w.r.t. the label store: reads human labels but writes nothing. Call
     :func:`write_exports` with the returned report to persist.
+
+    ``stamp_era`` ("v3"/"v4") OVERRIDES per-batch era resolution for this run —
+    every group is stamped with that era's labeler tags regardless of what the
+    batches' votes.csv resolve to. It exists for era-less batches (unknown
+    compositions, which :func:`write_exports` otherwise refuses), so it should
+    accompany ``--allow-nonstandard-panel``-style explicit provenance
+    decisions only. ``None`` (default) resolves each batch via
+    :func:`batch_panel_era`.
 
     The size gate is *structural*, not a flat edge count: a group auto-exports
     when it is a single corridor-pair OR has few assignment-components within a
@@ -496,6 +546,20 @@ def plan_exports(
         soft_max_edges = settings.stitch_export_soft_max_edges
     if backstop_max_edges is None:
         backstop_max_edges = settings.stitch_export_backstop_max_edges
+    if stamp_era is not None and stamp_era not in LABELERS_BY_ERA:
+        raise ValueError(f"stamp_era must be one of {sorted(LABELERS_BY_ERA)}, got {stamp_era!r}")
+
+    # Era stamping (and vote-provenance archival) keys batches by BASENAME, so
+    # duplicate basenames would mis-attribute one dir's era/rows to another
+    # (last-dir-wins). Refuse up front rather than plan on ambiguous identity.
+    names = [Path(bd).name for bd in batch_dirs]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        raise ValueError(
+            f"batch dirs have duplicate basenames {dupes}; era stamping and "
+            "vote-provenance archival key on the basename and would collapse "
+            "them — pass uniquely-named batch dirs."
+        )
     merged = _merge_consensus(batch_dirs)
 
     # Load batch.json groups (geometries/edges) once per distinct batch dir,
@@ -666,6 +730,13 @@ def plan_exports(
                 )
             )
 
+    # Per-dir labeler era ("v3"/"v4"; "" for unattributable), or the explicit
+    # stamp_era override for every dir. Resolved once; used for both the direct
+    # groups (by source batch) and the recomposition era-mix check below.
+    era_by_dir: dict[Path, str] = {
+        bd: (stamp_era or batch_panel_era(bd) or "") for bd in batch_groups
+    }
+
     # Recomposition (#367 Mode B): one outcome per decomposed parent, from its
     # sub-problem verdicts. Conservative all-or-nothing rule — see
     # :func:`_gate_recomposed_group`. When an OLD wave also voted the parent
@@ -688,27 +759,55 @@ def plan_exports(
                 with suppress(ValueError, TypeError):
                     sub_confs.append(float(srow.get("mean_confidence") or 0.0))
         rec = recompose_subproblem_verdicts(parent_gid, roster_ids, verdicts)
-        groups.append(
-            _gate_recomposed_group(
-                gid=parent_gid,
-                bd=bd,
-                grp=grp,
-                rec=rec,
-                meta=candidate_metas.get(parent_gid),
-                human_gids=human_gids,
-                overlap_map=overlap_map,
-                # Weakest-link confidence: the minimum accepted sub-panel mean,
-                # so a reviewer sees the least-certain sub-decision.
-                mean_confidence=min(sub_confs) if sub_confs else 0.0,
-            )
-        )
+        # Weakest-link confidence: the minimum accepted sub-panel mean, so a
+        # reviewer sees the least-certain sub-decision.
+        min_conf = min(sub_confs) if sub_confs else 0.0
 
-    # Stamp each outcome with its source batch's labeler era ("v3"/"v4"; "" for
-    # nonstandard/unattributable) so write_exports can tag v3-era batches with
-    # the v3 labelers instead of silently re-stamping committed history as v4.
-    era_by_name = {bd.name: (batch_panel_era(bd) or "") for bd in batch_groups}
+        # Era of the recomposed label = the era of the batch dirs whose
+        # consensus rows the recomposition CONSUMED (merged precedence), not
+        # the roster dir's: a v3-era wave whose failed sub-problems were
+        # re-voted post-bless in a v4 batch dir would otherwise stamp a
+        # mixed-composition union under a single era. On a mismatch the group
+        # is blocked (subproblem_era_mixed) — never stamped.
+        sub_dirs = {merged[sid][0] for sid in roster_ids if sid in merged}
+        sub_eras = {era_by_dir.get(d, "") for d in (sub_dirs or {bd})}
+        if len(sub_eras) > 1:
+            groups.append(
+                GroupExport(
+                    group_id=parent_gid,
+                    source_batch=bd.name,
+                    exported=False,
+                    reason=REASON_SUBPROBLEM_ERA_MIXED,
+                    match_type=str(grp.get("match_type") or ""),
+                    n_edges_raw=len(rec.union_edges),
+                    mean_confidence=min_conf,
+                    from_decomposition=True,
+                    n_subproblems=rec.n_subproblems,
+                    n_subproblems_resolved=rec.n_resolved,
+                )
+            )
+            continue
+        ge = _gate_recomposed_group(
+            gid=parent_gid,
+            bd=bd,
+            grp=grp,
+            rec=rec,
+            meta=candidate_metas.get(parent_gid),
+            human_gids=human_gids,
+            overlap_map=overlap_map,
+            mean_confidence=min_conf,
+        )
+        ge.panel_era = next(iter(sub_eras))
+        groups.append(ge)
+
+    # Stamp every DIRECT outcome with its source batch's era so write_exports
+    # can tag each batch with its own labeler generation. Recomposed groups
+    # were already stamped above from their CONTRIBUTING dirs (which may differ
+    # from the roster dir this loop would key on) — leave them untouched.
+    era_by_name = {bd.name: era for bd, era in era_by_dir.items()}
     for g in groups:
-        g.panel_era = era_by_name.get(g.source_batch, "")
+        if not g.from_decomposition:
+            g.panel_era = era_by_name.get(g.source_batch, "")
 
     return ExportReport(
         dataset=dataset,
@@ -976,12 +1075,11 @@ def _gate_recomposed_group(
 
 
 #: Era -> (accept, reject-all, decomposed) labeler tags for write_exports.
-#: v3-era batches keep minting v3-tagged labels on (re-)export; the current
-#: (v4) tags apply to v4 batches AND to era-less exports ("" — nonstandard
-#: compositions force-exported via --allow-nonstandard-panel, or batches with
-#: no readable votes.csv), preserving the pre-v4 behavior of stamping the
-#: current labeler under that explicit override.
-_LABELERS_BY_ERA: dict[str, tuple[str, str, str]] = {
+#: v3-era batches keep minting v3-tagged labels on (re-)export; v4 batches mint
+#: the current tags. There is deliberately NO fallback entry: an era-less group
+#: ("" — unknown composition, or no readable votes.csv) makes write_exports
+#: refuse rather than silently mint the current era's provenance.
+LABELERS_BY_ERA: dict[str, tuple[str, str, str]] = {
     "v3": (PANEL_LABELER_V3, PANEL_NONE_LABELER_V3, PANEL_DECOMPOSED_LABELER_V3),
     "v4": (PANEL_LABELER, PANEL_NONE_LABELER, PANEL_DECOMPOSED_LABELER),
 }
@@ -1002,17 +1100,28 @@ def write_exports(
     their sub-problem selections. Groups whose source batch is a v3-era panel
     (``panel_era == "v3"``, see :func:`batch_panel_era`) are stamped with the v3
     variants instead — re-exporting committed v3 history never rewrites its
-    provenance to v4. Upserts by ``group_id`` (the store replaces an
+    provenance to v4 — and a group with NO resolvable era raises ``ValueError``
+    (declare one explicitly via ``plan_exports(stamp_era=...)`` / CLI
+    ``--stamp-era``) instead of silently minting current-era provenance.
+    Upserts by ``group_id`` (the store replaces an
     existing row for the same group_id), so this is idempotent. The source batch
     name is recorded in the ``session_id`` field for provenance.
     Returns the number of rows written.
     """
+    era_less = sorted(
+        {g.source_batch for g in report.exported if g.panel_era not in LABELERS_BY_ERA}
+    )
+    if era_less:
+        raise ValueError(
+            f"batches {era_less} match no known panel era (blessed or historical) — "
+            f"refusing to stamp panel_* labelers on unknown provenance. Declare the "
+            f"era explicitly with plan_exports(stamp_era=...) / CLI --stamp-era "
+            f"{{{', '.join(sorted(LABELERS_BY_ERA))}}}."
+        )
     store = StitchingLabelStore(dataset, labels_dir=labels_dir)
     written = 0
     for g in report.exported:
-        accept_tag, none_tag, decomposed_tag = _LABELERS_BY_ERA.get(
-            g.panel_era, _LABELERS_BY_ERA["v4"]
-        )
+        accept_tag, none_tag, decomposed_tag = LABELERS_BY_ERA[g.panel_era]
         if g.is_empty_set:
             labeler = none_tag
         elif g.from_decomposition:
@@ -1051,9 +1160,12 @@ def write_vote_provenance(
     back and merged with the current batches, so exporting batches across
     *separate* invocations (``stitch-export -b b1`` then later ``-b b2``) never
     drops earlier ballots — matching ``write_exports``, which only upserts the
-    labels for the groups in each run. Idempotent via dedup (votes by
-    ``source_batch``/``group_id``/``provider``, consensus by
-    ``source_batch``/``group_id``; ``keep="last"`` lets a re-run refresh a batch).
+    labels for the groups in each run. A re-archived batch REPLACES all of its
+    previous rows wholesale (keyed by ``source_batch``, only when the batch
+    contributes a readable file in this call): per-row upsert would leave stale
+    ballots from a different panel composition lingering under the same batch
+    name (e.g. archived agy rows surviving a v4-panel re-run — a 4-voter
+    chimera batch). Rows are still deduped within a run as defense in depth.
 
     ``source_batch`` is the batch dir *basename*, so duplicate basenames in one
     call would collapse distinct ballots — we refuse that rather than lose data.
@@ -1080,12 +1192,12 @@ def write_vote_provenance(
             return None
 
     def _collect(filename: str, dedupe_on: list[str]) -> int:
-        frames = []
-        # Existing archive first (already carries source_batch); current batches
-        # append after it, so keep="last" lets a re-run supersede a stale batch.
-        existing = _read_csv(out_dir / filename)
-        if existing is not None:
-            frames.append(existing)
+        # Current batches first: only a batch that contributes a READABLE file
+        # in this call supersedes its archived rows — a listed batch whose CSV
+        # is missing/empty keeps its archive untouched (never delete ballots
+        # without a replacement).
+        new_frames: list[pd.DataFrame] = []
+        contributing: set[str] = set()
         for bd in batch_dirs:
             df = _read_csv(Path(bd) / filename)
             if df is None:
@@ -1093,7 +1205,21 @@ def write_vote_provenance(
             if "source_batch" in df.columns:  # a re-archived tree; re-tag cleanly
                 df = df.drop(columns="source_batch")
             df.insert(0, "source_batch", Path(bd).name)
-            frames.append(df)
+            contributing.add(Path(bd).name)
+            new_frames.append(df)
+        frames = []
+        existing = _read_csv(out_dir / filename)
+        if existing is not None:
+            # Wholesale replacement per re-archived batch: drop ALL previously
+            # archived rows for the batches refreshed in this call, so stale
+            # ballots from an earlier panel composition (e.g. agy rows under a
+            # batch re-run with the v4 panel) can never linger beside the new
+            # rows as a chimera composition.
+            if "source_batch" in existing.columns and contributing:
+                existing = existing[~existing["source_batch"].astype(str).isin(contributing)]
+            if not existing.empty:
+                frames.append(existing)
+        frames.extend(new_frames)
         if not frames:
             return 0
         merged = pd.concat(frames, ignore_index=True)

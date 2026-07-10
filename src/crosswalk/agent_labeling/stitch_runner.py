@@ -168,10 +168,21 @@ PANELS: dict[str, list[ProviderSpec]] = {
 
 
 def get_panel(name: str | None) -> list[ProviderSpec]:
-    """Resolve a named panel config; unknown/empty names fall back to DEFAULT_PANEL."""
+    """Resolve a named panel config; an empty/None name means DEFAULT_PANEL.
+
+    An UNKNOWN name is a hard error, not a silent default: panel choice is
+    era-load-bearing (it decides which export labeler generation a wave's
+    labels are stamped with), so a typo like ``--panel v3-candiate`` quietly
+    running the v4 default would corrupt a wave's intended provenance.
+    """
     if not name:
         return DEFAULT_PANEL
-    return PANELS.get(name, DEFAULT_PANEL)
+    try:
+        return PANELS[name]
+    except KeyError:
+        raise ValueError(
+            f"unknown panel {name!r}; valid panels: {', '.join(sorted(PANELS))}"
+        ) from None
 
 
 class AbstainReason(StrEnum):
