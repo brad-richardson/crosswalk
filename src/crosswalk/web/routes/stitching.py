@@ -1025,13 +1025,13 @@ async def stitching_select(
                 )
                 return HTMLResponse("Inconsistent selection", status_code=400)
 
-            # De-anchored empty-submit guard: in normal mode "both pill fields
-            # empty" is a deliberate deselection of the pre-seed, but in
-            # de-anchored mode it is the UNTOUCHED default (blank slate), so a
-            # misclick on "Select This" would silently record a reject-all label
-            # into the exact eval slice this mode exists to keep clean. Require
-            # an explicit confirmation flag (the client shows a confirm dialog
-            # and sets it) before storing an empty de-anchored selection.
+            # De-anchored empty-submit guard: de-anchored mode now starts fully
+            # selected, so an empty submit means the reviewer cleared every
+            # pill (e.g. via the None bulk buttons). That is far stronger
+            # intent than the old blank-slate default, but a reject-all label
+            # still lands in the exact eval slice this mode exists to keep
+            # clean, so keep requiring the explicit confirmation flag (the
+            # client shows a confirm dialog and sets it) before storing it.
             if (
                 deanchored
                 and not ref_set
