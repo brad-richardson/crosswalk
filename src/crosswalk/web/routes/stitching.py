@@ -609,6 +609,12 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
       so nothing signals the proposal) and the client edge payload is widened to
       the full candidate union so live confidence can reason about rejected
       candidates the reviewer pairs up.
+    - A ``prior_label`` delta (drift-aware coverage of an earlier review of this
+      geometry — see ``labeling/stitch_coverage.py``) OVERRIDES the pre-seed in
+      BOTH modes: pills prefill to ``kept ∩ current``, new-since-label members
+      start unselected/hidden and are visually flagged, and the coverage banner
+      is shown. This anchors the reviewer to his OWN prior judgment, never the
+      optimizer's, so it does not un-blind the de-anchored slate.
     """
     geojson = _build_group_geojson(group, deanchored=deanchored)
     ctx = _build_group_context(group, dataset=dataset)
@@ -625,6 +631,29 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
         ctx["preseed_inactive_ids"] = list(group.get("ref_ids", [])) + list(
             group.get("target_ids", [])
         )
+
+    prior = group.get("prior_label")
+    if prior:
+        # Delta review: prefill the KEPT ∩ CURRENT membership from the prior
+        # label; new members start unselected (and hidden on the map, matching
+        # the pill state) and are flagged as new-since-label in the template.
+        # Ids are matched as strings but the group's ORIGINAL id values are
+        # passed through so template comparisons (ref.id in ...) stay typed.
+        covered_refs = {str(x) for x in prior.get("covered_ref_ids", [])}
+        covered_targets = {str(x) for x in prior.get("covered_target_ids", [])}
+        ref_ids = list(group.get("ref_ids", []))
+        target_ids = list(group.get("target_ids", []))
+        ctx["prior_label"] = prior
+        ctx["preseed_active_refs"] = [r for r in ref_ids if str(r) in covered_refs]
+        ctx["preseed_active_targets"] = [t for t in target_ids if str(t) in covered_targets]
+        # Membership prefill, not a pair-level assertion: leave the exact-edge
+        # field empty so an untouched submit records a SET label of the pills.
+        ctx["preseed_edges"] = []
+        new_ids = [r for r in ref_ids if str(r) not in covered_refs] + [
+            t for t in target_ids if str(t) not in covered_targets
+        ]
+        ctx["preseed_inactive_ids"] = new_ids
+        ctx["prior_new_ids"] = new_ids
     return geojson, ctx
 
 

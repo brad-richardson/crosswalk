@@ -14,6 +14,7 @@ web ``/stitching-review`` combined queue correct:
 import csv
 import json
 
+import pandas as pd
 from typer.testing import CliRunner
 
 from crosswalk.cli import app
@@ -31,6 +32,43 @@ def _batch(dataset_id, group_ids):
     }
 
 
+def _labels(dataset_id, group_ids):
+    """A minimal stitching-labels frame with one exact-id row per group_id."""
+    return pd.DataFrame(
+        [
+            {
+                "group_id": gid,
+                "dataset_id": dataset_id,
+                "selected_edges": "[]",
+                "match_type": "M:N",
+                "num_refs": 0,
+                "num_targets": 0,
+                "labeler": "brad",
+                "labeled_at": "2026-07-09T00:00:00+00:00",
+                "session_id": "s1",
+                "label_semantics": "pair",
+                "ref_ids": "",
+                "target_ids": "",
+            }
+            for gid in group_ids
+        ],
+        columns=[
+            "group_id",
+            "dataset_id",
+            "selected_edges",
+            "match_type",
+            "num_refs",
+            "num_targets",
+            "labeler",
+            "labeled_at",
+            "session_id",
+            "label_semantics",
+            "ref_ids",
+            "target_ids",
+        ],
+    )
+
+
 class TestGetUnreviewedPerGroupDataset:
     """The unreviewed filter must key on each group's owning dataset."""
 
@@ -41,8 +79,8 @@ class TestGetUnreviewedPerGroupDataset:
             def __init__(self, dataset_id, *a, **k):
                 self.dataset_id = dataset_id
 
-            def get_reviewed_group_ids(self, dataset_id=None):
-                return {"g_reviewed"}
+            def load(self, dataset_id=None):
+                return _labels(self.dataset_id, ["g_reviewed"])
 
         monkeypatch.setattr("crosswalk.labeling.stitching_store.StitchingLabelStore", FakeStore)
         groups = [{"group_id": "g_reviewed"}, {"group_id": "g_fresh"}]
@@ -54,14 +92,14 @@ class TestGetUnreviewedPerGroupDataset:
 
         # ds_a has "g1" reviewed; ds_b has nothing reviewed. A colliding group_id
         # must stay visible for ds_b.
-        reviewed = {"ds_a": {"g1"}, "ds_b": set()}
+        reviewed = {"ds_a": ["g1"], "ds_b": []}
 
         class FakeStore:
             def __init__(self, dataset_id, *a, **k):
                 self.dataset_id = dataset_id
 
-            def get_reviewed_group_ids(self, dataset_id=None):
-                return reviewed[self.dataset_id]
+            def load(self, dataset_id=None):
+                return _labels(self.dataset_id, reviewed[self.dataset_id])
 
         monkeypatch.setattr("crosswalk.labeling.stitching_store.StitchingLabelStore", FakeStore)
         groups = [
@@ -86,8 +124,8 @@ class TestGetUnreviewedPerGroupDataset:
                 self.dataset_id = dataset_id
                 calls.append(dataset_id)
 
-            def get_reviewed_group_ids(self, dataset_id=None):
-                return set()
+            def load(self, dataset_id=None):
+                return _labels(self.dataset_id, [])
 
         monkeypatch.setattr("crosswalk.labeling.stitching_store.StitchingLabelStore", FakeStore)
         groups = [{"group_id": f"g{i}", "dataset_id": "ds_a"} for i in range(5)]

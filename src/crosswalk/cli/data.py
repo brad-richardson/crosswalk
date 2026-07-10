@@ -2202,6 +2202,11 @@ def _generate_stitch_batch_for_dataset(
         panel_failed_group_ids,
     )
     from ..filenames import bridge_filename, groups_sidecar_path, stitch_batch_path
+    from ..labeling.stitch_coverage import (
+        PRIOR_LABEL_KEY,
+        compute_prior_coverage,
+        fully_covered_group_ids,
+    )
     from ..labeling.stitching_store import StitchingLabelStore
     from ..matching.alternatives import generate_top_k_alternatives
     from ..matching.batch_selection import select_stitching_batch
@@ -2227,10 +2232,24 @@ def _generate_stitch_batch_for_dataset(
         console.print("  [yellow]No groups to process[/yellow]")
         return False
 
-    # Load existing stitching labels to skip already-reviewed
+    # Load existing stitching labels and classify every CURRENT group against
+    # them with the drift-aware coverage mapping (labeling/stitch_coverage.py,
+    # built on the eval-side recover_labeled_groups). group_ids are content
+    # hashes, so a regenerated sidecar re-mints ids for already-reviewed
+    # geometry: exact-id matches and drift-mapped FULLY-covered groups are
+    # treated as reviewed (excluded); PARTIALLY-covered groups stay in the
+    # queue and get delta metadata attached after selection below.
     stitch_store = StitchingLabelStore(ds_name)
-    reviewed_ids = stitch_store.get_reviewed_group_ids(ds_name)
-    console.print(f"  Already reviewed: {len(reviewed_ids)} groups")
+    coverage = compute_prior_coverage(groups, stitch_store.load(ds_name))
+    reviewed_ids = fully_covered_group_ids(coverage)
+    n_exact = sum(1 for c in coverage.values() if c.exact_id)
+    n_drift_full = sum(1 for c in coverage.values() if c.fully_covered and not c.exact_id)
+    n_partial = len(coverage) - n_exact - n_drift_full
+    console.print(
+        f"  Already reviewed: {len(reviewed_ids)} groups "
+        f"({n_exact} exact-id, {n_drift_full} drift-mapped fully covered); "
+        f"{n_partial} partially covered (stay queued with review deltas)"
+    )
 
     # Gate the human queue to groups the agent panel routed to human_review
     # (unless --include-unvoted). Restrict to the current sidecar's group ids
@@ -2317,6 +2336,19 @@ def _generate_stitch_batch_for_dataset(
     n_reasons = attach_panel_route_reasons(selected, ds_name)
     if n_reasons:
         console.print(f"  Panel route reasons attached: {n_reasons}/{len(selected)}")
+
+    # Attach prior-label delta metadata to PARTIALLY-covered queued groups so
+    # the review UI can show the coverage banner, prefill kept ∩ current, and
+    # highlight new-since-label members. Pure annotation — never changes which
+    # groups were selected.
+    n_delta = 0
+    for g in selected:
+        cov = coverage.get(str(g.get("group_id")))
+        if cov is not None and not cov.fully_covered:
+            g[PRIOR_LABEL_KEY] = cov.to_batch_dict()
+            n_delta += 1
+    if n_delta:
+        console.print(f"  Prior-label deltas attached: {n_delta}/{len(selected)}")
 
     # Fill in spatial context for each group
     console.print("  Filling spatial context...")

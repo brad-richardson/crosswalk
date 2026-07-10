@@ -80,6 +80,20 @@
     </div>
     {% endif %}
 
+    {% if prior_label is defined and prior_label %}
+    <!-- Delta-review banner: a prior label drift-maps onto this group but only
+         PARTIALLY covers its current membership (labeling/stitch_coverage.py).
+         Kept ∩ current is pre-selected; new-since-label members start
+         unselected and carry a "new" pill flag. -->
+    <div class="prior-label-notice" id="prior-label-notice" role="status">
+        &#8635; {{ prior_label.n_covered_refs }}/{{ prior_label.n_total_refs }} refs and
+        {{ prior_label.n_covered_targets }}/{{ prior_label.n_total_targets }} targets
+        covered by {{ prior_label.labeler or 'a prior' }}&rsquo;s
+        {{ (prior_label.labeled_at or '')[:10] }} label of {{ prior_label.prior_group_id }}
+        &mdash; kept members pre-selected, new members flagged and unselected.
+    </div>
+    {% endif %}
+
     <!-- ============ TAB: REVIEW ============ -->
     <div class="stitch-panel" data-tab-panel="review">
         <!-- Current assignment summary. Live-updated by updateReviewSummary()
@@ -189,7 +203,10 @@
             <span class="segment-toggle-label" onclick="toggleAllRef()" title="Toggle all ref">Ref</span>
             <div class="segment-pills">
                 {% for ref in ref_details %}
-                <button class="segment-pill segment-pill-ref{% if preseed_active_refs is not defined or preseed_active_refs is none or ref.id in preseed_active_refs %} active{% endif %}"
+                {# NOTE: title MUST stay the bare segment id — populateSelection()
+                   collects submitted ids from pill titles. New-since-label pills
+                   are flagged via class only. #}
+                <button class="segment-pill segment-pill-ref{% if preseed_active_refs is not defined or preseed_active_refs is none or ref.id in preseed_active_refs %} active{% endif %}{% if prior_new_ids is defined and ref.id in prior_new_ids %} segment-pill-new{% endif %}"
                         onclick="toggleSegment(this, '{{ ref.id }}', 'ref')"
                         data-seg-id="{{ ref.id }}"
                         data-cls="{{ ref.cls or '' }}" data-name="{{ ref.name or '' }}"
@@ -212,7 +229,7 @@
             <span class="segment-toggle-label" onclick="toggleAllTarget()" title="Toggle all target">Trgt</span>
             <div class="segment-pills">
                 {% for tgt in target_details %}
-                <button class="segment-pill segment-pill-target{% if preseed_active_targets is not defined or preseed_active_targets is none or tgt.id in preseed_active_targets %} active{% endif %}"
+                <button class="segment-pill segment-pill-target{% if preseed_active_targets is not defined or preseed_active_targets is none or tgt.id in preseed_active_targets %} active{% endif %}{% if prior_new_ids is defined and tgt.id in prior_new_ids %} segment-pill-new{% endif %}"
                         onclick="toggleSegment(this, '{{ tgt.id }}', 'target')"
                         data-seg-id="{{ tgt.id }}"
                         data-cls="{{ tgt.cls or '' }}" data-name="{{ tgt.name or '' }}"

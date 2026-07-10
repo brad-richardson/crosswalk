@@ -1183,14 +1183,22 @@ def load_stitch_batch(dataset_id: str) -> dict | None:
 
 
 def get_unreviewed_stitch_groups(dataset_id: str, groups: list[dict]) -> list[dict]:
-    """Filter groups to only those not yet reviewed.
+    """Filter groups to only those not yet reviewed (drift-aware).
 
     Each group is checked against ITS OWN dataset's stitching labels: for a
     normal per-dataset batch that is just ``dataset_id``, but for the combined
     ``__all__`` queue every group carries its owning ``dataset_id`` and must be
     filtered against that partition's reviewed set (a group is reviewed in its
-    own dataset, never in the synthetic ``__all__`` one). Reviewed-id sets are
-    loaded once per owning dataset and cached.
+    own dataset, never in the synthetic ``__all__`` one). Labels are loaded and
+    coverage-mapped once per owning dataset.
+
+    group_ids are content hashes, so a label recorded against an earlier
+    grouping detaches when membership churns. Coverage semantics (see
+    ``labeling/stitch_coverage.py``): exact-id and drift-mapped FULLY-covered
+    groups are excluded as reviewed; PARTIALLY-covered groups stay queued with
+    fresh ``prior_label`` delta metadata (recomputed here from current labels,
+    superseding any batch-build-time annotation); unmapped groups pass through
+    untouched.
 
     Args:
         dataset_id: Queue identifier (a real dataset, or ``__all__``)
@@ -1199,20 +1207,34 @@ def get_unreviewed_stitch_groups(dataset_id: str, groups: list[dict]) -> list[di
     Returns:
         List of unreviewed group dicts
     """
+    from ..labeling.stitch_coverage import PRIOR_LABEL_KEY, compute_prior_coverage
     from ..labeling.stitching_store import StitchingLabelStore
 
-    reviewed_by_ds: dict[str, set] = {}
+    # Group the queue entries by owning dataset (coverage is per-partition).
+    groups_by_ds: dict[str, list[dict]] = {}
+    for g in groups:
+        groups_by_ds.setdefault(g.get("dataset_id") or dataset_id, []).append(g)
 
-    def _reviewed_for(ds: str) -> set:
-        if ds not in reviewed_by_ds:
-            reviewed_by_ds[ds] = StitchingLabelStore(ds).get_reviewed_group_ids(ds)
-        return reviewed_by_ds[ds]
+    coverage: dict[tuple[str, str], object] = {}
+    for ds, ds_groups in groups_by_ds.items():
+        labels_df = StitchingLabelStore(ds).load(ds)
+        for gid, cov in compute_prior_coverage(ds_groups, labels_df).items():
+            coverage[(ds, gid)] = cov
 
-    return [
-        g
-        for g in groups
-        if g.get("group_id") not in _reviewed_for(g.get("dataset_id") or dataset_id)
-    ]
+    out: list[dict] = []
+    for g in groups:
+        ds = g.get("dataset_id") or dataset_id
+        cov = coverage.get((ds, str(g.get("group_id"))))
+        if cov is None:
+            # No mapping: serve as-is, dropping any stale build-time delta.
+            g.pop(PRIOR_LABEL_KEY, None)
+            out.append(g)
+        elif not cov.fully_covered:
+            # Partial coverage: queue with fresh delta metadata.
+            g[PRIOR_LABEL_KEY] = cov.to_batch_dict()
+            out.append(g)
+        # Fully covered (exact-id or drift-mapped): reviewed -> excluded.
+    return out
 
 
 def record_stitching_label(
