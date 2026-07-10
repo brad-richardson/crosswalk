@@ -604,11 +604,16 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
 
     - ``deanchored`` is threaded into the template for the mode switch, the
       collapsed proposals, and the blank confidence readout.
-    - In de-anchored mode the optimizer pre-seed is stripped to a blank slate
-      (no active pills, no pre-picked option, every group segment starts hidden
-      so nothing signals the proposal) and the client edge payload is widened to
-      the full candidate union so live confidence can reason about rejected
-      candidates the reviewer pairs up.
+    - In de-anchored mode the optimizer pre-seed is stripped so nothing signals
+      the proposal: no pre-picked option (the exact-edge field stays empty) and
+      the client edge payload is widened to the full candidate union so live
+      confidence can reason about rejected candidates the reviewer pairs up. The
+      pills/map start FULLY selected (every group segment active) — the reviewer
+      then bulk-clears or trims down, which is the fast path he wants: starting
+      from the full extent and toggling to see it, rather than rebuilding a
+      hundreds-of-edge selection from an empty slate. This is a display default
+      only; it hides no proposal signal (a full grid is not the optimizer's pick)
+      and the empty-submit guard still refuses an unconfirmed reject-all.
     """
     geojson = _build_group_geojson(group, deanchored=deanchored)
     ctx = _build_group_context(group, dataset=dataset)
@@ -619,12 +624,13 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
         # Keep the server-rendered sliver count consistent with the widened
         # candidate payload (the live indicator recomputes client-side anyway).
         ctx["sliver_count"] = sum(1 for e in annotated if e["is_sliver"])
-        ctx["preseed_active_refs"] = []
-        ctx["preseed_active_targets"] = []
+        # Fully selected: None => the template marks every rendered pill active,
+        # and an empty inactive list keeps every group segment visible on the map.
+        # No exact option is pre-picked, so this is a SET-membership selection.
+        ctx["preseed_active_refs"] = None
+        ctx["preseed_active_targets"] = None
         ctx["preseed_edges"] = []
-        ctx["preseed_inactive_ids"] = list(group.get("ref_ids", [])) + list(
-            group.get("target_ids", [])
-        )
+        ctx["preseed_inactive_ids"] = []
     return geojson, ctx
 
 
@@ -1019,13 +1025,13 @@ async def stitching_select(
                 )
                 return HTMLResponse("Inconsistent selection", status_code=400)
 
-            # De-anchored empty-submit guard: in normal mode "both pill fields
-            # empty" is a deliberate deselection of the pre-seed, but in
-            # de-anchored mode it is the UNTOUCHED default (blank slate), so a
-            # misclick on "Select This" would silently record a reject-all label
-            # into the exact eval slice this mode exists to keep clean. Require
-            # an explicit confirmation flag (the client shows a confirm dialog
-            # and sets it) before storing an empty de-anchored selection.
+            # De-anchored empty-submit guard: de-anchored mode now starts fully
+            # selected, so an empty submit means the reviewer cleared every
+            # pill (e.g. via the None bulk buttons). That is far stronger
+            # intent than the old blank-slate default, but a reject-all label
+            # still lands in the exact eval slice this mode exists to keep
+            # clean, so keep requiring the explicit confirmation flag (the
+            # client shows a confirm dialog and sets it) before storing it.
             if (
                 deanchored
                 and not ref_set

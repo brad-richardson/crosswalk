@@ -885,6 +885,28 @@
         refreshSelectionUI();
     }
 
+    // Deterministic per-side bulk select/clear. `visible` true = select all,
+    // false = clear all. Instant client-side: flip every GROUP pill's active
+    // class for this side and drive the map ONCE (one restyle pass over the id
+    // list — no per-element server round-trip, so 200+-segment groups stay
+    // smooth for rapid all-on/all-off flashing). Context pills and the other
+    // side are untouched, so no other state is lost. Like any hand edit it
+    // enters manual mode (invalidates a picked option's exact edge set).
+    function setAllSegments(side, visible) {
+        var cls = side === 'ref' ? '.segment-pill-ref' : '.segment-pill-target';
+        var pills = document.querySelectorAll(cls);
+        var ids = [];
+        for (var i = 0; i < pills.length; i++) {
+            pills[i].classList.toggle('active', visible);
+            ids.push(pills[i].title);
+        }
+        if (window.matcherSetSegmentsVisible) {
+            window.matcherSetSegmentsVisible(ids, visible);
+        }
+        enterManualMode();
+        refreshSelectionUI();
+    }
+
     function toggleGroupDetails() {
         var details = document.getElementById('group-details');
         if (details) details.classList.toggle('expanded');
