@@ -16,6 +16,10 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
+from ..matching.group_decomposition import (
+    STATUS_COMPLETE,
+    recompose_subproblem_verdicts,
+)
 from ..matching.sliver import annotate_group_sliver_flags
 
 
@@ -125,6 +129,15 @@ class GroupEval:
     panel_edge_set_filtered: frozenset = field(default_factory=frozenset)
     exact_match_filtered: bool = False
     f1_filtered: float = 0.0
+    # True for a decomposed group's RECOMPOSED verdict (#367 Mode B): one row per
+    # decomposed parent, its ``panel_edge_set`` the union of accepted sub-problem
+    # selections (no single panel voted the whole group). The raw sub-problem
+    # rows are NOT emitted — comparing each sub's partial selection against the
+    # whole-group human label is a category error that double-counts the label
+    # and deflates agreement. Recomposed rows carry no per-provider votes and are
+    # excluded from the option-coverage denominator (a decomposed group has no
+    # single whole-group option menu). ``consensus`` is ``"decomposed"``.
+    is_recomposed: bool = False
 
 
 def _load_group_metadata(group_dir: Path) -> dict:
@@ -364,18 +377,99 @@ def recover_empty_reject_all(groups: list[dict], human_df: pd.DataFrame) -> dict
     return {"recovered": recovered, "unrecoverable": unrecoverable}
 
 
+def _load_decomposition(
+    batch_dir: Path,
+) -> tuple[dict[str, str], dict[str, list[str]], dict[str, dict]]:
+    """Read a batch's decomposition structure from ``batch.json`` (#367 Mode B).
+
+    Returns ``(sub_to_parent, rosters, parent_src)`` where ``sub_to_parent`` maps
+    each sub-problem id to its parent, ``rosters`` maps each decomposed parent to
+    its full ``subproblem_ids`` roster, and ``parent_src`` maps each parent to its
+    (pack-less) batch.json group dict. All empty for a non-decomposed batch or a
+    batch with no ``batch.json``.
+    """
+    batch_path = Path(batch_dir) / "batch.json"
+    if not batch_path.exists():
+        return {}, {}, {}
+    try:
+        batch = json.loads(batch_path.read_text())
+    except (ValueError, OSError):
+        return {}, {}, {}
+    rosters: dict[str, list[str]] = {}
+    parent_src: dict[str, dict] = {}
+    sub_to_parent: dict[str, str] = {}
+    for g in batch.get("groups", []):
+        if g.get("decomposed_parent") and g.get("subproblem_ids"):
+            pgid = str(g.get("group_id"))
+            roster = [str(s) for s in g["subproblem_ids"]]
+            rosters[pgid] = roster
+            parent_src[pgid] = g
+            for sid in roster:
+                sub_to_parent[sid] = pgid
+    # Defense in depth: any group carrying parent_group_id is a sub-problem even
+    # if a newer roster no longer lists it (budget changed between waves).
+    for g in batch.get("groups", []):
+        if g.get("parent_group_id"):
+            sub_to_parent.setdefault(str(g.get("group_id")), str(g["parent_group_id"]))
+    return sub_to_parent, rosters, parent_src
+
+
+def _synthetic_parent_meta(src: dict) -> dict:
+    """A minimal metadata dict for a pack-less decomposed parent.
+
+    The parent has no evidence pack (only its sub-problems do), so build just
+    enough for :func:`map_human_labels_to_groups` (segment ids) and the eval
+    row's ``match_type``. There is no whole-group option menu, so ``options`` is
+    empty (a decomposed group's answer is the recomposed union, not one option).
+    """
+    ref_ids = [str(r) for r in (src.get("ref_ids") or [])]
+    tgt_ids = [str(t) for t in (src.get("target_ids") or [])]
+    if not ref_ids or not tgt_ids:
+        pairs = [(str(e["ref_id"]), str(e["target_id"])) for e in src.get("edges", []) or []]
+        ref_ids = ref_ids or sorted({r for r, _ in pairs})
+        tgt_ids = tgt_ids or sorted({t for _, t in pairs})
+    return {
+        "match_type": src.get("match_type", ""),
+        "segments": {
+            "reference": [{"id": r, "label": r} for r in ref_ids],
+            "target": [{"id": t, "label": t} for t in tgt_ids],
+        },
+        "options": [],
+    }
+
+
 def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
-    """Compare panel results in a batch against the human labels."""
+    """Compare panel results in a batch against the human labels.
+
+    Decomposed groups (#367 Mode B) are recomposed here rather than evaluated per
+    sub-problem: each sub-problem selects only a slice of the parent, so comparing
+    it against the whole-group human label would double-count the label and
+    deflate agreement. Sub-problem rows are excluded from the per-group metrics
+    and replaced by ONE recomposed row per decomposed parent (``consensus``
+    ``"decomposed"``), whose panel edge set is the union of accepted sub-selections
+    — the same union the exporter would mint.
+    """
     batch_dir = Path(batch_dir)
     consensus_df = pd.read_csv(batch_dir / "consensus.csv", dtype={"group_id": str})
     votes_df = pd.read_csv(batch_dir / "votes.csv", dtype={"group_id": str})
 
+    sub_to_parent, rosters, parent_src = _load_decomposition(batch_dir)
+    consensus_by_gid = {str(r["group_id"]): r for _, r in consensus_df.iterrows()}
+    # Parents that have at least one voted sub-problem are evaluatable.
+    voted_parents = {
+        pgid for pgid, roster in rosters.items() if any(sid in consensus_by_gid for sid in roster)
+    }
+
     group_metas: dict[str, dict] = {}
     for _, row in consensus_df.iterrows():
         gid = str(row["group_id"])
+        if gid in sub_to_parent:
+            continue  # sub-problem pack — evaluated via its parent's recomposition
         gdir = batch_dir / gid
         if (gdir / "metadata.yaml").exists():
             group_metas[gid] = _load_group_metadata(gdir)
+    for pgid in voted_parents:
+        group_metas.setdefault(pgid, _synthetic_parent_meta(parent_src[pgid]))
 
     candidate_edges = _load_batch_candidate_edges(batch_dir)
     sliver_edges = _load_batch_sliver_edges(batch_dir)
@@ -385,6 +479,8 @@ def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
     results: list[GroupEval] = []
     for _, row in consensus_df.iterrows():
         gid = str(row["group_id"])
+        if gid in sub_to_parent:
+            continue  # consumed by the recomposition pass below
         if gid not in mapping:
             continue
         hgid = mapping[gid]
@@ -436,7 +532,74 @@ def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
                 f1_filtered=f1_f,
             )
         )
+
+    results.extend(
+        _recomposed_group_evals(
+            voted_parents, rosters, consensus_by_gid, mapping, human_by_gid, sliver_edges
+        )
+    )
     return results
+
+
+def _recomposed_group_evals(
+    voted_parents: set[str],
+    rosters: dict[str, list[str]],
+    consensus_by_gid: dict[str, dict],
+    mapping: dict[str, str],
+    human_by_gid: dict[str, object],
+    sliver_edges: dict[str, frozenset],
+) -> list[GroupEval]:
+    """One recomposed eval row per decomposed parent (union of sub-selections)."""
+    out: list[GroupEval] = []
+    for pgid in sorted(voted_parents):
+        if pgid not in mapping:
+            continue
+        roster = rosters[pgid]
+        verdicts: dict[str, tuple[str, frozenset]] = {}
+        for sid in roster:
+            srow = consensus_by_gid.get(sid)
+            if srow is None:
+                continue
+            verdicts[sid] = (
+                str(srow.get("routing", "")),
+                _parse_edge_set(srow.get("edge_set")),
+            )
+        rec = recompose_subproblem_verdicts(pgid, roster, verdicts)
+        panel_es = frozenset((str(r), str(t)) for r, t in rec.union_edges)
+
+        hgid = mapping[pgid]
+        human_es = _human_edge_set(human_by_gid[hgid]["selected_edges"])
+        exact = panel_es == human_es
+        _, _, f1 = edge_prf(panel_es, human_es)
+
+        group_slivers = sliver_edges.get(pgid, frozenset())
+        panel_es_f = panel_es - group_slivers
+        human_es_f = human_es - group_slivers
+        exact_f = panel_es_f == human_es_f
+        _, _, f1_f = edge_prf(panel_es_f, human_es_f)
+
+        out.append(
+            GroupEval(
+                group_id=pgid,
+                human_group_id=hgid,
+                match_type="",
+                human_edge_set=human_es,
+                consensus="decomposed",
+                routing=("auto_accept" if rec.status == STATUS_COMPLETE else "human_review"),
+                panel_choice="RECOMPOSED",
+                panel_edge_set=panel_es,
+                exact_match=exact,
+                f1=f1,
+                option_covered=False,
+                provider_votes={},
+                human_edge_set_filtered=human_es_f,
+                panel_edge_set_filtered=panel_es_f,
+                exact_match_filtered=exact_f,
+                f1_filtered=f1_f,
+                is_recomposed=True,
+            )
+        )
+    return out
 
 
 def summarize(results: list[GroupEval]) -> dict:
@@ -493,13 +656,23 @@ def summarize(results: list[GroupEval]) -> dict:
         for prov, vals in sorted(providers.items())
     }
 
-    # Option-coverage gap.
-    covered = sum(r.option_covered for r in results)
+    # Option-coverage gap. Recomposed decomposed-group rows (#367 Mode B) have no
+    # whole-group option menu (their answer is the union of sub-selections), so
+    # they are excluded from the denominator rather than always counted as a gap.
+    option_rows = [r for r in results if not r.is_recomposed]
+    n_opt = len(option_rows)
+    covered = sum(r.option_covered for r in option_rows)
     summary["option_coverage"] = {
         "covered": covered,
-        "gap": n - covered,
-        "gap_rate": round((n - covered) / n, 3),
+        "gap": n_opt - covered,
+        "gap_rate": round((n_opt - covered) / n_opt, 3) if n_opt else 0.0,
     }
+
+    # Decomposition (#367 Mode B): report the recomposed-parent count separately
+    # so a reader knows how many rows are unions rather than direct panel votes.
+    n_recomposed = sum(1 for r in results if r.is_recomposed)
+    if n_recomposed:
+        summary["decomposition"] = {"recomposed_parents": n_recomposed}
     return summary
 
 

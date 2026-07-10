@@ -63,6 +63,7 @@ import yaml
 
 from ..config import settings
 from ..filenames import PROJECT_ROOT
+from ..matching.group_decomposition import parent_group_id_of
 
 
 def _raise_csv_field_limit() -> None:
@@ -133,6 +134,14 @@ REASON_SIZE_GATED = "size_gated"
 #: minimum is effectively the calibrated voter's self-report — a low value there
 #: flagged wrong unanimous verdicts the panel review found.
 REASON_LOW_CONFIDENCE = "low_confidence"
+#: A decomposed group (#367 Mode B) at least one of whose sub-problems the panel
+#: routed to ``human_review``. The sub-problem verdicts key on sub-problem ids
+#: (``{parent}__p...``) that are not sidecar groups, so the PARENT is surfaced to
+#: the human review queue on its behalf: recomposition is all-or-nothing, so a
+#: single failed sub-problem blocks the whole-group label and the reviewer must
+#: adjudicate the parent. Synthesized by :func:`attach_panel_route_reasons` for a
+#: parent that has no direct consensus row of its own (a decompose-first monster).
+REASON_SUBPROBLEM_FAILED = "subproblem_failed"
 
 #: Legacy phase-2 stamps that merely echo the ``consensus`` column ("majority",
 #: "none"). They carry strictly less information than what the row's own
@@ -222,6 +231,11 @@ def humanize_route_reason(code: str) -> str:
         # Low-confidence gate: stamped by compute_consensus (and the read-time
         # overlay) when the calibrated voter's confidence was too low.
         REASON_LOW_CONFIDENCE: "low panel confidence — below the auto-accept floor",
+        # Decomposition (#367 Mode B): a sub-problem the panel could not
+        # auto-accept blocks the whole-group label — review the group as a whole.
+        REASON_SUBPROBLEM_FAILED: (
+            "a decomposed sub-problem could not be auto-accepted — review the whole group"
+        ),
     }
     if code in fixed:
         return fixed[code]
@@ -441,12 +455,24 @@ def panel_failed_group_ids(
     This is the allow-list for the human review queue: the groups the agent
     panel could not auto-accept. Groups never voted by the panel are absent (they
     do not enter the human queue by default).
+
+    Decomposition fold (#367 Mode B): a decomposed group's panel votes key on
+    sub-problem ids (``{parent}__p...``), which are NOT sidecar groups, so a
+    sub-problem the panel failed would be filtered out of the queue against the
+    sidecar and — for a monster that went STRAIGHT to decomposition (no
+    size-gated whole-group vote of its own) — the parent would be invisible in
+    every review queue. Each failed sub-problem is therefore folded onto its
+    PARENT group id (the sidecar entry the reviewer adjudicates): recomposition
+    is all-or-nothing, so one failed sub-problem blocks the whole-group label.
     """
-    return {
-        gid
-        for gid, routing in latest_panel_routing(dataset, batches_root).items()
-        if routing == ROUTING_HUMAN_REVIEW
-    }
+    failed: set[str] = set()
+    for gid, routing in latest_panel_routing(dataset, batches_root).items():
+        if routing != ROUTING_HUMAN_REVIEW:
+            continue
+        # A failed sub-problem surfaces its PARENT (the sidecar group); a plain
+        # group surfaces itself.
+        failed.add(parent_group_id_of(gid) or gid)
+    return failed
 
 
 def attach_panel_route_reasons(
@@ -461,16 +487,36 @@ def attach_panel_route_reasons(
     and ``panel_route_reason_human`` (short display string). Annotation only —
     never touches routing or selection; groups the panel never voted on are left
     untouched. Returns the number of groups annotated.
+
+    Decomposition fold (#367 Mode B): a decompose-first monster has no direct
+    consensus row of its own — only its sub-problems were voted. When such a
+    parent surfaces in the queue because a sub-problem failed (see
+    :func:`panel_failed_group_ids`), it is annotated with
+    :data:`REASON_SUBPROBLEM_FAILED` so the reviewer sees WHY the whole group is
+    up for review even though the panel never voted it directly.
     """
     rows = latest_panel_consensus(dataset, batches_root)
     if not rows:
         return 0
+    # Parents with >=1 sub-problem the panel routed to human_review. A direct
+    # consensus row (below) always wins over this synthesized reason.
+    failed_sub_parents: set[str] = set()
+    for gid, row in rows.items():
+        if str(row.get("routing", "") or "").strip() != ROUTING_HUMAN_REVIEW:
+            continue
+        parent = parent_group_id_of(gid)
+        if parent is not None:
+            failed_sub_parents.add(parent)
     n = 0
     for group in groups:
-        row = rows.get(str(group.get("group_id", "") or "").strip())
-        if row is None:
+        gid = str(group.get("group_id", "") or "").strip()
+        row = rows.get(gid)
+        if row is not None:
+            code = derive_route_reason(row)
+        elif gid in failed_sub_parents:
+            code = REASON_SUBPROBLEM_FAILED
+        else:
             continue
-        code = derive_route_reason(row)
         if not code:
             continue
         group["panel_route_reason"] = code

@@ -21,6 +21,7 @@ from crosswalk.agent_labeling.stitch_export import (
     PANEL_DECOMPOSED_LABELER,
     PANEL_DECOMPOSED_LABELER_V3,
     REASON_CLASS_MISMATCH,
+    REASON_EMPTY_RECOMPOSITION,
     REASON_EXPORTED,
     REASON_HUMAN_PRECEDENCE,
     REASON_SUBPROBLEM_ERA_MIXED,
@@ -226,6 +227,28 @@ def test_one_failed_subproblem_blocks_group(tmp_path, labels_dir):
     assert parent.exported is False
     assert parent.reason == REASON_SUBPROBLEM_FAILED
     assert parent.n_subproblems_resolved == 1
+    assert write_exports(report, DATASET, labels_dir) == 0
+
+
+def test_empty_union_complete_recomposition_routes_to_review(tmp_path, labels_dir):
+    # Defense in depth (#388 follow-up): a COMPLETE recomposition (every
+    # sub-problem auto_accept) whose accepted selections union to NOTHING must
+    # route to review under an explicit reason — never mint an empty label, and
+    # never be mis-attributed to the sliver gate (0 slivers dropped).
+    b, sub_ids = make_decomposed_batch(
+        tmp_path / "b1",
+        [
+            {"edges": [("r1", "t1")], "routing": "auto_accept", "chosen": []},
+            {"edges": [("r2", "t2")], "routing": "auto_accept", "chosen": []},
+        ],
+    )
+    report = _plan([b], labels_dir)
+    parent = _by_gid(report)[PARENT]
+    assert parent.exported is False
+    assert parent.reason == REASON_EMPTY_RECOMPOSITION
+    # Every sub resolved, so it is NOT a failed/unvoted block — the union is
+    # simply empty.
+    assert parent.n_subproblems_resolved == 2
     assert write_exports(report, DATASET, labels_dir) == 0
 
 

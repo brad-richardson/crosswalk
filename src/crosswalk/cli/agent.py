@@ -962,7 +962,10 @@ def generate_stitch_batch(
     """
     import json
 
-    from ..agent_labeling.stitch_evidence import generate_stitch_evidence
+    from ..agent_labeling.stitch_evidence import (
+        generate_stitch_evidence,
+        missing_evidence_packs,
+    )
     from ..config import settings
     from ..filenames import (
         PROJECT_ROOT,
@@ -975,6 +978,36 @@ def generate_stitch_batch(
         group_candidate_edge_count,
         select_stitching_batch,
     )
+
+    # Validate --decompose-max-edges against the export backstop (#367 Mode B).
+    # A budget ABOVE the backstop is a silent mini-void: sub-problems sized
+    # between the backstop and the budget pass the panel (they get packed and
+    # voted), but the consensus-time size gate (#386) then demotes their verdicts
+    # to human_review, so they can never auto-accept — and one un-exportable
+    # sub-verdict conservatively blocks the parent's whole-group label forever.
+    # Fail loud rather than burn panel quota on votes that structurally cannot
+    # contribute a label (repo style: no silent partial-void).
+    if decompose_max_edges:
+        backstop = settings.stitch_export_backstop_max_edges
+        if decompose_max_edges < 1:
+            console.print(
+                f"[red]--decompose-max-edges must be >= 1 (got {decompose_max_edges}).[/red]"
+            )
+            raise typer.Exit(1)
+        if decompose_max_edges > backstop:
+            console.print(
+                f"[red]--decompose-max-edges ({decompose_max_edges}) exceeds the export "
+                f"backstop (stitch_export_backstop_max_edges={backstop}). Sub-problems sized "
+                f"{backstop + 1}..{decompose_max_edges} would pass the panel but be size-gated "
+                f"at export, silently blocking their parent's whole-group label. Choose a "
+                f"budget <= {backstop} (or raise the backstop).[/red]"
+            )
+            raise typer.Exit(1)
+        if not decompose:
+            console.print(
+                "[yellow]--decompose-max-edges has no effect without --decompose "
+                "(ignored).[/yellow]"
+            )
 
     out_root = PROJECT_ROOT / "data" / "output"
     bridge_path = out_root / bridge_filename(dataset)
@@ -1202,6 +1235,28 @@ def generate_stitch_batch(
         batch, batch_dir, group_ids=[str(g["group_id"]) for g in packable]
     )
     console.print(f"[green]Generated {len(generated)} evidence packs[/green]")
+
+    # Confirm the pack count: a packable group that produced no pack (no options)
+    # is silently unvoted. Benign for a normal group, but a missing decomposed
+    # sub-problem pack (#367 Mode B) permanently blocks its parent's whole-group
+    # recomposition with no downstream signal — so refuse rather than ship a
+    # decomposition that can never fully recompose.
+    missing_subs, missing_other = missing_evidence_packs(packable, generated)
+    if missing_other:
+        console.print(
+            f"[yellow]WARNING: {len(missing_other)} requested group(s) produced no "
+            f"evidence pack (no options) and will not be voted: "
+            f"{', '.join(missing_other[:5])}[/yellow]"
+        )
+    if missing_subs:
+        detail = ", ".join(f"{sid} (parent {pgid})" for sid, pgid in missing_subs[:5])
+        console.print(
+            f"[red]ERROR: {len(missing_subs)} decomposed sub-problem(s) produced no "
+            f"evidence pack, so their parent group(s) can never fully recompose to a "
+            f"whole-group label: {detail}[/red]"
+        )
+        raise typer.Exit(1)
+
     console.print(f"  Batch dir: {batch_dir}")
     console.print("Next: crosswalk agent stitch-run --batch " + str(batch_dir))
 
