@@ -948,6 +948,31 @@ def test_vote_provenance_rearchive_replaces_batch_wholesale(tmp_path):
     )
 
 
+def test_vote_provenance_header_only_votes_preserves_archive(tmp_path):
+    """A HEADER-ONLY (readable, zero-row) votes.csv is as empty as a 0-byte
+    one: it must not mark the batch as contributing in the wholesale
+    replacement, or it would delete the batch's archived ballots with no
+    replacement rows (#398 re-review, finding 2)."""
+    votes_dir = tmp_path / "votes"
+    grp = {"group_id": "g1", "match_type": "1:1", "routing": "auto_accept", "edges": [("r1", "t1")]}
+    wave = tmp_path / "wave1"
+    make_batch(wave, DATASET, [grp])
+    _write_votes(wave, _voter_rows("g1"))
+    write_vote_provenance([wave], DATASET, votes_dir=votes_dir)
+
+    # Re-archive with a header-only votes.csv: archived ballots must survive.
+    _write_votes(wave, [])  # header row only, zero data rows
+    n_votes, _ = write_vote_provenance([wave], DATASET, votes_dir=votes_dir)
+    assert n_votes == 3  # nothing deleted, nothing added
+    out = votes_dir / f"dataset={DATASET}"
+    votes = list(csv.DictReader((out / "votes.csv").open()))
+    assert {v["provider"] for v in votes if v["source_batch"] == "wave1"} == {
+        "claude",
+        "codex",
+        "agy",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Nonstandard-panel export guard (provenance: PANEL_LABELER is composition-bound,
 # keyed on (provider, model) VOTER pairs since the v4 bless)
@@ -1180,9 +1205,12 @@ def test_write_exports_refuses_era_less_batches(tmp_path, labels_dir):
     assert StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET).empty
 
 
-def test_stamp_era_override_resolves_era_less_batches(tmp_path, labels_dir):
-    """plan_exports(stamp_era=...) declares the era for the whole run: an
-    era-less batch then exports under the declared generation's tags."""
+def test_stamp_era_fills_in_era_less_batches_only(tmp_path, labels_dir):
+    """plan_exports(stamp_era=...) is a FILL-IN, not a whole-run override: an
+    era-less batch exports under the declared generation's tags, while a batch
+    that genuinely resolves to an era in the SAME run keeps its own — passing
+    --stamp-era v3 for one unknown batch must never re-stamp a blessed-v4
+    batch's labels as v3 (#398 re-review, finding 1)."""
     from crosswalk.agent_labeling.stitch_export import PANEL_LABELER_V3
 
     b_unknown = _one_group_batch(tmp_path, "b_unknown", "g_unknown", voters=None)
@@ -1192,6 +1220,19 @@ def test_stamp_era_override_resolves_era_less_batches(tmp_path, labels_dir):
     assert write_exports(report, DATASET, labels_dir) == 1
     df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
     assert list(df["labeler"]) == [PANEL_LABELER_V3]
+
+    # Mixed set: the blessed-v4 batch keeps v4; only the era-less one fills in.
+    b_v4 = _one_group_batch(tmp_path, "b_v4", "g_v4", voters=_V4_VOTERS)
+    report = plan_exports([b_unknown, b_v4], DATASET, labels_dir, stamp_era="v3")
+    assert {g.group_id: g.panel_era for g in report.groups} == {
+        "g_unknown": "v3",
+        "g_v4": "v4",
+    }
+    assert write_exports(report, DATASET, labels_dir) == 2
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    labelers = dict(zip(df["group_id"], df["labeler"], strict=True))
+    assert labelers["g_v4"] == PANEL_LABELER  # never re-stamped by the fill-in
+    assert labelers["g_unknown"] == PANEL_LABELER_V3
 
     with pytest.raises(ValueError, match="stamp_era"):
         plan_exports([b_unknown], DATASET, labels_dir, stamp_era="v9")

@@ -516,13 +516,15 @@ def plan_exports(
     Pure w.r.t. the label store: reads human labels but writes nothing. Call
     :func:`write_exports` with the returned report to persist.
 
-    ``stamp_era`` ("v3"/"v4") OVERRIDES per-batch era resolution for this run —
-    every group is stamped with that era's labeler tags regardless of what the
-    batches' votes.csv resolve to. It exists for era-less batches (unknown
-    compositions, which :func:`write_exports` otherwise refuses), so it should
-    accompany ``--allow-nonstandard-panel``-style explicit provenance
-    decisions only. ``None`` (default) resolves each batch via
-    :func:`batch_panel_era`.
+    ``stamp_era`` ("v3"/"v4") is a FILL-IN for era-less batches only: each
+    batch is first resolved via :func:`batch_panel_era`, and ``stamp_era``
+    applies solely to batches whose composition resolves to NO era (unknown
+    compositions, which :func:`write_exports` otherwise refuses). A batch that
+    genuinely resolves to an era always keeps it — a mixed run of one
+    era-less and one blessed-v4 batch with ``stamp_era="v3"`` stamps v3 only
+    on the era-less one, never re-stamping the v4 batch. It should accompany
+    ``--allow-nonstandard-panel``-style explicit provenance decisions only.
+    ``None`` (default) leaves era-less batches unresolved.
 
     The size gate is *structural*, not a flat edge count: a group auto-exports
     when it is a single corridor-pair OR has few assignment-components within a
@@ -730,11 +732,14 @@ def plan_exports(
                 )
             )
 
-    # Per-dir labeler era ("v3"/"v4"; "" for unattributable), or the explicit
-    # stamp_era override for every dir. Resolved once; used for both the direct
-    # groups (by source batch) and the recomposition era-mix check below.
+    # Per-dir labeler era ("v3"/"v4"; "" for unattributable). stamp_era is a
+    # FILL-IN for dirs that resolve to no era — a genuinely-resolved batch
+    # always keeps its own era (resolution first), so an operator passing
+    # --stamp-era v3 for one era-less batch can never re-stamp a blessed-v4
+    # batch in the same run. Resolved once; used for both the direct groups
+    # (by source batch) and the recomposition era-mix check below.
     era_by_dir: dict[Path, str] = {
-        bd: (stamp_era or batch_panel_era(bd) or "") for bd in batch_groups
+        bd: (batch_panel_era(bd) or stamp_era or "") for bd in batch_groups
     }
 
     # Recomposition (#367 Mode B): one outcome per decomposed parent, from its
@@ -1187,9 +1192,14 @@ def write_vote_provenance(
         if not path.exists():
             return None
         try:
-            return pd.read_csv(path, dtype={"group_id": str})
+            df = pd.read_csv(path, dtype={"group_id": str})
         except pd.errors.EmptyDataError:
             return None
+        # A header-only (zero-row) file is as empty as a 0-byte one: it must
+        # not mark a batch as "contributing" in _collect's wholesale
+        # replacement, or it would delete the batch's archived ballots with no
+        # replacement rows.
+        return None if df.empty else df
 
     def _collect(filename: str, dedupe_on: list[str]) -> int:
         # Current batches first: only a batch that contributes a READABLE file

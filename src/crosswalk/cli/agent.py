@@ -1771,11 +1771,12 @@ def export_stitch_panel(
         None,
         "--stamp-era",
         help=(
-            "Explicitly declare the labeler era ('v3' or 'v4') to stamp for THIS "
-            "run, overriding per-batch era resolution. Required when a batch's "
-            "composition matches no blessed or known-historical era — export "
-            "refuses to guess which panel_* generation unknown provenance "
-            "belongs to."
+            "Declare the labeler era ('v3' or 'v4') for batches whose "
+            "composition resolves to NO era. FILL-IN only: batches that "
+            "resolve to a blessed or known-historical era always keep their "
+            "own era — this flag never re-stamps them. Required when any "
+            "batch matches no known era — export refuses to guess which "
+            "panel_* generation unknown provenance belongs to."
         ),
     ),
 ):
@@ -1860,10 +1861,14 @@ def export_stitch_panel(
             )
         raise typer.Exit(1)
 
-    # Per-batch labeler era: resolved from votes.csv, or the explicit
-    # --stamp-era override. A batch with NO known era (and no override) is
-    # refused — export never guesses which panel_* generation to mint.
-    eras = {bd: (stamp_era or batch_panel_era(bd)) for bd in batch_dirs}
+    # Per-batch labeler era, resolved from votes.csv. --stamp-era is a FILL-IN
+    # for batches that resolve to NO era (resolution first, matching
+    # plan_exports): a genuinely-resolved batch always keeps its own era, so
+    # the flag can never re-stamp a blessed-v4 batch as v3 in a mixed run. A
+    # batch with no known era and no --stamp-era is refused — export never
+    # guesses which panel_* generation to mint.
+    resolved = {bd: batch_panel_era(bd) for bd in batch_dirs}
+    eras = {bd: (resolved[bd] or stamp_era) for bd in batch_dirs}
     era_less = sorted(bd.name for bd, era in eras.items() if not era)
     if era_less:
         console.print(
@@ -1901,7 +1906,9 @@ def export_stitch_panel(
     for bd in batch_dirs:
         era = eras[bd]
         accept_tag, none_tag, decomposed_tag = LABELERS_BY_ERA[era]
-        override = " (--stamp-era override)" if stamp_era else ""
+        # Mark only the batches that actually took the fill-in (unresolved
+        # composition + --stamp-era), not every line whenever the flag is set.
+        override = " (--stamp-era fill-in)" if stamp_era and not resolved[bd] else ""
         # Parentheses, not square brackets: rich would swallow [tags] as markup.
         console.print(
             f"  Stamp era: {bd.name} -> {era}{override} "
