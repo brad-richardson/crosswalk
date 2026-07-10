@@ -1212,11 +1212,48 @@ class TestPanelRoutingDecomposeFold:
         os.utime(bpath, (mtime, mtime))
         return bpath
 
+    def _write_manifest(self, batch_dir, parent, subs):
+        """Write decomposition.json; subs is [(sid, oversized_bool), ...]."""
+        import json
+
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        (batch_dir / "decomposition.json").write_text(
+            json.dumps(
+                {
+                    parent: {
+                        "n_edges": 99,
+                        "max_edges": 40,
+                        "subproblems": [
+                            {
+                                "id": sid,
+                                "n_edges": 50 if over else 1,
+                                "oversized": over,
+                                **(
+                                    {"route": "human_review", "route_reason": "size_gated"}
+                                    if over
+                                    else {}
+                                ),
+                            }
+                            for sid, over in subs
+                        ],
+                    }
+                }
+            )
+        )
+
+    def _write_pack(self, batch_dir, sid):
+        """Create the evidence-pack marker ({batch_dir}/{sid}/prompt.txt)."""
+        gdir = batch_dir / sid
+        gdir.mkdir(parents=True, exist_ok=True)
+        (gdir / "prompt.txt").write_text("vote prompt")
+
     def test_unvoted_oversized_sub_surfaces_parent(self, tmp_path):
         # THE VOID (#403 follow-up): a decompose-first monster split into an
         # accepted sub AND an oversized sub that was never voted. It can never
         # recompose (all-or-nothing) and has NO failed sub-vote to fold — before
         # the fix it surfaced in no queue. It must now surface as human_review.
+        # (Completed run: consensus.csv present; the oversized sub has no
+        # evidence pack — the fallback discriminator.)
         from crosswalk.agent_labeling.panel_routing import (
             panel_failed_group_ids,
             unvoted_decomposed_parents,
@@ -1230,10 +1267,87 @@ class TestPanelRoutingDecomposeFold:
         self._write_consensus(root / "ds_a", [(s_ok, "auto_accept")])
         # batch.json roster declares BOTH subs (the completeness contract).
         self._write_batch_json(root / "ds_a", parent, [s_ok, s_big])
+        self._write_pack(root / "ds_a", s_ok)  # the voted sub was packed
 
         assert unvoted_decomposed_parents("ds_a", root) == {parent}
         # The void is closed: the parent (sidecar group) now reaches the queue.
         assert panel_failed_group_ids("ds_a", root) == {parent}
+
+    def test_oversized_by_manifest_surfaces_parent(self, tmp_path):
+        # Primary discriminator: decomposition.json marks the unvoted sub
+        # oversized (route_reason size_gated) — flagged in a completed run.
+        from crosswalk.agent_labeling.panel_routing import unvoted_decomposed_parents
+
+        root = tmp_path / "batches"
+        parent = "beef0014"
+        s_ok = self._sub(parent, [("r1", "t1")])
+        s_big = self._sub(parent, [("r2", "t2")])
+        self._write_consensus(root / "ds_a", [(s_ok, "auto_accept")])
+        self._write_batch_json(root / "ds_a", parent, [s_ok, s_big])
+        self._write_manifest(root / "ds_a", parent, [(s_ok, False), (s_big, True)])
+        self._write_pack(root / "ds_a", s_ok)
+
+        assert unvoted_decomposed_parents("ds_a", root) == {parent}
+
+    def test_built_but_not_voted_dir_not_flagged(self, tmp_path):
+        # FALSE-POSITIVE REPRO (i): a decompose wave between stitch-batch and
+        # panel completion — batch.json + packs but NO consensus.csv yet. The
+        # absence of votes is not evidence of an oversized void; flagging here
+        # would violate the queue's panel-failures-only invariant.
+        from crosswalk.agent_labeling.panel_routing import (
+            panel_failed_group_ids,
+            unvoted_decomposed_parents,
+        )
+
+        root = tmp_path / "batches"
+        parent = "beef0015"
+        s1 = self._sub(parent, [("r1", "t1")])
+        s2 = self._sub(parent, [("r2", "t2")])
+        # batch.json + manifest + packs — but no consensus.csv (run in flight).
+        self._write_batch_json(root / "ds_a", parent, [s1, s2])
+        self._write_manifest(root / "ds_a", parent, [(s1, False), (s2, True)])
+        self._write_pack(root / "ds_a", s1)
+
+        assert unvoted_decomposed_parents("ds_a", root) == set()
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_limit_truncated_packed_sub_not_flagged(self, tmp_path):
+        # FALSE-POSITIVE REPRO (ii): a completed --limit-truncated run — a sub
+        # was PACKED (prompt.txt exists) but fell beyond the cutoff, so it has
+        # no consensus row. It is pending, not oversized: must not be flagged.
+        from crosswalk.agent_labeling.panel_routing import (
+            panel_failed_group_ids,
+            unvoted_decomposed_parents,
+        )
+
+        root = tmp_path / "batches"
+        parent = "beef0016"
+        s_voted = self._sub(parent, [("r1", "t1")])
+        s_pending = self._sub(parent, [("r2", "t2")])
+        self._write_consensus(root / "ds_a", [(s_voted, "auto_accept")])
+        self._write_batch_json(root / "ds_a", parent, [s_voted, s_pending])
+        self._write_pack(root / "ds_a", s_voted)
+        self._write_pack(root / "ds_a", s_pending)  # packed, just not voted yet
+
+        assert unvoted_decomposed_parents("ds_a", root) == set()
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_manifest_not_oversized_wins_over_missing_pack(self, tmp_path):
+        # The manifest is authoritative: an explicit oversized:false record for
+        # an unvoted sub means "packable, pending" even when its pack dir is
+        # absent (e.g. packing failed mid-wave) — not flagged.
+        from crosswalk.agent_labeling.panel_routing import unvoted_decomposed_parents
+
+        root = tmp_path / "batches"
+        parent = "beef0017"
+        s_ok = self._sub(parent, [("r1", "t1")])
+        s_pending = self._sub(parent, [("r2", "t2")])
+        self._write_consensus(root / "ds_a", [(s_ok, "auto_accept")])
+        self._write_batch_json(root / "ds_a", parent, [s_ok, s_pending])
+        self._write_manifest(root / "ds_a", parent, [(s_ok, False), (s_pending, False)])
+        # No pack for s_pending — but the manifest says it is not oversized.
+
+        assert unvoted_decomposed_parents("ds_a", root) == set()
 
     def test_fully_voted_roster_does_not_surface_parent(self, tmp_path):
         # Control: every roster sub voted+accepted -> recomposition will export;
@@ -1553,6 +1667,14 @@ class TestCountsShowAbstention:
         assert counts_show_abstention(5, 4) is True  # more valid than total
         assert counts_show_abstention(-1, 4) is True
         assert counts_show_abstention(3, -1) is True
+
+    def test_zero_valid_with_votes_is_abstention(self):
+        # 0-of-4 valid IS four abstentions — the counts must not read as
+        # unanimity (moot on current call paths, but the docstring's contract).
+        from crosswalk.agent_labeling.panel_routing import counts_show_abstention
+
+        assert counts_show_abstention(0, 4) is True
+        assert counts_show_abstention(0, 0) is False  # no votes -> no evidence
 
     def test_derive_route_reason_downgrades_impossible_accept_to_quorum(self):
         from crosswalk.agent_labeling.panel_routing import REASON_QUORUM, derive_route_reason

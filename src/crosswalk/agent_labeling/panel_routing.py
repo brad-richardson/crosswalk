@@ -63,8 +63,11 @@ decomposition has no direct whole-group vote, and one of its roster
 sub-problems may have been skipped as an irreducible oversized block (no
 consensus row). Such a parent can never recompose (all-or-nothing) yet has no
 failed sub-vote to fold onto the queue — a silent void. :func:`panel_failed_group_ids`
-surfaces these via :func:`unvoted_decomposed_parents` (which reads the batch.json
-roster) and :func:`attach_panel_route_reasons` annotates them
+surfaces these via :func:`unvoted_decomposed_parents` — which flags a parent
+only for a COMPLETED run (its batch dir has a consensus.csv) whose unvoted sub
+is genuinely oversized (per decomposition.json, or a missing evidence pack), so
+in-flight waves and ``--limit``-truncated packed subs are never falsely queued
+— and :func:`attach_panel_route_reasons` annotates them
 ``route_reason="oversized_unvoted"``.
 """
 
@@ -185,7 +188,9 @@ REASON_SUBPROBLEM_FAILED = "subproblem_failed"
 #: parent vote, so without this it would neither auto-accept (recomposition is
 #: all-or-nothing, and an unvoted sub blocks it) nor queue: a silent void. It is
 #: surfaced to the human review queue on its own by :func:`panel_failed_group_ids`
-#: and annotated here by :func:`attach_panel_route_reasons`.
+#: (only for COMPLETED runs with genuine oversized evidence — see
+#: :func:`unvoted_decomposed_parents`) and annotated here by
+#: :func:`attach_panel_route_reasons`.
 REASON_OVERSIZED_UNVOTED = "oversized_unvoted"
 
 #: Legacy phase-2 stamps that merely echo the ``consensus`` column ("majority",
@@ -225,7 +230,10 @@ def counts_show_abstention(n_valid: int | None, n_votes: int | None) -> bool:
     corrupt/hand-edited row mint the STRONGER unanimous claim its data cannot
     support. So impossible counts take the conservative path: treated as
     abstention-present (the weakest claim, quorum) with a warning logged so the
-    anomaly is visible. Missing/unparseable counts are no evidence (False).
+    anomaly is visible. ``n_valid == 0`` with ``n_votes > 0`` is likewise
+    abstention-present (all recorded votes abstained) — moot on current call
+    paths (an accept/NONE tier needs valid votes), but the counts must not read
+    as unanimity. Missing/unparseable counts are no evidence (False).
     """
     if n_valid is None or n_votes is None:
         return False
@@ -237,7 +245,7 @@ def counts_show_abstention(n_valid: int | None, n_votes: int | None) -> bool:
             n_votes,
         )
         return True
-    return 0 < n_valid < n_votes
+    return n_valid < n_votes
 
 
 def derive_route_reason(row: Mapping) -> str:
@@ -560,19 +568,21 @@ def latest_panel_routing(
 def _decomposition_rosters(
     dataset: str,
     batches_root: Path = STITCH_BATCHES_DIR,
-) -> dict[str, list[str]]:
-    """Each decompose-first parent's full sub-problem roster, from ``batch.json``.
+) -> dict[str, tuple[Path, list[str]]]:
+    """Each decompose-first parent's sub-problem roster + source batch dir.
 
-    Maps ``{parent_group_id: [subproblem_id, ...]}`` for every ``batch.json``
-    group carrying ``decomposed_parent`` + ``subproblem_ids`` (#367 Mode B),
-    merged across the dataset's batch dirs (later wave supersedes earlier per
-    parent, mirroring the consensus precedence). The roster is the completeness
-    contract — it includes oversized sub-problems that were never packed/voted —
-    so it is the only source that reveals a parent whose voted-sub set is
-    INCOMPLETE. Batch dirs are matched by the same name rule as
-    :func:`_dataset_batch_dirs` but keyed on ``batch.json`` presence (a
-    decompose-first parent may have no ``consensus.csv`` row of its own). Returns
-    ``{}`` when nothing decomposed.
+    Maps ``{parent_group_id: (batch_dir, [subproblem_id, ...])}`` for every
+    ``batch.json`` group carrying ``decomposed_parent`` + ``subproblem_ids``
+    (#367 Mode B), merged across the dataset's batch dirs (later wave supersedes
+    earlier per parent, mirroring the consensus precedence). The roster is the
+    completeness contract — it includes oversized sub-problems that were never
+    packed/voted — so it is the only source that reveals a parent whose
+    voted-sub set is INCOMPLETE. The source dir rides along because the caller
+    needs the SAME dir's decomposition.json / evidence packs / consensus.csv to
+    judge why a roster sub has no vote. Batch dirs are matched by the same name
+    rule as :func:`_dataset_batch_dirs` but keyed on ``batch.json`` presence (a
+    decompose-first parent may have no ``consensus.csv`` row of its own).
+    Returns ``{}`` when nothing decomposed.
     """
     if not dataset or not batches_root.exists():
         return {}
@@ -584,7 +594,7 @@ def _decomposition_rosters(
         and (d / "batch.json").is_file()
     ]
     dirs.sort(key=lambda d: ((d / "batch.json").stat().st_mtime, d.name))
-    rosters: dict[str, list[str]] = {}
+    rosters: dict[str, tuple[Path, list[str]]] = {}
     for d in dirs:
         try:
             batch = json.loads((d / "batch.json").read_text())
@@ -596,15 +606,55 @@ def _decomposition_rosters(
             if not isinstance(grp, Mapping):
                 continue
             if grp.get("decomposed_parent") and grp.get("subproblem_ids"):
-                rosters[str(grp.get("group_id"))] = [str(s) for s in grp["subproblem_ids"]]
+                rosters[str(grp.get("group_id"))] = (
+                    d,
+                    [str(s) for s in grp["subproblem_ids"]],
+                )
     return rosters
+
+
+def _manifest_oversized_ids(batch_dir: Path) -> dict[str, bool]:
+    """Per-sub oversized verdicts from a batch dir's ``decomposition.json``.
+
+    ``stitch-batch --decompose`` writes a manifest mapping each parent to its
+    sub-problem records; a record carries ``oversized: true`` (and
+    ``route_reason: size_gated``) for an irreducible over-budget block that was
+    never packed. Returns ``{subproblem_id: oversized}`` for every recorded sub
+    — an explicit ``oversized: false`` is authoritative evidence the sub was
+    packable (e.g. merely beyond a ``--limit`` cutoff). Empty dict when the
+    manifest is missing/unreadable (callers fall back to evidence-pack
+    presence).
+    """
+    mpath = batch_dir / "decomposition.json"
+    if not mpath.is_file():
+        return {}
+    try:
+        manifest = json.loads(mpath.read_text())
+    except (ValueError, OSError, UnicodeDecodeError):
+        return {}
+    if not isinstance(manifest, Mapping):
+        return {}
+    out: dict[str, bool] = {}
+    for rec in manifest.values():
+        if not isinstance(rec, Mapping):
+            continue
+        for sub in rec.get("subproblems", []):
+            if not isinstance(sub, Mapping):
+                continue
+            sid = str(sub.get("id", "") or "").strip()
+            if not sid:
+                continue
+            out[sid] = bool(sub.get("oversized")) or (
+                str(sub.get("route_reason", "") or "").strip() == REASON_SIZE_GATED
+            )
+    return out
 
 
 def unvoted_decomposed_parents(
     dataset: str,
     batches_root: Path = STITCH_BATCHES_DIR,
 ) -> set[str]:
-    """Decompose-first parents with an unvoted (oversized) roster sub-problem.
+    """Decompose-first parents blocked by a genuinely OVERSIZED unvoted sub.
 
     A monster that went straight to decomposition has no direct whole-group vote;
     when one of its roster sub-problems was skipped as an irreducible oversized
@@ -613,21 +663,51 @@ def unvoted_decomposed_parents(
     exists to fold it onto the queue (see :func:`panel_failed_group_ids`). That is
     a residual queue-void (#403 follow-up): the group would be reviewed by no one.
 
-    Returns each such parent id: it has a batch.json roster, no direct consensus
-    row of its own, and at least one roster sub-problem with no consensus row.
-    Parents whose entire roster was voted are excluded (they either recompose/
-    export cleanly or already surface via a failed sub-problem).
+    "No consensus row" alone is NOT evidence of that void — consensus.csv is
+    only written at end-of-run and only for the wave's ``--limit``/group-id
+    selection, so a naive absence check would falsely flag (i) every decompose
+    wave between ``stitch-batch`` and panel completion (batch.json present, no
+    consensus.csv yet) and (ii) packed subs beyond a ``--limit`` cutoff —
+    violating the queue's panel-failures-only invariant. A parent is therefore
+    flagged ONLY when BOTH hold:
+
+    1. its roster's batch dir has a ``consensus.csv`` (the panel run completed);
+    2. an unvoted roster sub is actually oversized — per ``decomposition.json``'s
+       per-sub ``oversized``/``route_reason: size_gated`` record, falling back
+       (when the manifest lacks the sub) to the absence of
+       ``{batch_dir}/{sid}/prompt.txt`` (oversized subs get no evidence pack;
+       the panel runner itself enumerates votable groups by pack presence).
+
+    Parents with a direct consensus row are excluded (already routed), as are
+    parents whose entire roster was voted (they either recompose/export cleanly
+    or already surface via a failed sub-problem).
     """
     rosters = _decomposition_rosters(dataset, batches_root)
     if not rosters:
         return set()
     voted = set(latest_panel_consensus(dataset, batches_root).keys())
     void: set[str] = set()
-    for parent, roster in rosters.items():
+    for parent, (batch_dir, roster) in rosters.items():
         if parent in voted:
             continue  # a direct (e.g. size-gated) parent row already routes it
-        if any(sid not in voted for sid in roster):
-            void.add(parent)
+        if not (batch_dir / "consensus.csv").is_file():
+            continue  # run not completed — absence of votes is not evidence
+        manifest_oversized: dict[str, bool] | None = None
+        for sid in roster:
+            if sid in voted:
+                continue
+            if manifest_oversized is None:  # lazy: only read when a sub is unvoted
+                manifest_oversized = _manifest_oversized_ids(batch_dir)
+            if sid in manifest_oversized:
+                is_oversized = manifest_oversized[sid]
+            else:
+                # No manifest record: an oversized sub gets no evidence pack, so
+                # a missing pack is the discriminator; a packed-but-unvoted sub
+                # (e.g. beyond a --limit cutoff) is pending, not a void.
+                is_oversized = not (batch_dir / sid / "prompt.txt").is_file()
+            if is_oversized:
+                void.add(parent)
+                break
     return void
 
 

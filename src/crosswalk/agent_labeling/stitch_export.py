@@ -1357,6 +1357,16 @@ def write_exports(
     ``--stamp-era``) instead of silently minting current-era provenance. A
     QUORUM-flagged group in an era without quorum labelers (pre-v5) also raises:
     that combination is a provenance anomaly, never blurred into a unanimous tag.
+
+    The anomaly check is ATOMIC over the run: labelers are resolved in a
+    pre-pass, so a raise writes NOTHING — which also means a single anomalous
+    row (e.g. an impossible-counts row that
+    :func:`panel_routing.counts_show_abstention` conservatively downgrades to a
+    quorum claim inside a pre-quorum-era batch) blocks the WHOLE export run.
+    That is by design — the same raise-on-provenance-anomaly stance as the
+    quorum-in-pre-quorum-era refusal (#405) — and the operational escape hatch
+    is a ``.no-export`` marker on the offending batch dir, which excludes it
+    from export while its groups keep feeding the human review queue.
     Upserts by ``group_id`` (the store replaces an
     existing row for the same group_id), so this is idempotent. The source batch
     name is recorded in the ``session_id`` field for provenance.
