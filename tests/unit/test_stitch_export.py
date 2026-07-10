@@ -782,6 +782,61 @@ def test_vote_provenance_archived_from_batches(tmp_path):
     assert {v["provider"] for v in votes} == {"claude", "codex", "agy"}
 
 
+def test_vote_provenance_quad_panel_keeps_four_rows_per_group(tmp_path):
+    """A 4-voter (quad-candidate) batch archives FOUR ballots per group.
+
+    The provenance dedupe keys on (source_batch, group_id, provider). Kimi and
+    Muse ride the same opencode transport, so if Muse reused the "opencode"
+    provider name its ballot would collapse into Kimi's (source_batch, group_id,
+    provider) key — silent vote loss. The distinct "muse" name keeps all four
+    ballots, which is exactly what a calibration wave needs archived intact.
+    """
+    b = tmp_path / "quad"
+    make_batch(
+        b,
+        DATASET,
+        [
+            {
+                "group_id": "g1",
+                "match_type": "1:1",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+            }
+        ],
+    )
+    quad_rows = [
+        {
+            "group_id": "g1",
+            "provider": p,
+            "model": m,
+            "choice": "A",
+            "confidence": 0.9,
+            "edge_set": "[]",
+        }
+        for p, m in (
+            ("claude", "claude-opus-4-8"),
+            ("codex", "gpt-5.6-sol"),
+            ("opencode", "openrouter/moonshotai/kimi-k2.6"),
+            ("muse", "meta/muse-spark-1.1"),
+        )
+    ]
+    _write_votes(b, quad_rows)
+
+    votes_dir = tmp_path / "votes"
+    n_votes, n_consensus = write_vote_provenance([b], DATASET, votes_dir=votes_dir)
+
+    assert n_votes == 4  # all four ballots survive the (…, provider) dedupe
+    out = votes_dir / f"dataset={DATASET}"
+    votes = list(csv.DictReader((out / "votes.csv").open()))
+    g1_rows = [v for v in votes if v["group_id"] == "g1"]
+    assert len(g1_rows) == 4
+    assert {v["provider"] for v in g1_rows} == {"claude", "codex", "opencode", "muse"}
+    # Kimi and Muse carry their own model strings on their own rows.
+    by_prov = {v["provider"]: v["model"] for v in g1_rows}
+    assert by_prov["opencode"] == "openrouter/moonshotai/kimi-k2.6"
+    assert by_prov["muse"] == "meta/muse-spark-1.1"
+
+
 def test_vote_provenance_idempotent(tmp_path):
     """Re-archiving the same batches rewrites identical, deduplicated files."""
     b1 = tmp_path / "b1"

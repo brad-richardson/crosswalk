@@ -344,6 +344,111 @@ def test_consensus_all_abstain():
 
 
 # ---------------------------------------------------------------------------
+# Consensus: 4-voter (quad-candidate) soundness. Nothing in compute_consensus
+# assumes exactly 3 voters — these lock in the quorum behavior a 4-seat panel
+# produces under the CURRENT consensus rules (the quad panel exists to record 4
+# ballots for offline consensus-rule replay), including the abstention path that
+# is ONLY reachable with >=4 voters (panel_routing.REASON_ABSTENTION).
+# ---------------------------------------------------------------------------
+
+
+def test_consensus_quad_4of4_unanimous_auto_accept():
+    """(a) 4/4 valid unanimity auto-accepts, exactly like 3/3 (n-agnostic)."""
+    es = frozenset({(R1, T1)})
+    votes = [
+        _vote("claude", "A", es),
+        _vote("codex", "A", es),
+        _vote("opencode", "A", es),
+        _vote("muse", "A", es),
+    ]
+    c = sr.compute_consensus(votes)
+    assert c.consensus == "unanimous"
+    assert c.routing == "auto_accept"
+    assert c.n_valid == 4
+    assert c.route_reason == "unanimous"
+
+
+def test_consensus_quad_3valid_1abstain_blocks_unanimity():
+    """(b) 3 valid votes agree + 1 ABSTAIN -> majority/human_review, NOT auto_accept.
+
+    This is the DESIGNED 4-voter behavior, not a bug: any abstention blocks full
+    unanimity (compute_consensus auto-accepts only when agree == len(votes)), and
+    the route reason is the dedicated ``abstention`` code that panel_routing
+    documents as "only reachable with a 4-voter panel". The quad panel's
+    resilience is that the wave SURVIVES a voter abstaining/timing out — the group
+    is adjudicated by a human and all four ballots are recorded — NOT that 3/3
+    valid unanimity silently auto-accepts. (A calibration wave records the raw
+    ballots so an n_valid-based rule could be replayed offline for a v5 decision.)
+    """
+    es = frozenset({(R1, T1)})
+    votes = [
+        _vote("claude", "A", es),
+        _vote("codex", "A", es),
+        _vote("opencode", "A", es),
+        _vote("muse", "ABSTAIN"),
+    ]
+    c = sr.compute_consensus(votes)
+    assert c.consensus == "majority"
+    assert c.routing == "human_review"
+    assert c.n_valid == 3
+    # >=3 valid agree but an abstain blocked unanimity: the 4-voter-only reason.
+    assert c.route_reason == "abstention"
+
+
+def test_consensus_quad_3_1_live_split_majority_human_review():
+    """(c) A live 3-1 split (no abstains) -> majority to human review, dissent stamped."""
+    es = frozenset({(R1, T1)})
+    votes = [
+        _vote("claude", "A", es),
+        _vote("codex", "A", es),
+        _vote("opencode", "A", es),
+        _vote("muse", "B"),
+    ]
+    c = sr.compute_consensus(votes)
+    assert c.consensus == "majority"
+    assert c.routing == "human_review"
+    assert c.choice == "A"
+    assert "muse=B" in c.minority
+    assert c.route_reason == "dissent:muse=B"
+
+
+def test_consensus_quad_2valid_2abstain_below_quorum():
+    """(d) 2 valid agree + 2 ABSTAIN -> below quorum (n_valid<3), human review."""
+    es = frozenset({(R1, T1)})
+    votes = [
+        _vote("claude", "A", es),
+        _vote("codex", "A", es),
+        _vote("opencode", "ABSTAIN"),
+        _vote("muse", "ABSTAIN"),
+    ]
+    c = sr.compute_consensus(votes)
+    assert c.routing == "human_review"
+    assert c.n_valid == 2
+    assert c.route_reason == "below_quorum:2"
+
+
+def test_consensus_quad_low_conf_gate_min_over_4_valid():
+    """(e) The low-confidence gate takes the MIN over all 4 valid votes."""
+    es = frozenset({(R1, T1)})
+    # 4/4 unanimous but the 4th voter is below a 0.5 floor -> demoted (min of 4).
+    votes = [
+        _vote_c("claude", "A", 0.9, es),
+        _vote_c("codex", "A", 0.9, es),
+        _vote_c("opencode", "A", 0.9, es),
+        _vote_c("muse", "A", 0.3, es),
+    ]
+    c = sr.compute_consensus(votes, min_voter_confidence=0.5)
+    assert c.consensus == "unanimous"  # the panel still agreed
+    assert c.routing == "human_review"
+    assert c.route_reason == "low_confidence"
+    # All 4 at/above the floor -> auto-accepts (the gate is a strict <).
+    votes_ok = [_vote_c(p, "A", 0.9, es) for p in ("claude", "codex", "opencode")]
+    votes_ok.append(_vote_c("muse", "A", 0.5, es))
+    c2 = sr.compute_consensus(votes_ok, min_voter_confidence=0.5)
+    assert c2.routing == "auto_accept"
+
+
+# ---------------------------------------------------------------------------
 # Class-consistency gate
 # ---------------------------------------------------------------------------
 
@@ -1889,31 +1994,68 @@ def test_v4_candidate_panel_is_the_397_validation_composition():
 
 
 def test_meta_candidate_panel_composition():
-    """meta-candidate swaps the v4 default's opencode/Kimi third voter for
-    opencode/Muse Spark 1.1 on Meta's API (opt-in Brad-approved prototype).
+    """meta-candidate swaps the v4 default's opencode/Kimi third voter for the
+    'muse' voter — Muse Spark 1.1 on Meta's API (opt-in Brad-approved prototype).
 
     Like v4-candidate w.r.t. the export gate: a 3-voter REPLACEMENT whose
-    (provider, model) triple is intentionally NONSTANDARD (opencode's model is
-    meta/muse-spark-1.1, not the blessed Kimi ref), so its labels are refused by
-    stitch-export without --allow-nonstandard-panel and it never mints a blessed
-    labeler. It carries v4 lineage (claude-opus-4-8 + codex/gpt-5.6-sol, both
-    medium) and must NOT touch DEFAULT_PANEL.
+    (provider, model) triple is intentionally NONSTANDARD (muse/meta-muse-spark-1.1
+    is not the blessed Kimi pair), so its labels are refused by stitch-export
+    without --allow-nonstandard-panel and it never mints a blessed labeler. It
+    carries v4 lineage (claude-opus-4-8 + codex/gpt-5.6-sol, both medium) and must
+    NOT touch DEFAULT_PANEL. Muse's provider NAME is the distinct "muse" (not
+    "opencode") so it stays individually addressable at every provider-keyed site.
     """
     meta = sr.get_panel("meta-candidate")
-    assert [p.name for p in meta] == ["claude", "codex", "opencode"]
+    assert [p.name for p in meta] == ["claude", "codex", "muse"]
     claude, codex, muse = meta
     assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
     assert codex.model == "gpt-5.6-sol" and codex.effort == "medium"
-    # The Muse voter: Meta-API model ref, reasoning-model timeout, tool-less agent.
-    assert muse is sr.OPENCODE_MUSE
+    # The Muse voter: distinct name, Meta-API model ref, reasoning-model timeout,
+    # tool-less agent.
+    assert muse is sr.MUSE
+    assert muse.name == "muse"
     assert muse.model == "meta/muse-spark-1.1"
     assert muse.timeout == 480  # reasoning model runs long on large packs
     assert muse.opencode_agent == "vote"  # tool-less agent forces a pure-text vote
     # NOT the blessed default; the default stays claude+codex+opencode/Kimi, and
-    # meta-candidate's opencode model differs -> nonstandard to the export gate.
+    # meta-candidate's third-voter (provider, model) differs -> nonstandard.
     assert meta != sr.DEFAULT_PANEL
     assert sr.DEFAULT_PANEL[2].model == "openrouter/moonshotai/kimi-k2.6"
     assert muse.model != sr.DEFAULT_PANEL[2].model
+    # Muse dispatches through the SAME transport as Kimi despite the distinct name.
+    assert sr._INVOKERS["muse"] is sr.invoke_opencode
+
+
+def test_quad_candidate_panel_composition():
+    """quad-candidate is the FOUR-SEAT calibration panel: the full v4 default
+    PLUS the distinctly-named Muse voter.
+
+    Seats claude + codex/gpt-5.6-sol + opencode/Kimi K2.6 + muse/Muse Spark 1.1.
+    Kimi and Muse ride the same opencode transport but carry DISTINCT provider
+    names so both stay individually addressable at every provider-keyed site. It
+    is intentionally NONSTANDARD to the stitch-export (provider, model) gate (four
+    voters, one on the Meta API), so its labels are refused without
+    --allow-nonstandard-panel and it never mints a blessed labeler. Must NOT touch
+    DEFAULT_PANEL (still the 3-seat v4 default).
+    """
+    quad = sr.get_panel("quad-candidate")
+    assert [p.name for p in quad] == ["claude", "codex", "opencode", "muse"]
+    claude, codex, kimi, muse = quad
+    assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
+    assert codex.model == "gpt-5.6-sol" and codex.effort == "medium"
+    assert kimi.model == "openrouter/moonshotai/kimi-k2.6" and kimi.timeout == 480
+    assert muse is sr.MUSE
+    assert muse.name == "muse" and muse.model == "meta/muse-spark-1.1"
+    assert muse.timeout == 480 and muse.opencode_agent == "vote"
+    # Distinct provider names -> no two voters collide on the keying field.
+    assert len({p.name for p in quad}) == 4
+    # The full v4 default is a prefix of quad (quad = default + muse), and adding
+    # a fourth voter must NOT mutate DEFAULT_PANEL.
+    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "opencode"]
+    assert quad != sr.DEFAULT_PANEL
+    # Both opencode-transport voters resolve to invoke_opencode.
+    assert sr._INVOKERS["opencode"] is sr.invoke_opencode
+    assert sr._INVOKERS["muse"] is sr.invoke_opencode
 
 
 def test_invoke_opencode_agent_flag(monkeypatch, tmp_path):
@@ -1950,33 +2092,54 @@ def test_invoke_opencode_agent_flag(monkeypatch, tmp_path):
     assert "--agent" in cmd and cmd[cmd.index("--agent") + 1] == "vote"
 
 
-def test_run_provider_on_group_threads_opencode_agent(monkeypatch):
+def test_run_provider_on_group_threads_opencode_agent(monkeypatch, tmp_path):
     """run_provider_on_group forwards a spec's ``opencode_agent`` to the invoker
-    as the ``agent`` kwarg (Muse), and forwards NOTHING extra when it is unset
-    (Kimi / every other voter keeps the plain 6-arg call)."""
-    seen: list[dict] = []
+    as ``--agent`` (Muse), and forwards NOTHING when it is unset (Kimi / every
+    other voter keeps the plain call).
 
-    def fake_invoker(prompt, group_dir, letters, model, timeout, effort="", **kw):
-        seen.append({"model": model, "agent": kw.get("agent")})
-        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+    Muse dispatches under its distinct "muse" provider name yet the ``--agent``
+    threading — keyed on the RESOLVED invoker (``invoker is invoke_opencode``),
+    not the name — still forwards its tool-less ``vote`` agent. Driven at the
+    SUBPROCESS boundary (not by swapping ``_INVOKERS``) so the real invoke_opencode
+    runs and the guard's invoker-identity check is genuinely exercised.
+    """
+    import subprocess as sp
 
-    monkeypatch.setitem(sr._INVOKERS, "opencode", fake_invoker)
+    gdir = tmp_path / "grp"
+    gdir.mkdir()
+    (gdir / "overview.png").write_bytes(b"\x89PNG")
 
-    v = sr.run_provider_on_group(sr.OPENCODE_MUSE, "g", None, "p", ["A"], {"A": []}, timeout=None)
-    assert v.choice == "A" and seen[-1]["agent"] == "vote"
+    cmds: list[list[str]] = []
 
-    # OPENCODE_KIMI has opencode_agent=None -> no agent kwarg is passed.
-    v = sr.run_provider_on_group(sr.OPENCODE_KIMI, "g", None, "p", ["A"], {"A": []}, timeout=None)
-    assert v.choice == "A" and seen[-1]["agent"] is None
+    def fake_run(cmd, **kwargs):
+        cmds.append(cmd)
+        return sp.CompletedProcess(
+            cmd, 0, stdout='{"choice":"A","confidence":0.9,"reasoning":"ok"}', stderr=""
+        )
+
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+
+    # MUSE (name="muse") dispatches to invoke_opencode and gets --agent vote.
+    v = sr.run_provider_on_group(sr.MUSE, "g", gdir, "p", ["A"], {"A": [(R1, T1)]}, timeout=None)
+    assert v.choice == "A"
+    assert "--agent" in cmds[-1] and cmds[-1][cmds[-1].index("--agent") + 1] == "vote"
+
+    # OPENCODE_KIMI has opencode_agent=None -> no --agent token at all.
+    v = sr.run_provider_on_group(
+        sr.OPENCODE_KIMI, "g", gdir, "p", ["A"], {"A": [(R1, T1)]}, timeout=None
+    )
+    assert v.choice == "A"
+    assert "--agent" not in cmds[-1]
 
 
-def test_meta_candidate_cli_preserves_agent_and_model_override(monkeypatch, tmp_path):
+def test_meta_candidate_cli_preserves_agent_and_muse_model_override(monkeypatch, tmp_path):
     """The CLI's per-provider override rebuild must carry ``opencode_agent``.
 
-    ``--panel meta-candidate`` resolves to the tool-less Muse voter through the
-    CLI, and an explicit ``--opencode-model`` override changes the model WITHOUT
-    dropping the vote agent (a naive ProviderSpec rebuild would silently revert
-    Muse to the agentic ``build`` default).
+    ``--panel meta-candidate`` resolves to the tool-less Muse voter (name "muse")
+    through the CLI, and an explicit ``--muse-model`` override changes the model
+    WITHOUT dropping the vote agent (a naive ProviderSpec rebuild would silently
+    revert Muse to the agentic ``build`` default). Post-rename, ``--muse-model``
+    (not ``--opencode-model``) is the override that targets this seat.
     """
     from typer.testing import CliRunner
 
@@ -1994,13 +2157,35 @@ def test_meta_candidate_cli_preserves_agent_and_model_override(monkeypatch, tmp_
     monkeypatch.setattr(sr, "run_batch", fake_run_batch)
     runner = CliRunner()
 
+    # No override: the rebuild preserves Muse's tool-less agent + long timeout.
     r = runner.invoke(app, ["agent", "stitch-run", "-b", str(batch), "--panel", "meta-candidate"])
     assert r.exit_code == 0, r.output
     p = captured["panel"]
-    assert [x.name for x in p] == ["claude", "codex", "opencode"]
+    assert [x.name for x in p] == ["claude", "codex", "muse"]
     assert p[2].model == "meta/muse-spark-1.1"
     assert p[2].opencode_agent == "vote" and p[2].timeout == 480
 
+    # --muse-model overrides the model; the vote agent survives the rebuild.
+    r = runner.invoke(
+        app,
+        [
+            "agent",
+            "stitch-run",
+            "-b",
+            str(batch),
+            "--panel",
+            "meta-candidate",
+            "--muse-model",
+            "meta/muse-spark-1.2",
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    p = captured["panel"]
+    assert p[2].model == "meta/muse-spark-1.2"
+    assert p[2].opencode_agent == "vote"
+
+    # --opencode-model is now a NO-OP on meta-candidate (no "opencode" seat): the
+    # override is unambiguously the Kimi seat, which meta-candidate does not have.
     r = runner.invoke(
         app,
         [
@@ -2011,14 +2196,58 @@ def test_meta_candidate_cli_preserves_agent_and_model_override(monkeypatch, tmp_
             "--panel",
             "meta-candidate",
             "--opencode-model",
+            "openrouter/should/not-apply",
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    p = captured["panel"]
+    assert p[2].model == "meta/muse-spark-1.1"  # muse untouched by --opencode-model
+
+
+def test_quad_candidate_cli_model_overrides_target_distinct_seats(monkeypatch, tmp_path):
+    """On the 4-seat quad panel, --opencode-model hits ONLY the Kimi seat and
+    --muse-model hits ONLY the Muse seat — the whole reason Muse got a distinct
+    provider name. A single --opencode-model must not ambiguously rewrite both.
+    """
+    from typer.testing import CliRunner
+
+    from crosswalk.cli import app
+
+    batch = tmp_path / "b"
+    batch.mkdir()
+    captured: dict = {}
+
+    def fake_run_batch(batch_dir, panel, **kwargs):
+        captured["panel"] = panel
+        cons = pd.DataFrame({"consensus": ["unanimous"], "routing": ["auto"]})
+        return pd.DataFrame({"x": [1]}), cons
+
+    monkeypatch.setattr(sr, "run_batch", fake_run_batch)
+    runner = CliRunner()
+
+    r = runner.invoke(
+        app,
+        [
+            "agent",
+            "stitch-run",
+            "-b",
+            str(batch),
+            "--panel",
+            "quad-candidate",
+            "--opencode-model",
+            "openrouter/moonshotai/kimi-k2.7",
+            "--muse-model",
             "meta/muse-spark-1.2",
         ],
     )
     assert r.exit_code == 0, r.output
     p = captured["panel"]
-    # Model override applied; tool-less vote agent preserved.
-    assert p[2].model == "meta/muse-spark-1.2"
-    assert p[2].opencode_agent == "vote"
+    assert [x.name for x in p] == ["claude", "codex", "opencode", "muse"]
+    # --opencode-model rewrote ONLY the Kimi seat; Muse kept its own model.
+    assert p[2].name == "opencode" and p[2].model == "openrouter/moonshotai/kimi-k2.7"
+    # --muse-model rewrote ONLY the Muse seat; its tool-less vote agent survives.
+    assert p[3].name == "muse" and p[3].model == "meta/muse-spark-1.2"
+    assert p[3].opencode_agent == "vote"
 
 
 def test_resolve_timeout_precedence():

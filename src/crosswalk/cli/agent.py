@@ -1268,18 +1268,31 @@ def run_stitch_panel(
         "'v3-candidate' (v3 + a 4th opencode/Qwen3-VL voter), 'no-agy' (v3 with "
         "agy swapped for opencode/Qwen — quota-outage fallback), "
         "'v4-candidate' (the #397 validation composition: v3 with agy swapped "
-        "for Kimi, codex still gpt-5.5), or 'meta-candidate' (the v4 default "
-        "with opencode/Kimi swapped for opencode/Muse Spark 1.1 on Meta's API — "
-        "opt-in reasoning-model prototype; use --timeout 480). Non-blessed "
-        "compositions are refused by stitch-export without "
-        "--allow-nonstandard-panel.",
+        "for Kimi, codex still gpt-5.5), 'meta-candidate' (the v4 default with "
+        "opencode/Kimi swapped for the muse voter — Muse Spark 1.1 on Meta's "
+        "API), or 'quad-candidate' (the FOUR-SEAT calibration panel: the full v4 "
+        "default PLUS the muse voter — claude + codex + opencode/Kimi + "
+        "muse/Muse Spark 1.1). The muse/quad panels are opt-in reasoning-model "
+        "prototypes; use --timeout 480. Non-blessed compositions are refused by "
+        "stitch-export without --allow-nonstandard-panel.",
     ),
     opencode_model: str = typer.Option(
         None,
         "--opencode-model",
-        help="Override the opencode voter's model string (default: the named panel's "
-        "spec — Kimi K2.6 for default/v4/v4-candidate, Muse Spark 1.1 for "
-        "meta-candidate, Qwen3-VL for v3-candidate/no-agy).",
+        help="Override the 'opencode'-named voter's model string (default: the named "
+        "panel's spec — Kimi K2.6 for default/v4/v4-candidate/quad-candidate, "
+        "Qwen3-VL for v3-candidate/no-agy). Targets ONLY the opencode seat — the "
+        "Muse voter has its own 'muse' provider name, so use --muse-model for it; "
+        "on meta-candidate (no opencode seat) this override is a no-op.",
+    ),
+    muse_model: str = typer.Option(
+        None,
+        "--muse-model",
+        help="Override the 'muse' voter's model string (default: the named panel's "
+        "spec — meta/muse-spark-1.1 on meta-candidate/quad-candidate). Distinct "
+        "from --opencode-model: Muse rides the opencode transport but carries a "
+        "separate provider name so both can be seated (quad-candidate) and pinned "
+        "independently.",
     ),
     resume: bool = typer.Option(
         False,
@@ -1324,7 +1337,11 @@ def run_stitch_panel(
         "claude": {"model": claude_model, "effort": claude_effort},
         "codex": {"model": codex_model, "effort": codex_effort},
         "agy": {"model": agy_model},
+        # "opencode" is the Kimi seat; "muse" is the distinctly-named Muse voter
+        # (same transport, own name so both can be seated in quad-candidate and
+        # overridden independently). --opencode-model no longer touches Muse.
         "opencode": {"model": opencode_model},
+        "muse": {"model": muse_model},
     }
 
     def _with_overrides(p: ProviderSpec) -> ProviderSpec:
