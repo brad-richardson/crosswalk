@@ -468,12 +468,13 @@ class TestRenderGroupPrefill:
         assert sorted(ctx["prior_new_ids"]) == ["r3", "t3"]
         assert ctx["prior_label"]["prior_group_id"] == "old1"
 
-    def test_deanchored_prefill_overrides_blank_slate(self):
+    def test_deanchored_prefill_overrides_display_default(self):
         from crosswalk.web.routes.stitching import _render_group
 
         _, ctx = _render_group(self._group_with_prior(), DATASET, deanchored=True)
-        # The prior label (the reviewer's OWN judgment) overrides the blank
-        # slate; the optimizer's proposal stays hidden via deanchored=True.
+        # The prior label (the reviewer's OWN judgment) overrides the
+        # fully-selected de-anchored display default (#406); the optimizer's
+        # proposal stays hidden via deanchored=True.
         assert ctx["deanchored"] is True
         assert ctx["preseed_active_refs"] == ["r1", "r2"]
         assert sorted(ctx["preseed_inactive_ids"]) == ["r3", "t3"]
@@ -488,10 +489,11 @@ class TestRenderGroupPrefill:
         _, ctx = _render_group(group, DATASET, deanchored=False)
         assert ctx.get("preseed_active_refs") is None
         assert "prior_new_ids" not in ctx
-        # De-anchored: blank slate, exactly as before.
+        # De-anchored: the #406 fully-selected display default, untouched
+        # (None => every pill active; nothing hidden on the map).
         _, ctx = _render_group(group, DATASET, deanchored=True)
-        assert ctx["preseed_active_refs"] == []
-        assert sorted(ctx["preseed_inactive_ids"]) == ["r1", "t1"]
+        assert ctx["preseed_active_refs"] is None
+        assert ctx["preseed_inactive_ids"] == []
         assert "prior_new_ids" not in ctx
 
 

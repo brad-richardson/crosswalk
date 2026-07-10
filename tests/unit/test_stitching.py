@@ -3909,9 +3909,10 @@ class TestPanelRouteReasonChip:
 
 
 class TestDeAnchoredMode:
-    """De-anchored review mode: blank-slate rendering (no active pills, proposals
-    collapsed, no leaked selection styling / confidence), provenance stamping,
-    and mode persistence across the HTMX swap chain."""
+    """De-anchored review mode: fully-selected default rendering (every group pill
+    active, map fully visible), proposals collapsed with no pre-picked option and
+    no leaked selection styling / confidence, provenance stamping, and mode
+    persistence across the HTMX swap chain."""
 
     DATASET = "test_ds"
 
@@ -3970,13 +3971,16 @@ class TestDeAnchoredMode:
             q += "&deanchored=1"
         return client.get(q).text
 
-    def test_blank_slate_no_active_pills(self):
+    def test_starts_fully_selected(self):
         client, patches = self._client()
         try:
             html = self._fragment(client, deanchored=True)
-            # No group selection pill starts active (blank slate).
-            assert "segment-pill-ref active" not in html
-            assert "segment-pill-target active" not in html
+            # Every group selection pill starts active (fully selected), so the
+            # reviewer bulk-clears/trims instead of rebuilding from an empty slate.
+            assert "segment-pill-ref active" in html
+            assert "segment-pill-target active" in html
+            # And the map starts fully visible: no group segment is pre-hidden.
+            assert 'id="group-inactive-ids">[]<' in html
         finally:
             self._stop(patches)
 
@@ -4112,11 +4116,11 @@ class TestDeAnchoredMode:
                 },
             )
             assert resp.status_code == 200
-            # The next group fragment stays de-anchored (blank slate + collapsed
-            # proposals + mode flag carried in its own forms).
+            # The next group fragment stays de-anchored (fully-selected default +
+            # collapsed proposals + mode flag carried in its own forms).
             assert "deanchored-proposals" in resp.text
             assert '<input type="hidden" name="deanchored" value="1">' in resp.text
-            assert "segment-pill-ref active" not in resp.text
+            assert "segment-pill-ref active" in resp.text
         finally:
             self._stop(patches)
 
@@ -4133,9 +4137,12 @@ class TestDeAnchoredMode:
             self._stop(patches)
 
     def test_empty_deanchored_submit_requires_confirmation(self):
-        """A blank-slate misclick on Select must NOT record a reject-all label:
-        in de-anchored mode 'no active pills' is the untouched default, not a
-        deliberate deselection, so an unconfirmed empty submit is refused."""
+        """An empty de-anchored submit must NOT silently record a reject-all
+        label: the server still refuses it without the explicit confirm flag.
+        The default now starts fully selected, so an empty selection means the
+        reviewer bulk-cleared every pill — the guard keeps a stray Select from
+        turning that into a reject-all unless the client confirm dialog ratifies
+        it (see test_confirmed_empty_deanchored_submit_stores_reject_all)."""
         from unittest.mock import MagicMock
 
         recorder = MagicMock()

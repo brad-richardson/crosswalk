@@ -692,6 +692,21 @@
         return !anyVisible; // return new visible state
     }
 
+    // Bulk-set visibility for an explicit list of segment ids in a SINGLE
+    // restyle pass. Used by the per-side "select all" / "clear all" controls,
+    // which pass the group pill ids for one side. Deterministic (unlike
+    // toggleAllSegments, which flips) so repeated all-on/all-off flashing to
+    // gauge a group's extent is smooth and predictable. Returns `visible`.
+    function setSegmentsVisible(ids, visible) {
+        if (ids) {
+            for (var i = 0; i < ids.length; i++) {
+                hiddenSegments[ids[i]] = !visible;
+            }
+        }
+        updateSegmentStyles();
+        return visible;
+    }
+
     function addGroupLayers() {
         if (map.getSource(GROUP_SOURCE)) return;
 
@@ -1177,6 +1192,7 @@
     window.matcherToggleContext = toggleContextLayer;
     window.matcherToggleSegment = toggleSegment;
     window.matcherSetSegmentVisible = setSegmentVisible;
+    window.matcherSetSegmentsVisible = setSegmentsVisible;
     window.matcherToggleAllSegments = toggleAllSegments;
     window.matcherRefitGroup = fitCurrentGroup;
     window.matcherUpdateCoverageGaps = updateCoverageGaps;

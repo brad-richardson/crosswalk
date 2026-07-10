@@ -200,7 +200,11 @@
     {% if ref_details is defined %}
     <div class="segment-toggles">
         <div class="segment-toggle-row">
-            <span class="segment-toggle-label" onclick="toggleAllRef()" title="Toggle all ref">Ref</span>
+            <span class="segment-toggle-label" onclick="toggleAllRef()" title="Toggle all ref (flip)">Ref</span>
+            <span class="segment-bulk" role="group" aria-label="Bulk select ref segments">
+                <button type="button" class="segment-bulk-btn" onclick="setAllSegments('ref', true)" title="Select all ref">All</button>
+                <button type="button" class="segment-bulk-btn" onclick="setAllSegments('ref', false)" title="Clear all ref">None</button>
+            </span>
             <div class="segment-pills">
                 {% for ref in ref_details %}
                 {# NOTE: title MUST stay the bare segment id — populateSelection()
@@ -226,7 +230,11 @@
             </div>
         </div>
         <div class="segment-toggle-row">
-            <span class="segment-toggle-label" onclick="toggleAllTarget()" title="Toggle all target">Trgt</span>
+            <span class="segment-toggle-label" onclick="toggleAllTarget()" title="Toggle all target (flip)">Trgt</span>
+            <span class="segment-bulk" role="group" aria-label="Bulk select target segments">
+                <button type="button" class="segment-bulk-btn" onclick="setAllSegments('target', true)" title="Select all target">All</button>
+                <button type="button" class="segment-bulk-btn" onclick="setAllSegments('target', false)" title="Clear all target">None</button>
+            </span>
             <div class="segment-pills">
                 {% for tgt in target_details %}
                 <button class="segment-pill segment-pill-target{% if preseed_active_targets is not defined or preseed_active_targets is none or tgt.id in preseed_active_targets %} active{% endif %}{% if prior_new_ids is defined and tgt.id in prior_new_ids %} segment-pill-new{% endif %}"
