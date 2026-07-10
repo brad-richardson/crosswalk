@@ -481,6 +481,13 @@ def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
         gid = str(row["group_id"])
         if gid in sub_to_parent:
             continue  # consumed by the recomposition pass below
+        if gid in voted_parents:
+            # Defensive: a parent with BOTH a direct whole-group consensus row and
+            # voted sub-problems (e.g. a size-gated whole-group vote in an early
+            # wave later decomposed) would otherwise be counted twice — once here,
+            # once in the recomposition pass. Prefer the recomposed union (the
+            # answer the exporter would mint) and skip the direct row.
+            continue
         if gid not in mapping:
             continue
         hgid = mapping[gid]
@@ -663,6 +670,7 @@ def summarize(results: list[GroupEval]) -> dict:
     n_opt = len(option_rows)
     covered = sum(r.option_covered for r in option_rows)
     summary["option_coverage"] = {
+        "n_opt": n_opt,
         "covered": covered,
         "gap": n_opt - covered,
         "gap_rate": round((n_opt - covered) / n_opt, 3) if n_opt else 0.0,

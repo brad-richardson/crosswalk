@@ -1188,6 +1188,110 @@ class TestPanelRoutingDecomposeFold:
         # subproblem_failed fold.
         assert groups[0]["panel_route_reason"] == "size_gated"
 
+    def _write_batch_json(self, batch_dir, parent, roster, mtime=1000):
+        """Write a batch.json declaring a decompose-first parent + its roster."""
+        import json
+        import os
+
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        bpath = batch_dir / "batch.json"
+        bpath.write_text(
+            json.dumps(
+                {
+                    "dataset_id": "ds_a",
+                    "groups": [
+                        {
+                            "group_id": parent,
+                            "decomposed_parent": True,
+                            "subproblem_ids": list(roster),
+                        }
+                    ],
+                }
+            )
+        )
+        os.utime(bpath, (mtime, mtime))
+        return bpath
+
+    def test_unvoted_oversized_sub_surfaces_parent(self, tmp_path):
+        # THE VOID (#403 follow-up): a decompose-first monster split into an
+        # accepted sub AND an oversized sub that was never voted. It can never
+        # recompose (all-or-nothing) and has NO failed sub-vote to fold — before
+        # the fix it surfaced in no queue. It must now surface as human_review.
+        from crosswalk.agent_labeling.panel_routing import (
+            panel_failed_group_ids,
+            unvoted_decomposed_parents,
+        )
+
+        root = tmp_path / "batches"
+        parent = "beef0010"
+        s_ok = self._sub(parent, [("r1", "t1")])  # small: voted + accepted
+        s_big = self._sub(parent, [("r2", "t2"), ("r3", "t3")])  # oversized: NEVER voted
+        # consensus.csv has ONLY the accepted sub — the oversized sub is absent.
+        self._write_consensus(root / "ds_a", [(s_ok, "auto_accept")])
+        # batch.json roster declares BOTH subs (the completeness contract).
+        self._write_batch_json(root / "ds_a", parent, [s_ok, s_big])
+
+        assert unvoted_decomposed_parents("ds_a", root) == {parent}
+        # The void is closed: the parent (sidecar group) now reaches the queue.
+        assert panel_failed_group_ids("ds_a", root) == {parent}
+
+    def test_fully_voted_roster_does_not_surface_parent(self, tmp_path):
+        # Control: every roster sub voted+accepted -> recomposition will export;
+        # the parent must NOT be surfaced as an unvoted void.
+        from crosswalk.agent_labeling.panel_routing import (
+            panel_failed_group_ids,
+            unvoted_decomposed_parents,
+        )
+
+        root = tmp_path / "batches"
+        parent = "beef0011"
+        s1 = self._sub(parent, [("r1", "t1")])
+        s2 = self._sub(parent, [("r2", "t2")])
+        self._write_consensus(root / "ds_a", [(s1, "auto_accept"), (s2, "auto_accept")])
+        self._write_batch_json(root / "ds_a", parent, [s1, s2])
+
+        assert unvoted_decomposed_parents("ds_a", root) == set()
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_unvoted_parent_reason_annotated(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import (
+            REASON_OVERSIZED_UNVOTED,
+            attach_panel_route_reasons,
+        )
+
+        root = tmp_path / "batches"
+        parent = "beef0012"
+        s_ok = self._sub(parent, [("r1", "t1")])
+        s_big = self._sub(parent, [("r2", "t2")])
+        self._write_consensus(root / "ds_a", [(s_ok, "auto_accept")])
+        self._write_batch_json(root / "ds_a", parent, [s_ok, s_big])
+
+        groups = [{"group_id": parent}]
+        assert attach_panel_route_reasons(groups, "ds_a", root) == 1
+        assert groups[0]["panel_route_reason"] == REASON_OVERSIZED_UNVOTED
+        assert "too large to vote" in groups[0]["panel_route_reason_human"]
+
+    def test_failed_sub_reason_wins_over_unvoted(self, tmp_path):
+        # A parent with BOTH a failed sub AND an unvoted sub is annotated with the
+        # more actionable failed-sub reason, not the unvoted one.
+        from crosswalk.agent_labeling.panel_routing import (
+            REASON_SUBPROBLEM_FAILED,
+            attach_panel_route_reasons,
+            panel_failed_group_ids,
+        )
+
+        root = tmp_path / "batches"
+        parent = "beef0013"
+        s_fail = self._sub(parent, [("r1", "t1")])
+        s_big = self._sub(parent, [("r2", "t2")])
+        self._write_consensus(root / "ds_a", [(s_fail, "human_review")])
+        self._write_batch_json(root / "ds_a", parent, [s_fail, s_big])
+
+        assert panel_failed_group_ids("ds_a", root) == {parent}
+        groups = [{"group_id": parent}]
+        attach_panel_route_reasons(groups, "ds_a", root)
+        assert groups[0]["panel_route_reason"] == REASON_SUBPROBLEM_FAILED
+
 
 # ---------------------------------------------------------------------------
 # panel_routing — read-time size-gate overlay (export-backstop routing void)
@@ -1322,6 +1426,141 @@ class TestPanelRoutingSizeGate:
         assert panel_failed_group_ids("ds_a", root) == {"monster"}
         row = latest_panel_consensus("ds_a", root)["monster"]
         assert row["route_reason"] == "dissent:codex=B"
+
+
+# ---------------------------------------------------------------------------
+# panel_routing — read-time quorum-floor overlay (#405 review)
+#
+# compute_consensus only mints auto_accept at n_valid >= 3. A historical /
+# hand-edited / corrupt row claiming auto_accept with n_valid < 3 must never be
+# treated as accepted at read time — it is demoted to human_review so it reaches
+# the queue instead of silently auto-exporting.
+# ---------------------------------------------------------------------------
+
+
+class TestPanelRoutingQuorumFloor:
+    def _write_consensus(self, batch_dir, rows, mtime=1000):
+        """rows: dicts with group_id/routing/n_valid/n_votes/route_reason."""
+        import csv as _csv
+        import os
+
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        cpath = batch_dir / "consensus.csv"
+        fields = [
+            "group_id",
+            "routing",
+            "route_reason",
+            "consensus",
+            "choice",
+            "n_valid",
+            "n_votes",
+        ]
+        with open(cpath, "w", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=fields)
+            w.writeheader()
+            for row in rows:
+                w.writerow({k: row.get(k, "") for k in fields})
+        os.utime(cpath, (mtime, mtime))
+
+    def test_two_valid_unanimous_accept_is_human_review_everywhere(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import (
+            latest_panel_routing,
+            panel_failed_group_ids,
+        )
+
+        root = tmp_path / "batches"
+        # A 2-valid "unanimous" accept: below the n_valid >= 3 quorum floor.
+        self._write_consensus(
+            root / "ds_a",
+            [
+                {
+                    "group_id": "g2",
+                    "routing": "auto_accept",
+                    "consensus": "unanimous",
+                    "choice": "A",
+                    "n_valid": 2,
+                    "n_votes": 2,
+                }
+            ],
+        )
+        # Routing is human_review everywhere, and it surfaces to the queue.
+        assert latest_panel_routing("ds_a", root)["g2"] == "human_review"
+        assert panel_failed_group_ids("ds_a", root) == {"g2"}
+
+    def test_three_valid_accept_unaffected(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import (
+            latest_panel_routing,
+            panel_failed_group_ids,
+        )
+
+        root = tmp_path / "batches"
+        self._write_consensus(
+            root / "ds_a",
+            [
+                {
+                    "group_id": "g3",
+                    "routing": "auto_accept",
+                    "consensus": "unanimous",
+                    "choice": "A",
+                    "n_valid": 3,
+                    "n_votes": 3,
+                }
+            ],
+        )
+        assert latest_panel_routing("ds_a", root)["g3"] == "auto_accept"
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_missing_n_valid_leaves_accept_untouched(self, tmp_path):
+        # No n_valid column -> no evidence -> the row keeps its routing (a
+        # historical wave that predates the column must not be newly demoted).
+        from crosswalk.agent_labeling.panel_routing import latest_panel_routing
+
+        root = tmp_path / "batches"
+        self._write_consensus(
+            root / "ds_a",
+            [{"group_id": "g0", "routing": "auto_accept", "consensus": "unanimous", "choice": "A"}],
+        )
+        assert latest_panel_routing("ds_a", root)["g0"] == "auto_accept"
+
+
+# ---------------------------------------------------------------------------
+# panel_routing — impossible vote counts never mint a stronger claim (#405)
+# ---------------------------------------------------------------------------
+
+
+class TestCountsShowAbstention:
+    def test_genuine_abstention_is_quorum(self):
+        from crosswalk.agent_labeling.panel_routing import counts_show_abstention
+
+        assert counts_show_abstention(3, 4) is True  # 3-of-4 -> abstention present
+
+    def test_full_participation_is_unanimous(self):
+        from crosswalk.agent_labeling.panel_routing import counts_show_abstention
+
+        assert counts_show_abstention(4, 4) is False  # no abstention
+
+    def test_missing_counts_are_no_evidence(self):
+        from crosswalk.agent_labeling.panel_routing import counts_show_abstention
+
+        assert counts_show_abstention(None, 4) is False
+        assert counts_show_abstention(4, None) is False
+
+    def test_impossible_counts_take_conservative_quorum_path(self):
+        # n_valid > n_votes (and negatives) are logically impossible; they must
+        # NOT fall through to the stronger unanimous claim. Conservative = quorum.
+        from crosswalk.agent_labeling.panel_routing import counts_show_abstention
+
+        assert counts_show_abstention(5, 4) is True  # more valid than total
+        assert counts_show_abstention(-1, 4) is True
+        assert counts_show_abstention(3, -1) is True
+
+    def test_derive_route_reason_downgrades_impossible_accept_to_quorum(self):
+        from crosswalk.agent_labeling.panel_routing import REASON_QUORUM, derive_route_reason
+
+        # An auto_accept row with impossible counts derives QUORUM (weaker), never
+        # UNANIMOUS (stronger, which the nonsensical counts cannot support).
+        row = {"routing": "auto_accept", "n_valid": "5", "n_votes": "4"}
+        assert derive_route_reason(row) == REASON_QUORUM
 
 
 # ---------------------------------------------------------------------------

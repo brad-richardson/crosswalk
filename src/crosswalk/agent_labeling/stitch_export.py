@@ -119,6 +119,7 @@ from .panel_routing import (
     REASON_QUORUM_NONE,
     REASON_UNANIMOUS_NONE,
     _int_or_none,
+    counts_show_abstention,
     derive_route_reason,
 )
 from .stitch_eval import (
@@ -613,11 +614,26 @@ def _counts_show_abstention(row: dict) -> bool:
     ``derive_route_reason`` would otherwise return verbatim as an informative
     existing reason) — the same contradicting-evidence-wins stance
     :func:`_none_verdict_kind` takes on the quorum floor. Missing/unparseable
-    counts are no evidence (False).
+    counts are no evidence (False); logically impossible counts are handled
+    conservatively (treated as abstention-present, the weaker quorum claim) by
+    the shared :func:`panel_routing.counts_show_abstention`.
     """
-    n_votes = _int_or_none(row.get("n_votes"))
+    return counts_show_abstention(
+        _int_or_none(row.get("n_valid")), _int_or_none(row.get("n_votes"))
+    )
+
+
+def _accept_below_quorum(row: dict) -> bool:
+    """True when an ``auto_accept`` row's own counts contradict the quorum floor.
+
+    ``compute_consensus`` only mints ``auto_accept`` at ``n_valid >= 3``; a row
+    with routing ``auto_accept`` but ``n_valid`` present and < 3 is a hand-edit /
+    corrupt / pre-quorum-rule artifact that must NOT mint accept ground truth.
+    ``n_valid`` missing is no evidence — historical rows lacking the column keep
+    exporting (same "no evidence -> untouched" stance the reject-all path takes).
+    """
     n_valid = _int_or_none(row.get("n_valid"))
-    return n_votes is not None and n_valid is not None and 0 < n_valid < n_votes
+    return n_valid is not None and n_valid < 3
 
 
 def _is_quorum_accept(row: dict) -> bool:
@@ -638,6 +654,34 @@ def _is_quorum_accept(row: dict) -> bool:
     if str(row.get("routing")) != "auto_accept":
         return False
     return derive_route_reason(row) == REASON_QUORUM or _counts_show_abstention(row)
+
+
+#: A batch dir carrying this marker file must never mint labels. Its verdicts
+#: still feed the human review queue (panel_routing reads it directly), so a
+#: calibration batch whose contested groups legitimately need human eyes is not
+#: lost — only label EXPORT is blocked. Used by :func:`filter_exportable_batch_dirs`.
+NO_EXPORT_MARKER = ".no-export"
+
+
+def filter_exportable_batch_dirs(batch_dirs: list[Path]) -> list[Path]:
+    """Drop batch dirs carrying a ``.no-export`` marker; keep order otherwise.
+
+    A ``.no-export`` marker file means the batch is a calibration wave whose
+    verdicts must not become durable labels — but whose contested groups still
+    legitimately feed the human review queue (``panel_routing`` reads the batch
+    dir directly and does NOT honor the marker). Only the export path skips these
+    dirs; each skip is logged with the dir name for traceability.
+    """
+    kept: list[Path] = []
+    for bd in batch_dirs:
+        bd = Path(bd)
+        if (bd / NO_EXPORT_MARKER).exists():
+            logger.info(
+                f"Skipping export for batch dir {bd.name}: {NO_EXPORT_MARKER} marker present"
+            )
+            continue
+        kept.append(bd)
+    return kept
 
 
 def plan_exports(
@@ -683,6 +727,10 @@ def plan_exports(
     reject-all pair labels with ``selected_edges == []`` (see
     :func:`_gate_empty_group`). Set it False to plan the accept path only.
     """
+    # Calibration batches (a ``.no-export`` marker) must not mint labels — drop
+    # them up front so nothing downstream plans against them. panel_routing still
+    # reads them, so their contested groups reach the human queue.
+    batch_dirs = filter_exportable_batch_dirs(batch_dirs)
     if max_assignment_components is None:
         max_assignment_components = settings.stitch_export_max_assignment_components
     if soft_max_edges is None:
@@ -769,7 +817,7 @@ def plan_exports(
     for gid, (bd, row) in merged.items():
         if gid in sub_to_parent:
             continue  # sub-problem rows are recomposition inputs, not candidates
-        is_accept = str(row.get("routing")) == "auto_accept"
+        is_accept = str(row.get("routing")) == "auto_accept" and not _accept_below_quorum(row)
         is_none = export_empty_set and _none_verdict_kind(row) is not None
         if not (is_accept or is_none):
             continue
@@ -841,8 +889,11 @@ def plan_exports(
         # gates; all-valid NONE (unanimous or quorum) -> empty-set gates (when
         # enabled). Everything else is not a candidate at all. The verdict's
         # quorum/unanimous tier rides onto the outcome (is_quorum) so
-        # write_exports can mint the matching labeler variant.
-        if str(row.get("routing")) == "auto_accept":
+        # write_exports can mint the matching labeler variant. A sub-quorum
+        # auto_accept (n_valid present and < 3) is not a valid accept — it is
+        # skipped here (the read-time overlay in panel_routing surfaces it to the
+        # human queue instead) so it can never mint accept ground truth.
+        if str(row.get("routing")) == "auto_accept" and not _accept_below_quorum(row):
             n_auto += 1
             ge = _gate_group(
                 gid=gid,
@@ -899,11 +950,15 @@ def plan_exports(
             if sid not in merged:
                 continue
             srow = merged[sid][1]
-            verdicts[sid] = (
-                str(srow.get("routing", "")),
-                _parse_edge_set_pairs(srow.get("edge_set")),
-            )
-            if str(srow.get("routing")) == "auto_accept":
+            # A sub-quorum auto_accept sub-verdict (n_valid present and < 3) is
+            # not a valid accept — demote it to human_review so recomposition
+            # treats it as a failed sub (the union can never launder a sub-quorum
+            # accept into a whole-group label).
+            sub_routing = str(srow.get("routing", ""))
+            if sub_routing == "auto_accept" and _accept_below_quorum(srow):
+                sub_routing = "human_review"
+            verdicts[sid] = (sub_routing, _parse_edge_set_pairs(srow.get("edge_set")))
+            if sub_routing == "auto_accept":
                 with suppress(ValueError, TypeError):
                     sub_confs.append(float(srow.get("mean_confidence") or 0.0))
         rec = recompose_subproblem_verdicts(parent_gid, roster_ids, verdicts)
@@ -1317,8 +1372,13 @@ def write_exports(
             f"era explicitly with plan_exports(stamp_era=...) / CLI --stamp-era "
             f"{{{', '.join(sorted(LABELERS_BY_ERA))}}}."
         )
-    store = StitchingLabelStore(dataset, labels_dir=labels_dir)
-    written = 0
+    # Resolve every row's labeler in a PRE-PASS, before any write. A quorum
+    # verdict attributed to a pre-quorum (no-quorum-labelers) era is a provenance
+    # anomaly that must raise — but with NOTHING written, not mid-loop after
+    # earlier rows already hit disk (that partial write left the store in an
+    # inconsistent, half-exported state). Resolution is pure, so any anomaly is
+    # caught here before the store is touched.
+    resolved: list[tuple[GroupExport, str]] = []
     for g in report.exported:
         tags = LABELERS_BY_ERA[g.panel_era]
         if g.is_empty_set:
@@ -1335,6 +1395,11 @@ def write_exports(
                 f"abstention. Refusing to blur quorum/unanimous provenance; "
                 f"investigate the batch's consensus.csv."
             )
+        resolved.append((g, labeler))
+
+    store = StitchingLabelStore(dataset, labels_dir=labels_dir)
+    written = 0
+    for g, labeler in resolved:
         ref_ids = {e["ref_id"] for e in g.selected_edges}
         tgt_ids = {e["target_id"] for e in g.selected_edges}
         store.add(

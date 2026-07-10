@@ -1536,9 +1536,7 @@ def eval_stitch_panel(
                 f"    {tier:<10} exact={s['exact_rate']:.0%} f1={s['mean_f1']:.3f} (n={s['n']})"
             )
         oc = summary["option_coverage"]
-        console.print(
-            f"  Option-coverage gap: {oc['gap']}/{summary['n_groups']} ({oc['gap_rate']:.0%})"
-        )
+        console.print(f"  Option-coverage gap: {oc['gap']}/{oc['n_opt']} ({oc['gap_rate']:.0%})")
         console.print(f"  Disagreements (label-quality review candidates): {len(disagreements)}")
     else:
         console.print("[bold]Panel eval: 0 pair-label groups mapped[/bold]")
@@ -1586,7 +1584,7 @@ def _write_stitch_eval_report(output, summary, results, disagreements, dataset, 
         lines.append(f"| {tier} | {s['exact_rate']:.0%} | {s['mean_f1']:.3f} | {s['n']} |\n")
     oc = summary["option_coverage"]
     lines.append(
-        f"\n### Option-coverage gap\n\n{oc['gap']}/{summary['n_groups']} "
+        f"\n### Option-coverage gap\n\n{oc['gap']}/{oc['n_opt']} "
         f"({oc['gap_rate']:.0%}) human edge sets match NO current option — "
         f"signal for whether top-K is large enough.\n"
     )
@@ -1910,6 +1908,7 @@ def export_stitch_panel(
         LABELERS_BY_ERA,
         REASON_HUMAN_PRECEDENCE,
         batch_panel_era,
+        filter_exportable_batch_dirs,
         nonstandard_panel_batches,
         plan_exports,
         write_exports,
@@ -1929,6 +1928,19 @@ def export_stitch_panel(
             part = part.strip()
             if part:
                 batch_dirs.append(Path(part))
+
+    # Calibration batches carrying a .no-export marker never mint labels — only
+    # the human review queue reads them (panel_routing honors no marker). Drop
+    # them up front, BEFORE the era/composition pre-checks, so a calibration
+    # batch cannot block a real export and vote-provenance archival skips it too.
+    exportable = filter_exportable_batch_dirs(batch_dirs)
+    for bd in batch_dirs:
+        if bd not in exportable:
+            console.print(f"[yellow]Skipping {bd.name}: .no-export marker present[/yellow]")
+    batch_dirs = exportable
+    if not batch_dirs:
+        console.print("[yellow]No exportable batch dirs (all carry a .no-export marker)[/yellow]")
+        raise typer.Exit(0)
 
     # Era stamping and vote-provenance archival key batches by BASENAME —
     # duplicates would mis-attribute one dir's era/ballots to another. Refuse

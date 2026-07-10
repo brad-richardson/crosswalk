@@ -2336,6 +2336,34 @@ def test_invoke_opencode_isolates_db_per_invocation(monkeypatch, tmp_path):
     assert not db_path.parent.exists()
 
 
+def test_invoke_opencode_cleans_db_dir_on_timeout(monkeypatch, tmp_path):
+    """The per-invocation OPENCODE_DB tmpdir is removed even when the subprocess
+    raises TimeoutExpired (the CLI-timeout path _attempt_provider turns into an
+    abstain) — the rmtree in the finally must not leak a temp dir per timeout.
+    """
+    import subprocess as sp
+
+    gdir = tmp_path / "grp"
+    gdir.mkdir()
+
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        # Record the tmpdir the invoker created, then raise as a real timeout would.
+        captured["db_path"] = Path(kwargs["env"]["OPENCODE_DB"])
+        raise sp.TimeoutExpired(cmd, timeout=kwargs.get("timeout", 1))
+
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+
+    with pytest.raises(sp.TimeoutExpired):
+        sr.invoke_opencode("P", gdir, [], "openrouter/moonshotai/kimi-k2.6", timeout=1)
+
+    db_path = captured["db_path"]
+    # The exception propagated (the caller classifies it), but the finally still
+    # ran: no leaked temp DB dir.
+    assert not db_path.parent.exists()
+
+
 def test_run_provider_on_group_threads_opencode_agent(monkeypatch, tmp_path):
     """run_provider_on_group forwards a spec's ``opencode_agent`` to the invoker
     as ``--agent`` (Kimi and Muse both run under the tool-less ``vote`` agent),

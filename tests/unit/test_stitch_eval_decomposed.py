@@ -68,8 +68,9 @@ def test_no_double_count_in_summary(tmp_path):
     assert summary["by_consensus"]["decomposed"]["n"] == 1
     assert summary["decomposition"]["recomposed_parents"] == 1
     # Recomposed rows are excluded from the option-coverage denominator (no
-    # whole-group option menu) rather than always scored as a gap.
-    assert summary["option_coverage"] == {"covered": 0, "gap": 0, "gap_rate": 0.0}
+    # whole-group option menu) rather than always scored as a gap. n_opt (the
+    # denominator) is therefore 0 here, distinct from n_groups == 1.
+    assert summary["option_coverage"] == {"n_opt": 0, "covered": 0, "gap": 0, "gap_rate": 0.0}
 
 
 def test_failed_subproblem_recomposes_partial_union(tmp_path):
@@ -90,6 +91,85 @@ def test_failed_subproblem_recomposes_partial_union(tmp_path):
     assert row.is_recomposed is True
     assert row.routing == "human_review"
     assert row.panel_edge_set == frozenset({("r1", "t1")})  # accepted sub only
+
+
+def test_option_coverage_denominator_is_n_opt():
+    # summarize exposes n_opt (the option-menu group count) separately from
+    # n_groups, and the gap RATE is computed against n_opt — a recomposed parent
+    # (no whole-group option menu) inflates n_groups but not n_opt, so the CLI
+    # must display gap/n_opt, never gap/n_groups.
+    from crosswalk.agent_labeling.stitch_eval import GroupEval, summarize
+
+    def _ge(gid, covered, is_recomposed):
+        es = frozenset({("r1", "t1")})
+        return GroupEval(
+            group_id=gid,
+            human_group_id=gid,
+            match_type="M:N",
+            human_edge_set=es,
+            consensus="decomposed" if is_recomposed else "unanimous",
+            routing="human_review",
+            panel_choice="A",
+            panel_edge_set=es,
+            exact_match=True,
+            f1=1.0,
+            option_covered=covered,
+            is_recomposed=is_recomposed,
+        )
+
+    # One real option-menu group (uncovered -> a gap) plus one recomposed parent.
+    results = [_ge("plain", covered=False, is_recomposed=False), _ge("parent", False, True)]
+    summary = summarize(results)
+    oc = summary["option_coverage"]
+    assert summary["n_groups"] == 2  # both rows are groups
+    assert oc["n_opt"] == 1  # only the non-recomposed row has an option menu
+    assert oc["gap"] == 1
+    # 1/1 == 1.0, NOT 1/2 == 0.5 — the denominator is n_opt, not n_groups.
+    assert oc["gap_rate"] == 1.0
+
+
+def test_parent_with_direct_row_and_subs_counted_once(tmp_path):
+    # Defensive double-count guard (#405): a parent with BOTH a direct
+    # whole-group consensus row AND voted sub-problems must be evaluated ONCE
+    # (the recomposed union preferred), never twice.
+    import csv
+
+    from .test_stitch_export import CONSENSUS_COLUMNS
+
+    b, sub_ids = make_decomposed_batch(
+        tmp_path / "b1",
+        [{"edges": [("r1", "t1")]}, {"edges": [("r2", "t2")]}],
+    )
+    # Inject a DIRECT consensus row for the parent (as if an early wave voted the
+    # whole group before it was decomposed), with the same union edge set.
+    rows = list(csv.DictReader((b / "consensus.csv").open()))
+    rows.append(
+        {
+            "group_id": PARENT,
+            "consensus": "unanimous",
+            "choice": "A",
+            "edge_set": json.dumps([["r1", "t1"], ["r2", "t2"]]),
+            "routing": "auto_accept",
+            "n_votes": 4,
+            "n_valid": 4,
+            "minority": "",
+            "mean_confidence": 0.9,
+            "route_reason": "unanimous",
+        }
+    )
+    with (b / "consensus.csv").open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=CONSENSUS_COLUMNS)
+        w.writeheader()
+        w.writerows(rows)
+
+    human = _human_df([("r1", "t1"), ("r2", "t2")])
+    results = evaluate_batch(b, human)
+
+    # Exactly ONE row for the parent — the recomposed union, not the direct row.
+    parent_rows = [r for r in results if r.group_id == PARENT]
+    assert len(parent_rows) == 1
+    assert parent_rows[0].is_recomposed is True
+    assert summarize(results)["n_groups"] == 1
 
 
 def test_non_decomposed_batch_unaffected(tmp_path):

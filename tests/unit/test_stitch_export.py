@@ -1534,6 +1534,34 @@ def test_quorum_verdict_in_pre_quorum_era_refused(tmp_path, labels_dir):
     assert StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET).empty
 
 
+def test_quorum_era_anomaly_writes_nothing_even_after_valid_rows(tmp_path, labels_dir):
+    """PARTIAL-WRITE GUARD (#405): a valid row FOLLOWED by a quorum-era-violation
+    row must write NOTHING — labeler resolution happens in a pre-pass, so the
+    anomaly raises before any row hits the store (no half-exported state)."""
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            # Sorts first -> pre-fix it would be written before the anomaly raises.
+            {
+                "group_id": "g_aaa_valid",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+                "route_reason": "unanimous",
+            },
+            # A quorum accept in v4 (no quorum labelers) -> resolution raises.
+            _quorum_group("g_zzz_anomaly", [("r2", "t2")]),
+        ],
+        voters=_V4_VOTERS,
+    )
+    report = plan_exports([b], DATASET, labels_dir)
+    assert {g.group_id for g in report.exported} == {"g_aaa_valid", "g_zzz_anomaly"}
+    with pytest.raises(ValueError, match="predates the quorum rule"):
+        write_exports(report, DATASET, labels_dir)
+    # NOTHING written — not even the valid row that precedes the anomaly.
+    assert StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET).empty
+
+
 # ---------------------------------------------------------------------------
 # 2026-07-10 quadcal0710 calibration batches (awareness item): batches voted
 # entirely post-#404 carry voter sets EXACTLY equal to PANEL_VOTERS_V5, so they
@@ -1905,3 +1933,88 @@ def test_empty_and_accept_coexist(tmp_path, labels_dir):
     labelers = dict(zip(df["group_id"], df["labeler"]))
     assert labelers["gyes"] == PANEL_LABELER
     assert labelers["gno"] == PANEL_NONE_LABELER
+
+
+# ---------------------------------------------------------------------------
+# Accept-floor guard (#405): an auto_accept row with n_valid present and < 3
+# contradicts the quorum floor (compute_consensus only mints accept at
+# n_valid >= 3). It must never mint accept ground truth at export.
+# ---------------------------------------------------------------------------
+
+
+def test_sub_quorum_accept_not_exported(tmp_path, labels_dir):
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {"group_id": "g_ok", "routing": "auto_accept", "edges": [("r1", "t1")]},
+            # auto_accept but only 2 valid votes -> below the n_valid >= 3 floor.
+            {
+                "group_id": "g_bad",
+                "routing": "auto_accept",
+                "edges": [("r2", "t2")],
+                "n_votes": 2,
+                "n_valid": 2,
+            },
+        ],
+    )
+    report = _plan([b], labels_dir)
+    exported = {g.group_id for g in report.exported}
+    # The clean accept exports; the sub-quorum accept is not even a candidate.
+    assert "g_ok" in exported
+    assert "g_bad" not in {g.group_id for g in report.groups}
+    write_exports(report, DATASET, Path(labels_dir))
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    assert set(df["group_id"]) == {"g_ok"}
+
+
+# ---------------------------------------------------------------------------
+# .no-export marker (#405): a batch dir carrying a .no-export marker is skipped
+# by export, but panel_routing / queue building still reads it.
+# ---------------------------------------------------------------------------
+
+
+def test_no_export_marker_skips_batch(tmp_path, labels_dir):
+    from crosswalk.agent_labeling.stitch_export import NO_EXPORT_MARKER
+
+    marked = _one_group_batch(tmp_path, "b_cal", "g_cal")
+    (marked / NO_EXPORT_MARKER).write_text("")
+    normal = _one_group_batch(tmp_path, "b_real", "g_real")
+
+    report = _plan([marked, normal], labels_dir)
+    # Only the unmarked batch's group is planned/exported.
+    assert {g.group_id for g in report.groups} == {"g_real"}
+    write_exports(report, DATASET, Path(labels_dir))
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    assert set(df["group_id"]) == {"g_real"}
+
+
+def test_filter_exportable_batch_dirs_drops_marked(tmp_path):
+    from crosswalk.agent_labeling.stitch_export import (
+        NO_EXPORT_MARKER,
+        filter_exportable_batch_dirs,
+    )
+
+    marked = tmp_path / "b_cal"
+    marked.mkdir()
+    (marked / NO_EXPORT_MARKER).write_text("")
+    normal = tmp_path / "b_real"
+    normal.mkdir()
+    assert filter_exportable_batch_dirs([marked, normal]) == [normal]
+
+
+def test_no_export_marker_still_feeds_review_queue(tmp_path):
+    # The queue path (panel_routing) does NOT honor the marker: a calibration
+    # batch's contested groups still reach the human review queue.
+    from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
+    from crosswalk.agent_labeling.stitch_export import NO_EXPORT_MARKER
+
+    root = tmp_path / "batches"
+    b = make_batch(
+        root / "ds_cal",
+        "ds_cal",
+        [{"group_id": "g_contested", "routing": "human_review", "edges": [("r1", "t1")]}],
+    )
+    (b / NO_EXPORT_MARKER).write_text("")
+    # Despite the marker, the failed group surfaces to the queue.
+    assert panel_failed_group_ids("ds_cal", root) == {"g_contested"}

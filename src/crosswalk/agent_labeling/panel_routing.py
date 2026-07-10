@@ -50,11 +50,29 @@ size-gated verdict, a low-confidence one is NOT blocked at export, so without th
 overlay it would silently auto-export on the next ``stitch-export``). The
 low-confidence overlay runs AFTER the size gate — ``size_gated`` wins when both
 apply.
+
+Quorum-floor overlay: :func:`compute_consensus <stitch_runner.compute_consensus>`
+only mints ``auto_accept`` at ``n_valid >= 3``; a historical/hand-edited/corrupt
+row claiming ``auto_accept`` with ``n_valid`` present and < 3 is demoted here to
+``human_review`` (``route_reason="below_quorum:<n>"``) so a sub-quorum accept can
+never be treated as accepted. Runs BEFORE the size/low-confidence gates (the
+floor is the more fundamental invariant).
+
+Residual decomposition void (#403 follow-up): a monster that went straight to
+decomposition has no direct whole-group vote, and one of its roster
+sub-problems may have been skipped as an irreducible oversized block (no
+consensus row). Such a parent can never recompose (all-or-nothing) yet has no
+failed sub-vote to fold onto the queue — a silent void. :func:`panel_failed_group_ids`
+surfaces these via :func:`unvoted_decomposed_parents` (which reads the batch.json
+roster) and :func:`attach_panel_route_reasons` annotates them
+``route_reason="oversized_unvoted"``.
 """
 
 from __future__ import annotations
 
 import csv
+import json
+import logging
 import math
 import sys
 from collections.abc import Mapping
@@ -65,6 +83,8 @@ import yaml
 from ..config import settings
 from ..filenames import PROJECT_ROOT
 from ..matching.group_decomposition import parent_group_id_of
+
+logger = logging.getLogger(__name__)
 
 
 def _raise_csv_field_limit() -> None:
@@ -159,6 +179,14 @@ REASON_LOW_CONFIDENCE = "low_confidence"
 #: adjudicate the parent. Synthesized by :func:`attach_panel_route_reasons` for a
 #: parent that has no direct consensus row of its own (a decompose-first monster).
 REASON_SUBPROBLEM_FAILED = "subproblem_failed"
+#: A decompose-first parent (#367 Mode B) at least one of whose roster
+#: sub-problems was NEVER voted — skipped as an irreducible oversized block, so it
+#: has no consensus row. Such a parent has no failed sub-vote to fold and no direct
+#: parent vote, so without this it would neither auto-accept (recomposition is
+#: all-or-nothing, and an unvoted sub blocks it) nor queue: a silent void. It is
+#: surfaced to the human review queue on its own by :func:`panel_failed_group_ids`
+#: and annotated here by :func:`attach_panel_route_reasons`.
+REASON_OVERSIZED_UNVOTED = "oversized_unvoted"
 
 #: Legacy phase-2 stamps that merely echo the ``consensus`` column ("majority",
 #: "none"). They carry strictly less information than what the row's own
@@ -182,6 +210,34 @@ def _int_or_none(val) -> int | None:
         return int(float(val))
     except (TypeError, ValueError):
         return None
+
+
+def counts_show_abstention(n_valid: int | None, n_votes: int | None) -> bool:
+    """True when a row's vote counts prove >=1 abstention (``n_valid < n_votes``).
+
+    Count evidence must always be able to DOWNGRADE a verdict's tier to the
+    WEAKER quorum claim; ``n_valid == n_votes`` (no abstention) is the only shape
+    that supports the stronger unanimous claim.
+
+    Logically impossible counts — ``n_valid > n_votes`` (more valid than total),
+    or a negative — cannot support unanimity either, yet the naive
+    ``0 < n_valid < n_votes`` check falls through to False on them and would let a
+    corrupt/hand-edited row mint the STRONGER unanimous claim its data cannot
+    support. So impossible counts take the conservative path: treated as
+    abstention-present (the weakest claim, quorum) with a warning logged so the
+    anomaly is visible. Missing/unparseable counts are no evidence (False).
+    """
+    if n_valid is None or n_votes is None:
+        return False
+    if n_valid < 0 or n_votes < 0 or n_valid > n_votes:
+        logger.warning(
+            "impossible vote counts n_valid=%s n_votes=%s — treating as quorum "
+            "(weakest claim) rather than unanimous",
+            n_valid,
+            n_votes,
+        )
+        return True
+    return 0 < n_valid < n_votes
 
 
 def derive_route_reason(row: Mapping) -> str:
@@ -217,7 +273,9 @@ def derive_route_reason(row: Mapping) -> str:
         # agree == len(votes)), so their derivation is unchanged.
         if consensus == "quorum":
             return REASON_QUORUM
-        if n_valid is not None and n_votes is not None and 0 < n_valid < n_votes:
+        # Any abstention evidence (or impossible counts, handled conservatively)
+        # downgrades the claim to quorum; only n_valid == n_votes is unanimous.
+        if counts_show_abstention(n_valid, n_votes):
             return REASON_QUORUM
         return REASON_UNANIMOUS
     if consensus in ("unanimous", "quorum"):
@@ -271,6 +329,12 @@ def humanize_route_reason(code: str) -> str:
         # auto-accept blocks the whole-group label — review the group as a whole.
         REASON_SUBPROBLEM_FAILED: (
             "a decomposed sub-problem could not be auto-accepted — review the whole group"
+        ),
+        # Decomposition (#367 Mode B): a roster sub-problem was never voted
+        # (oversized/irreducible), so the whole group can neither recompose nor
+        # auto-accept — review it as a whole.
+        REASON_OVERSIZED_UNVOTED: (
+            "a decomposed sub-problem was too large to vote — review the whole group"
         ),
     }
     if code in fixed:
@@ -447,6 +511,17 @@ def latest_panel_consensus(
     for gid, row in rows.items():
         if str(row.get("routing", "") or "").strip() != ROUTING_AUTO_ACCEPT:
             continue  # already human-routed; keep the (more specific) reason
+        # Quorum floor first: compute_consensus only mints auto_accept at
+        # n_valid >= 3, so a row claiming auto_accept with n_valid PRESENT and < 3
+        # is a hand-edit / corrupt / pre-quorum-rule artifact. Never treat it as
+        # accepted (it would then neither export cleanly nor reach the queue) —
+        # surface it as a below-quorum human_review. n_valid missing is no
+        # evidence (historical rows lacking the column keep their routing).
+        n_valid = _int_or_none(row.get("n_valid"))
+        if n_valid is not None and n_valid < 3:
+            row["routing"] = ROUTING_HUMAN_REVIEW
+            row["route_reason"] = f"{REASON_BELOW_QUORUM_PREFIX}{n_valid}"
+            continue
         batch_dir = origins[gid]
         # Size gate first: the structural export block is the decisive fact.
         n_edges = _pack_candidate_edge_count(batch_dir, gid)
@@ -482,6 +557,80 @@ def latest_panel_routing(
     }
 
 
+def _decomposition_rosters(
+    dataset: str,
+    batches_root: Path = STITCH_BATCHES_DIR,
+) -> dict[str, list[str]]:
+    """Each decompose-first parent's full sub-problem roster, from ``batch.json``.
+
+    Maps ``{parent_group_id: [subproblem_id, ...]}`` for every ``batch.json``
+    group carrying ``decomposed_parent`` + ``subproblem_ids`` (#367 Mode B),
+    merged across the dataset's batch dirs (later wave supersedes earlier per
+    parent, mirroring the consensus precedence). The roster is the completeness
+    contract — it includes oversized sub-problems that were never packed/voted —
+    so it is the only source that reveals a parent whose voted-sub set is
+    INCOMPLETE. Batch dirs are matched by the same name rule as
+    :func:`_dataset_batch_dirs` but keyed on ``batch.json`` presence (a
+    decompose-first parent may have no ``consensus.csv`` row of its own). Returns
+    ``{}`` when nothing decomposed.
+    """
+    if not dataset or not batches_root.exists():
+        return {}
+    dirs = [
+        d
+        for d in batches_root.iterdir()
+        if d.is_dir()
+        and (d.name == dataset or d.name.startswith(dataset + "_"))
+        and (d / "batch.json").is_file()
+    ]
+    dirs.sort(key=lambda d: ((d / "batch.json").stat().st_mtime, d.name))
+    rosters: dict[str, list[str]] = {}
+    for d in dirs:
+        try:
+            batch = json.loads((d / "batch.json").read_text())
+        except (ValueError, OSError, UnicodeDecodeError):
+            continue
+        if not isinstance(batch, Mapping):
+            continue
+        for grp in batch.get("groups", []):
+            if not isinstance(grp, Mapping):
+                continue
+            if grp.get("decomposed_parent") and grp.get("subproblem_ids"):
+                rosters[str(grp.get("group_id"))] = [str(s) for s in grp["subproblem_ids"]]
+    return rosters
+
+
+def unvoted_decomposed_parents(
+    dataset: str,
+    batches_root: Path = STITCH_BATCHES_DIR,
+) -> set[str]:
+    """Decompose-first parents with an unvoted (oversized) roster sub-problem.
+
+    A monster that went straight to decomposition has no direct whole-group vote;
+    when one of its roster sub-problems was skipped as an irreducible oversized
+    block it has NO consensus row, so recomposition is permanently incomplete
+    (all-or-nothing) — the group can never auto-accept — yet no failed sub-vote
+    exists to fold it onto the queue (see :func:`panel_failed_group_ids`). That is
+    a residual queue-void (#403 follow-up): the group would be reviewed by no one.
+
+    Returns each such parent id: it has a batch.json roster, no direct consensus
+    row of its own, and at least one roster sub-problem with no consensus row.
+    Parents whose entire roster was voted are excluded (they either recompose/
+    export cleanly or already surface via a failed sub-problem).
+    """
+    rosters = _decomposition_rosters(dataset, batches_root)
+    if not rosters:
+        return set()
+    voted = set(latest_panel_consensus(dataset, batches_root).keys())
+    void: set[str] = set()
+    for parent, roster in rosters.items():
+        if parent in voted:
+            continue  # a direct (e.g. size-gated) parent row already routes it
+        if any(sid not in voted for sid in roster):
+            void.add(parent)
+    return void
+
+
 def panel_failed_group_ids(
     dataset: str,
     batches_root: Path = STITCH_BATCHES_DIR,
@@ -500,6 +649,12 @@ def panel_failed_group_ids(
     every review queue. Each failed sub-problem is therefore folded onto its
     PARENT group id (the sidecar entry the reviewer adjudicates): recomposition
     is all-or-nothing, so one failed sub-problem blocks the whole-group label.
+
+    Residual void (#403 follow-up): a decompose-first parent whose roster has an
+    UNVOTED (oversized) sub-problem has neither a failed sub-vote to fold nor a
+    direct parent vote — it can never auto-accept but nothing surfaces it. Such
+    parents (see :func:`unvoted_decomposed_parents`) are added directly so they
+    reach the human queue instead of vanishing.
     """
     failed: set[str] = set()
     for gid, routing in latest_panel_routing(dataset, batches_root).items():
@@ -508,6 +663,9 @@ def panel_failed_group_ids(
         # A failed sub-problem surfaces its PARENT (the sidecar group); a plain
         # group surfaces itself.
         failed.add(parent_group_id_of(gid) or gid)
+    # Decompose-first parents blocked only by an unvoted oversized sub-problem
+    # have no human_review row above — surface them explicitly.
+    failed |= unvoted_decomposed_parents(dataset, batches_root)
     return failed
 
 
@@ -532,7 +690,8 @@ def attach_panel_route_reasons(
     up for review even though the panel never voted it directly.
     """
     rows = latest_panel_consensus(dataset, batches_root)
-    if not rows:
+    unvoted_parents = unvoted_decomposed_parents(dataset, batches_root)
+    if not rows and not unvoted_parents:
         return 0
     # Parents with >=1 sub-problem the panel routed to human_review. A direct
     # consensus row (below) always wins over this synthesized reason.
@@ -550,7 +709,11 @@ def attach_panel_route_reasons(
         if row is not None:
             code = derive_route_reason(row)
         elif gid in failed_sub_parents:
+            # A concrete failed sub-vote is more actionable than an unvoted one,
+            # so it wins when a parent has both.
             code = REASON_SUBPROBLEM_FAILED
+        elif gid in unvoted_parents:
+            code = REASON_OVERSIZED_UNVOTED
         else:
             continue
         if not code:
