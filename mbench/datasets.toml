@@ -13,20 +13,30 @@ stitch_labels_dir = "../labels/stitching"
 # a floor is enforced only once >= min_mapped_groups curated stitching labels
 # map to current pipeline groups; below that the gate reports skip_unarmed
 # (non-blocking), so growing the label base engages the gate with no code
-# change. Floors are baseline-minus-margin, mirroring tests/regression/
+# change. Once a baseline is established, `armed = true` makes mapping loss a
+# failure instead of allowing the gate to self-unarm; `min_mapping_rate`
+# protects the established label population even when the absolute mapped count
+# remains above the auto-arm threshold; `min_labels_total` separately protects
+# against deleting labels while retaining a perfect mapping rate (it counts
+# pair + set labels, so pair->set semantic conversions don't read as
+# deletions). Floors are baseline-minus-margin, mirroring tests/regression/
 # test_loo_cv.py. Re-measure and update when the label base or optimizer shifts
 # materially (see docs/BENCHMARKING.md "Stitch-level quality gate").
 #
 # us_boston_streets baseline (2026-07-05, post-#295/#298 set-semantics
-# reinterpretation; 123 labels, 3 converted to set semantics -> 111 mapped PAIR
-# groups): filtered edge-F1 0.8858, filtered exact-match 0.5946, 0 sliver-
+# reinterpretation; 111/113 eligible PAIR labels mapped, with SET labels scored
+# separately): filtered edge-F1 0.8858, filtered exact-match 0.5946, 0 sliver-
 # affected. Floors: F1 0.8858-0.0558 -> 0.83; exact 0.5946-0.0946 -> 0.50 (wider
 # margin: per-group exact-match is the noisier metric). Set labels are scored
 # separately (membership/boundary/coverage) and are NOT gated: only 3 mapped set
 # labels exist, far below any sensible arming base — no set floor is invented
 # (see docs/BENCHMARKING.md "Stitch-level quality gate").
 [gate.us_boston_streets]
+armed = true
 min_mapped_groups = 30
+min_mapping_rate = 0.90
+# 118 curated labels as of 2026-07-09 (113 pair + 5 set); ~90% retention.
+min_labels_total = 106
 f1_filtered_floor = 0.83
 exact_filtered_floor = 0.50
 

@@ -10,6 +10,8 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+METRIC_SCHEMA_VERSION = 2
+
 
 @dataclass
 class BenchmarkResult:
@@ -20,6 +22,9 @@ class BenchmarkResult:
     timestamp: str
     metrics: dict
     metadata: dict = field(default_factory=dict)
+    # Defaults identify historical records that predate explicit view tracking.
+    metric_schema_version: int = 1
+    prediction_view: str = "legacy_combined"
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), default=str)
@@ -55,6 +60,7 @@ def create_result(
     dataset: str,
     metrics: dict,
     metadata: dict | None = None,
+    prediction_view: str = "combined",
 ) -> BenchmarkResult:
     """Create a new BenchmarkResult with current timestamp."""
     return BenchmarkResult(
@@ -63,6 +69,8 @@ def create_result(
         timestamp=datetime.now(UTC).isoformat(),
         metrics=metrics,
         metadata=metadata or {},
+        metric_schema_version=METRIC_SCHEMA_VERSION,
+        prediction_view=prediction_view,
     )
 
 
@@ -80,6 +88,7 @@ def compare_results(results: list[BenchmarkResult], console: Console | None = No
     table.add_column("Tool", style="cyan")
     table.add_column("Dataset", style="green")
     table.add_column("Level")
+    table.add_column("View")
     table.add_column("Precision", justify="right")
     table.add_column("Recall", justify="right")
     table.add_column("F1", justify="right", style="bold")
@@ -104,6 +113,7 @@ def compare_results(results: list[BenchmarkResult], console: Console | None = No
             r.tool,
             r.dataset,
             m.get("match_level", "-"),
+            r.prediction_view,
             f"{m.get('precision', 0):.4f}",
             f"{m.get('recall', 0):.4f}",
             f"{m.get('f1', 0):.4f}",

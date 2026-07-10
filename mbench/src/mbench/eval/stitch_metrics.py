@@ -71,6 +71,22 @@ class StitchEvalResult:
     set_boundary_precision: float = 0.0
     set_coverage: float = 0.0
     set_metrics_by_labeler: dict = field(default_factory=dict)
+    # Mapping-health diagnostics. These are observational only: scoring still
+    # uses ``edges`` and the existing mapping algorithm in this release.
+    mapping_diagnostics_available: bool = False
+    pair_labels_total: int = 0
+    pair_labels_mapped: int = 0
+    pair_labels_mapped_clean: int = 0
+    pair_labels_mapped_partial: int = 0
+    pair_labels_mapped_split: int = 0
+    pair_labels_lost: int = 0
+    reject_all_labels_total: int = 0
+    reject_all_labels_mapped: int = 0
+    reject_all_labels_unrecoverable: int = 0
+    pair_label_mapping_rate: float = 0.0
+    set_labels_total: int = 0
+    set_labels_mapped: int = 0
+    set_labels_lost: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -93,6 +109,20 @@ class StitchEvalResult:
             "stitch_set_boundary_precision": self.set_boundary_precision,
             "stitch_set_coverage": self.set_coverage,
             "stitch_set_metrics_by_labeler": self.set_metrics_by_labeler,
+            "stitch_mapping_diagnostics_available": self.mapping_diagnostics_available,
+            "stitch_pair_labels_total": self.pair_labels_total,
+            "stitch_pair_labels_mapped": self.pair_labels_mapped,
+            "stitch_pair_labels_mapped_clean": self.pair_labels_mapped_clean,
+            "stitch_pair_labels_mapped_partial": self.pair_labels_mapped_partial,
+            "stitch_pair_labels_mapped_split": self.pair_labels_mapped_split,
+            "stitch_pair_labels_lost": self.pair_labels_lost,
+            "stitch_reject_all_labels_total": self.reject_all_labels_total,
+            "stitch_reject_all_labels_mapped": self.reject_all_labels_mapped,
+            "stitch_reject_all_labels_unrecoverable": self.reject_all_labels_unrecoverable,
+            "stitch_pair_label_mapping_rate": self.pair_label_mapping_rate,
+            "stitch_set_labels_total": self.set_labels_total,
+            "stitch_set_labels_mapped": self.set_labels_mapped,
+            "stitch_set_labels_lost": self.set_labels_lost,
         }
 
 
@@ -108,15 +138,55 @@ def _empty_result() -> StitchEvalResult:
     )
 
 
-def _curated_edge_set(selected_edges_raw: str) -> EdgeSet:
-    """Parse a stitching label's ``selected_edges`` JSON into an edge set."""
-    if not selected_edges_raw or isinstance(selected_edges_raw, float):
-        return frozenset()
+def _curated_edge_set(selected_edges_raw: object) -> EdgeSet:
+    """Strictly parse a stitching label's ``selected_edges`` JSON.
+
+    Only an explicit JSON array may represent the selection; only ``[]`` means
+    reject-all. Missing, blank, malformed, or structurally invalid values are
+    label errors and must never be silently reinterpreted as reject-all.
+    """
+    if selected_edges_raw is None or (
+        not isinstance(selected_edges_raw, (str, list, dict)) and pd.isna(selected_edges_raw)
+    ):
+        raise ValueError("selected_edges is null; reject-all must be explicit JSON []")
+    if not isinstance(selected_edges_raw, str) or not selected_edges_raw.strip():
+        raise ValueError("selected_edges must be a non-blank JSON array")
     try:
         edges = json.loads(selected_edges_raw)
-    except (ValueError, TypeError):
-        return frozenset()
-    return frozenset((str(e["ref_id"]), str(e["target_id"])) for e in edges)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"selected_edges is invalid JSON: {exc}") from exc
+    if not isinstance(edges, list):
+        raise ValueError("selected_edges must decode to a JSON array")
+
+    parsed: list[Edge] = []
+    for index, edge in enumerate(edges):
+        if not isinstance(edge, dict):
+            raise ValueError(f"selected_edges[{index}] must be an object")
+        missing = {"ref_id", "target_id"} - set(edge)
+        if missing:
+            raise ValueError(f"selected_edges[{index}] missing keys: {sorted(missing)}")
+        ref_id = edge["ref_id"]
+        target_id = edge["target_id"]
+        if ref_id is None or target_id is None or str(ref_id) == "" or str(target_id) == "":
+            raise ValueError(f"selected_edges[{index}] contains a null/blank id")
+        parsed.append((str(ref_id), str(target_id)))
+    return frozenset(parsed)
+
+
+def _row_edge_set(row, idx: object) -> EdgeSet:
+    """Parse one label row's ``selected_edges``, naming the row on failure.
+
+    A malformed label is curation corruption and must abort evaluation (never
+    silently reinterpreted), but the error has to identify WHICH row so the
+    label file can be fixed without bisecting it.
+    """
+    try:
+        return _curated_edge_set(row.get("selected_edges"))
+    except ValueError as exc:
+        raise ValueError(
+            f"invalid stitching label (row {idx}, group_id={row.get('group_id')}, "
+            f"labeler={row.get('labeler')}): {exc}"
+        ) from exc
 
 
 def _labeler_class(labeler: object) -> str:
@@ -232,7 +302,7 @@ def map_labels_to_groups(
 
     mapping: dict[int, str] = {}
     for idx, row in stitch_labels.iterrows():
-        hes = _curated_edge_set(row.get("selected_edges"))
+        hes = _row_edge_set(row, idx)
         hgid = str(row.get("group_id"))
         if not hes:
             # Reject-all label: recoverable only by verbatim group_id match.
@@ -298,6 +368,53 @@ def map_set_labels_to_groups(
     return mapping
 
 
+def _pair_mapping_health(
+    pair_labels: pd.DataFrame,
+    group_candidate_edges: dict[str, EdgeSet],
+    mapping: dict[int, str],
+) -> dict[str, int | float]:
+    """Classify pair-label mapping without altering the scoring mapping."""
+    edge_groups: dict[Edge, set[str]] = defaultdict(set)
+    for gid, edges in group_candidate_edges.items():
+        for edge in edges:
+            edge_groups[edge].add(gid)
+
+    clean = partial = split = reject_all_total = reject_all_unrecoverable = 0
+    for idx, row in pair_labels.iterrows():
+        curated = _row_edge_set(row, idx)
+        if not curated:
+            reject_all_total += 1
+            if idx not in mapping:
+                reject_all_unrecoverable += 1
+            continue
+
+        surviving = [edge for edge in curated if edge_groups.get(edge)]
+        current_groups = {gid for edge in surviving for gid in edge_groups[edge]}
+        if not surviving:
+            continue
+        if len(current_groups) > 1:
+            split += 1
+        elif len(surviving) < len(curated):
+            partial += 1
+        else:
+            clean += 1
+
+    total = len(pair_labels)
+    mapped = len(mapping)
+    return {
+        "pair_labels_total": total,
+        "pair_labels_mapped": mapped,
+        "pair_labels_mapped_clean": clean,
+        "pair_labels_mapped_partial": partial,
+        "pair_labels_mapped_split": split,
+        "pair_labels_lost": total - mapped,
+        "reject_all_labels_total": reject_all_total,
+        "reject_all_labels_mapped": reject_all_total - reject_all_unrecoverable,
+        "reject_all_labels_unrecoverable": reject_all_unrecoverable,
+        "pair_label_mapping_rate": mapped / total if total else 0.0,
+    }
+
+
 def _aggregate(
     records: list[tuple[EdgeSet, EdgeSet]],
 ) -> tuple[float, float, float, float]:
@@ -328,8 +445,8 @@ def _legacy_evaluate(bridge: pd.DataFrame, stitch_labels: pd.DataFrame) -> Stitc
     records: list[tuple[EdgeSet, EdgeSet]] = []
     total_curated = 0
     total_extra = 0
-    for _, row in stitch_labels.iterrows():
-        curated = _curated_edge_set(row.get("selected_edges"))
+    for idx, row in stitch_labels.iterrows():
+        curated = _row_edge_set(row, idx)
         if not curated:
             continue
         group_ref_ids = {r for r, _ in curated}
@@ -414,6 +531,7 @@ def evaluate_stitch_groups(
         set_labels = stitch_labels.iloc[0:0]
 
     mapping = map_labels_to_groups(pair_labels, group_candidate_edges)
+    mapping_health = _pair_mapping_health(pair_labels, group_candidate_edges, mapping)
 
     raw_records: list[tuple[EdgeSet, EdgeSet]] = []
     filt_records: list[tuple[EdgeSet, EdgeSet]] = []
@@ -424,7 +542,7 @@ def evaluate_stitch_groups(
 
     for idx, gid in mapping.items():
         row = stitch_labels.loc[idx]
-        curated = _curated_edge_set(row.get("selected_edges"))
+        curated = _row_edge_set(row, idx)
         candidate = group_candidate_edges[gid]
         # Predicted edge set for this group = bridge selections among the group's
         # candidate edges (i.e. what the optimizer kept within this component).
@@ -501,4 +619,9 @@ def evaluate_stitch_groups(
         set_boundary_precision=set_boundary,
         set_coverage=set_coverage,
         set_metrics_by_labeler=set_metrics_by_labeler,
+        mapping_diagnostics_available=True,
+        **mapping_health,
+        set_labels_total=len(set_labels),
+        set_labels_mapped=len(set_mapping),
+        set_labels_lost=len(set_labels) - len(set_mapping),
     )

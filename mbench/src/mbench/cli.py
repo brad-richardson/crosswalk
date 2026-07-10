@@ -115,6 +115,16 @@ def _print_eval_result(tool: str, dataset: str, result) -> None:
         f"  Labeled coverage: {er.labeled_coverage:.4f} "
         f"(predictions on unlabeled pairs are excluded from precision)"
     )
+    if result.decision_results:
+        console.print("  [bold]Decision views:[/bold]")
+        for name in ("accepted", "review", "proposal"):
+            view = result.decision_results[name]
+            marker = " (headline)" if name == "accepted" else ""
+            console.print(
+                f"    {name}{marker}: F1={view.f1:.4f} "
+                f"P={view.precision:.4f} R={view.recall:.4f} "
+                f"predictions={view.total_predictions}"
+            )
     if result.resource_stats:
         rs = result.resource_stats
         console.print(
@@ -135,6 +145,18 @@ def _print_eval_result(tool: str, dataset: str, result) -> None:
             f"({sr.groups_sliver_affected} sliver-affected)"
         )
         console.print(f"    Curated edges: {sr.total_curated_edges}  Extra: {sr.total_extra_edges}")
+        if sr.mapping_diagnostics_available:
+            console.print(
+                "    Mapping: "
+                f"{sr.pair_labels_mapped}/{sr.pair_labels_total} pair labels "
+                f"({sr.pair_label_mapping_rate:.1%}); "
+                f"clean={sr.pair_labels_mapped_clean} "
+                f"partial={sr.pair_labels_mapped_partial} "
+                f"split={sr.pair_labels_mapped_split} "
+                f"lost={sr.pair_labels_lost} "
+                f"reject-all-mapped={sr.reject_all_labels_mapped} "
+                f"reject-all-unrecoverable={sr.reject_all_labels_unrecoverable}"
+            )
         if sr.label_counts_by_labeler:
             counts = "  ".join(f"{k}={v}" for k, v in sr.label_counts_by_labeler.items())
             console.print(f"    Labels by labeler: {counts}")
@@ -154,21 +176,22 @@ def _apply_stitch_gate(
     per-dataset floors from ``[gate.*]`` in the config, prints a status line per
     dataset, and returns True iff any ARMED dataset failed its floor (blocking).
 
-    Never raises on config problems: a missing/malformed config just means no
-    floors, so every dataset reports ``no_config`` (non-blocking).
+    A requested gate fails closed when its config is missing or malformed.
     """
     from mbench.eval.gate import evaluate_gate, load_gate_config
 
     try:
         cfg = load_datasets_config(config)
-        floors = load_gate_config(cfg)
-    except (FileNotFoundError, ValueError):
-        floors = {}
+        floors = load_gate_config(cfg, strict=True)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print("\n[bold]Stitch-level quality gate[/bold]")
+        console.print(f"  [bold red]GATE CONFIG ERROR[/bold red] — {exc}")
+        return True
 
     console.print("\n[bold]Stitch-level quality gate[/bold]")
     if not floors:
-        console.print("  [yellow]No [gate.*] floors configured; nothing to enforce.[/yellow]")
-        return False
+        console.print("  [bold red]No valid [gate.*] floors configured.[/bold red]")
+        return True
 
     colors = {"pass": "green", "fail": "red", "skip_unarmed": "yellow", "no_config": "dim"}
     any_blocking = False
@@ -366,7 +389,7 @@ def run(
     except FileNotFoundError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
 
@@ -514,14 +537,17 @@ def run_batch(
     console.print(table)
     console.print(f"\n{passed}/{len(batch_results)} datasets completed successfully.")
 
+    gate_blocking = False
     if gate:
         gate_inputs = [
             (ds_name, res.stitch_result if res is not None else None)
             for ds_name, res, _err in batch_results
         ]
-        blocking = _apply_stitch_gate(config, gate_inputs)
-        if blocking:
-            raise typer.Exit(1)
+        gate_blocking = _apply_stitch_gate(config, gate_inputs)
+
+    execution_failed = any(res is None for _ds, res, _err in batch_results)
+    if execution_failed or gate_blocking:
+        raise typer.Exit(1)
 
 
 @app.command("list-datasets")
