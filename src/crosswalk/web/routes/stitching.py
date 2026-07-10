@@ -604,11 +604,16 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
 
     - ``deanchored`` is threaded into the template for the mode switch, the
       collapsed proposals, and the blank confidence readout.
-    - In de-anchored mode the optimizer pre-seed is stripped to a blank slate
-      (no active pills, no pre-picked option, every group segment starts hidden
-      so nothing signals the proposal) and the client edge payload is widened to
-      the full candidate union so live confidence can reason about rejected
-      candidates the reviewer pairs up.
+    - In de-anchored mode the optimizer pre-seed is stripped so nothing signals
+      the proposal: no pre-picked option (the exact-edge field stays empty) and
+      the client edge payload is widened to the full candidate union so live
+      confidence can reason about rejected candidates the reviewer pairs up. The
+      pills/map start FULLY selected (every group segment active) — the reviewer
+      then bulk-clears or trims down, which is the fast path he wants: starting
+      from the full extent and toggling to see it, rather than rebuilding a
+      hundreds-of-edge selection from an empty slate. This is a display default
+      only; it hides no proposal signal (a full grid is not the optimizer's pick)
+      and the empty-submit guard still refuses an unconfirmed reject-all.
     """
     geojson = _build_group_geojson(group, deanchored=deanchored)
     ctx = _build_group_context(group, dataset=dataset)
@@ -619,12 +624,13 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
         # Keep the server-rendered sliver count consistent with the widened
         # candidate payload (the live indicator recomputes client-side anyway).
         ctx["sliver_count"] = sum(1 for e in annotated if e["is_sliver"])
-        ctx["preseed_active_refs"] = []
-        ctx["preseed_active_targets"] = []
+        # Fully selected: None => the template marks every rendered pill active,
+        # and an empty inactive list keeps every group segment visible on the map.
+        # No exact option is pre-picked, so this is a SET-membership selection.
+        ctx["preseed_active_refs"] = None
+        ctx["preseed_active_targets"] = None
         ctx["preseed_edges"] = []
-        ctx["preseed_inactive_ids"] = list(group.get("ref_ids", [])) + list(
-            group.get("target_ids", [])
-        )
+        ctx["preseed_inactive_ids"] = []
     return geojson, ctx
 
 
