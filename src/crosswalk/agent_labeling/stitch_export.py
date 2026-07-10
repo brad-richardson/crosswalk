@@ -305,6 +305,13 @@ REASON_HUMAN_PRECEDENCE = "human_precedence"
 # blocks), blocks the whole-group label.
 REASON_SUBPROBLEM_FAILED = "subproblem_failed"
 REASON_SUBPROBLEMS_UNVOTED = "subproblems_unvoted"
+# A recomposition that resolved COMPLETE (every sub-problem unanimously accepted)
+# but whose union of accepted selections is EMPTY. Structurally unreachable via a
+# normal panel (a non-NONE auto_accept selects >=1 edge; a unanimous-NONE routes
+# to human_review, not auto_accept), so this is defense-in-depth: an empty
+# accepted union is NOT a real whole-group label and must route to review rather
+# than mint an empty label or be mis-attributed to the sliver gate.
+REASON_EMPTY_RECOMPOSITION = "empty_recomposition"
 # The batch dirs contributing a parent's consumed sub-problem verdicts resolve
 # to DIFFERENT panel eras (e.g. a v3-era wave completed by post-bless v4
 # re-votes): the union label would mix compositions under a single era tag, so
@@ -1046,6 +1053,14 @@ def _gate_recomposed_group(
         return _mk(REASON_SUBPROBLEM_FAILED, n_edges_final=n_raw)
     if rec.status == STATUS_UNVOTED:
         return _mk(REASON_SUBPROBLEMS_UNVOTED, n_edges_final=n_raw)
+
+    # Empty-union guard: a COMPLETE recomposition whose accepted selections union
+    # to nothing is not a real whole-group label. Refuse it EXPLICITLY (route to
+    # review) rather than let it fall through to the sliver gate below, which
+    # would drop it too — but mis-report it as ``emptied_by_sliver`` (0 slivers)
+    # and rely on that unrelated gate as an accidental safety net.
+    if not rec.union_edges:
+        return _mk(REASON_EMPTY_RECOMPOSITION, n_edges_final=0)
 
     # Class-consistency gate on the union (same rule as _gate_group).
     if meta is not None:

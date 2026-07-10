@@ -1095,6 +1095,101 @@ class TestPanelRouting:
 
 
 # ---------------------------------------------------------------------------
+# panel_routing — decomposition queue-void fold (#367 Mode B, #388 follow-up)
+#
+# A monster group that goes STRAIGHT to decomposition has no direct whole-group
+# vote — only its sub-problems are voted, keyed by sub-problem ids
+# (``{parent}__p...``) that are NOT sidecar groups. A failed sub-problem would
+# thus be filtered out of the human review queue against the sidecar, leaving the
+# parent invisible in every queue. panel_failed_group_ids folds each failed
+# sub-problem onto its PARENT (the sidecar group the reviewer adjudicates).
+# ---------------------------------------------------------------------------
+
+
+class TestPanelRoutingDecomposeFold:
+    def _write_consensus(self, batch_dir, rows, mtime=1000):
+        """Rows are (gid, routing) or (gid, routing, route_reason)."""
+        import csv as _csv
+
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        cpath = batch_dir / "consensus.csv"
+        with open(cpath, "w", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=["group_id", "routing", "route_reason"])
+            w.writeheader()
+            for row in rows:
+                gid, routing = row[0], row[1]
+                reason = row[2] if len(row) > 2 else ""
+                w.writerow({"group_id": gid, "routing": routing, "route_reason": reason})
+        import os
+
+        os.utime(cpath, (mtime, mtime))
+        return cpath
+
+    def _sub(self, parent, edges):
+        from crosswalk.matching.group_decomposition import subproblem_id
+
+        return subproblem_id(parent, edges)
+
+    def test_failed_subproblem_surfaces_parent(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
+
+        root = tmp_path / "batches"
+        parent = "beef0001"
+        s1 = self._sub(parent, [("r1", "t1")])  # accepted
+        s2 = self._sub(parent, [("r2", "t2")])  # failed
+        self._write_consensus(root / "ds_a", [(s1, "auto_accept"), (s2, "human_review")])
+        # The PARENT surfaces (sidecar group), never the sub-problem ids.
+        assert panel_failed_group_ids("ds_a", root) == {parent}
+
+    def test_all_subproblems_accept_no_parent(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import panel_failed_group_ids
+
+        root = tmp_path / "batches"
+        parent = "beef0002"
+        s1 = self._sub(parent, [("r1", "t1")])
+        s2 = self._sub(parent, [("r2", "t2")])
+        self._write_consensus(root / "ds_a", [(s1, "auto_accept"), (s2, "auto_accept")])
+        # Every sub accepted -> recomposition will export; parent must NOT surface.
+        assert panel_failed_group_ids("ds_a", root) == set()
+
+    def test_attach_reason_for_decompose_first_parent(self, tmp_path):
+        from crosswalk.agent_labeling.panel_routing import (
+            REASON_SUBPROBLEM_FAILED,
+            attach_panel_route_reasons,
+        )
+
+        root = tmp_path / "batches"
+        parent = "beef0003"
+        s1 = self._sub(parent, [("r1", "t1")])
+        s2 = self._sub(parent, [("r2", "t2")])
+        self._write_consensus(root / "ds_a", [(s1, "auto_accept"), (s2, "human_review")])
+        # The parent has no direct consensus row (decompose-first monster) but
+        # surfaces via the fold; it must be annotated with WHY.
+        groups = [{"group_id": parent}]
+        assert attach_panel_route_reasons(groups, "ds_a", root) == 1
+        assert groups[0]["panel_route_reason"] == REASON_SUBPROBLEM_FAILED
+        assert "review the whole group" in groups[0]["panel_route_reason_human"]
+
+    def test_direct_row_reason_wins_over_fold(self, tmp_path):
+        # A parent that ALSO has a direct (size-gated) whole-group vote keeps its
+        # own, more specific reason; the fold never clobbers a direct row.
+        from crosswalk.agent_labeling.panel_routing import attach_panel_route_reasons
+
+        root = tmp_path / "batches"
+        parent = "beef0004"
+        s2 = self._sub(parent, [("r2", "t2")])
+        self._write_consensus(
+            root / "ds_a",
+            [(parent, "human_review", "size_gated"), (s2, "human_review")],
+        )
+        groups = [{"group_id": parent}]
+        attach_panel_route_reasons(groups, "ds_a", root)
+        # The direct row's own (more specific) reason wins over the synthesized
+        # subproblem_failed fold.
+        assert groups[0]["panel_route_reason"] == "size_gated"
+
+
+# ---------------------------------------------------------------------------
 # panel_routing — read-time size-gate overlay (export-backstop routing void)
 # ---------------------------------------------------------------------------
 

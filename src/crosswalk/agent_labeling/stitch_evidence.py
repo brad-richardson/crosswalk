@@ -913,3 +913,37 @@ def generate_stitch_evidence(
         if meta is not None:
             generated.append(gid)
     return generated
+
+
+def missing_evidence_packs(
+    packable: list[dict], generated: list[str]
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Which packable groups did NOT get an evidence pack, split by kind.
+
+    :func:`generate_group_evidence` silently returns ``None`` (no pack) when a
+    group yields no options, so a group can be requested yet never packed. For a
+    decomposed sub-problem (#367 Mode B) that is not benign: a missing sub-problem
+    pack is never voted, and the recomposition contract then blocks the parent's
+    whole-group label PERMANENTLY (``subproblems_unvoted``) with no visible cause.
+
+    Args:
+        packable: the group dicts an evidence pack was requested for.
+        generated: the group_ids :func:`generate_stitch_evidence` actually packed.
+
+    Returns ``(missing_subproblems, missing_other)`` where ``missing_subproblems``
+    is ``[(subproblem_id, parent_group_id), ...]`` (packable groups carrying a
+    ``parent_group_id``) and ``missing_other`` is the remaining missing group_ids.
+    """
+    gen = {str(g) for g in generated}
+    missing_subs: list[tuple[str, str]] = []
+    missing_other: list[str] = []
+    for g in packable:
+        gid = str(g.get("group_id"))
+        if gid in gen:
+            continue
+        parent = g.get("parent_group_id")
+        if parent:
+            missing_subs.append((gid, str(parent)))
+        else:
+            missing_other.append(gid)
+    return missing_subs, missing_other

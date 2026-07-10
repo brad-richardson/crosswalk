@@ -115,6 +115,24 @@ def subproblem_id(parent_group_id: str, edges: Iterable[Pair]) -> str:
     return f"{parent_group_id}{SUBPROBLEM_SEPARATOR}{digest[:10]}"
 
 
+def parent_group_id_of(gid: str) -> str | None:
+    """Parent group id embedded in a sub-problem id, or ``None`` for a plain id.
+
+    Sub-problem ids are ``{parent}__p{sha256[:10]}`` (see :func:`subproblem_id`).
+    Sidecar/parent group ids are short hex strings that never contain the
+    ``__p`` separator, so splitting on the LAST separator recovers the parent
+    unambiguously. Returns ``None`` for any id without the separator — i.e. a
+    normal (non-decomposed) group id — so callers can fold a decomposed
+    sub-problem back onto the parent that the human review queue and stitch-eval
+    key on (a sub-problem id is not itself a sidecar group).
+    """
+    s = str(gid)
+    idx = s.rfind(SUBPROBLEM_SEPARATOR)
+    if idx <= 0:
+        return None
+    return s[:idx]
+
+
 def _canonical_pairs(edges: Iterable) -> list[Pair]:
     """Normalize edges (dicts or pairs) to sorted, deduplicated string pairs."""
     pairs: set[Pair] = set()
