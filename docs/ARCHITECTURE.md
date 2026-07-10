@@ -431,12 +431,20 @@ Setup (no machine-level config required):
   `{env:META_API_KEY}` — **never inlined**. `META_API_KEY` (in `.env`) is loaded
   into the process environment by `crosswalk`'s `load_dotenv()` and inherited by
   the opencode subprocess.
-- **Tool-less `vote` agent**: `opencode.json` also defines a `vote` agent with all
-  tools disabled. Muse is an agentic reasoning model — under opencode's default
-  `build` agent it burns its turn on (auto-rejected) `ls`/`cat`/`read` tool calls
-  instead of answering. The `MUSE` spec sets `opencode_agent="vote"`, threaded to
-  `invoke_opencode` as `--agent vote`; the Kimi invocation passes no agent and is
-  byte-identical to before this knob existed.
+- **Tool-less `vote` agent**: `opencode.json` also defines a model-agnostic `vote`
+  agent with all tools disabled. Under opencode's default `build` agent a voter
+  burns its turn on (auto-rejected) `ls`/`cat`/`read` tool calls instead of
+  answering — a voter with the evidence-pack PNGs already force-attached needs no
+  tools. **Both** the `OPENCODE_KIMI` and `MUSE` specs set `opencode_agent="vote"`,
+  threaded to `invoke_opencode` as `--agent vote`. Kimi was moved onto `vote` after
+  the 2026-07-10 quad-candidate calibration wave, where it timed out (480s) on 7/30
+  groups under `build` — its successful votes ran a median 37s / max 172s (bimodal
+  answer-fast-or-stall-forever, not slow thinking) — while Muse on the same
+  transport and identical packs had 0/30 timeouts (median 19s) under `vote`. The
+  `--agent` threading keys on the resolved invoker, so this is invocation plumbing
+  only: the export gate keys voter identity on `(provider, model)` pairs, leaving
+  the blessed v4 composition unchanged. The residual v3-era Qwen seat passes no
+  agent and is byte-identical to before this knob existed.
 - **Output budget**: Muse emits hidden reasoning tokens; a low output budget
   truncates its JSON mid-object (`finish_reason: "length"`, `content: null`). The
   `muse-spark-1.1` model entry sets a generous `limit.output` (32000), and the

@@ -12,6 +12,7 @@ import errno
 import json
 import math
 import subprocess
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -1927,15 +1928,18 @@ def test_parse_vote_ignores_pack_feedback_key():
 
 
 def test_default_panel_is_v4():
-    """The blessed v4 panel IS the default: claude + codex/gpt-5.6-sol +
+    """The blessed v4 panel IS the default: claude + codex/gpt-5.6-terra +
     kimi/Kimi K2.6 (the 2026-07-09 bless; agy is out of the default)."""
     assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "kimi"]
     claude, codex, kimi = sr.DEFAULT_PANEL
     assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
-    assert codex.model == "gpt-5.6-sol" and codex.effort == "medium"
+    assert codex.model == "gpt-5.6-terra" and codex.effort == "medium"
     assert kimi.model == "openrouter/moonshotai/kimi-k2.6"
     # Kimi's thinking runs long on large packs: the spec carries its own timeout.
     assert kimi.timeout == 480
+    # Kimi runs tool-less under the same ``vote`` agent as Muse (7/30 -> 0/30
+    # timeout evidence): a voter with pre-attached packs needs no tools.
+    assert kimi.opencode_agent == "vote"
     assert sr.get_panel("default") is sr.DEFAULT_PANEL
     assert sr.get_panel("v4") is sr.DEFAULT_PANEL
     # Empty/None means "no choice made" -> the default panel.
@@ -2001,7 +2005,7 @@ def test_meta_candidate_panel_composition():
     (provider, model) triple is intentionally NONSTANDARD (muse/meta-muse-spark-1.1
     is not the blessed Kimi pair), so its labels are refused by stitch-export
     without --allow-nonstandard-panel and it never mints a blessed labeler. It
-    carries v4 lineage (claude-opus-4-8 + codex/gpt-5.6-sol, both medium) and must
+    carries v4 lineage (claude-opus-4-8 + codex/gpt-5.6-terra, both medium) and must
     NOT touch DEFAULT_PANEL. Muse's provider NAME is the distinct "muse" (not the
     transport name "opencode", nor the Kimi seat's "kimi") so it stays individually
     addressable at every provider-keyed site.
@@ -2010,7 +2014,7 @@ def test_meta_candidate_panel_composition():
     assert [p.name for p in meta] == ["claude", "codex", "muse"]
     claude, codex, muse = meta
     assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
-    assert codex.model == "gpt-5.6-sol" and codex.effort == "medium"
+    assert codex.model == "gpt-5.6-terra" and codex.effort == "medium"
     # The Muse voter: distinct name, Meta-API model ref, reasoning-model timeout,
     # tool-less agent.
     assert muse is sr.MUSE
@@ -2031,7 +2035,7 @@ def test_quad_candidate_panel_composition():
     """quad-candidate is the FOUR-SEAT calibration panel: the full v4 default
     PLUS the distinctly-named Muse voter.
 
-    Seats claude + codex/gpt-5.6-sol + kimi/Kimi K2.6 + muse/Muse Spark 1.1.
+    Seats claude + codex/gpt-5.6-terra + kimi/Kimi K2.6 + muse/Muse Spark 1.1.
     Kimi and Muse ride the same opencode transport but carry DISTINCT provider
     names so both stay individually addressable at every provider-keyed site. It
     is intentionally NONSTANDARD to the stitch-export (provider, model) gate (four
@@ -2043,8 +2047,10 @@ def test_quad_candidate_panel_composition():
     assert [p.name for p in quad] == ["claude", "codex", "kimi", "muse"]
     claude, codex, kimi, muse = quad
     assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
-    assert codex.model == "gpt-5.6-sol" and codex.effort == "medium"
+    assert codex.model == "gpt-5.6-terra" and codex.effort == "medium"
     assert kimi.model == "openrouter/moonshotai/kimi-k2.6" and kimi.timeout == 480
+    # Both opencode-transport voters run tool-less under the ``vote`` agent.
+    assert kimi.opencode_agent == "vote"
     assert muse is sr.MUSE
     assert muse.name == "muse" and muse.model == "meta/muse-spark-1.1"
     assert muse.timeout == 480 and muse.opencode_agent == "vote"
@@ -2062,10 +2068,10 @@ def test_quad_candidate_panel_composition():
 def test_invoke_opencode_agent_flag(monkeypatch, tmp_path):
     """The opencode invoker adds ``--agent`` only when an agent is passed.
 
-    The Kimi voter passes none, so its command stays byte-identical to before
-    this knob existed; Muse passes ``agent="vote"`` to run under the tool-less
-    agent (without which an agentic reasoning model burns its turn on
-    auto-rejected ls/cat/read tool calls instead of answering).
+    Called with no agent (the residual Qwen seat) the command stays
+    byte-identical to before this knob existed; passing ``agent="vote"`` runs
+    under the tool-less agent (both Kimi and Muse do this — without it a voter
+    burns its turn on auto-rejected ls/cat/read tool calls instead of answering).
     """
     import subprocess as sp
 
@@ -2083,26 +2089,68 @@ def test_invoke_opencode_agent_flag(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sr.subprocess, "run", fake_run)
 
-    # No agent (Kimi path): no --agent token at all.
-    sr.invoke_opencode("P", gdir, [], "openrouter/moonshotai/kimi-k2.6", timeout=99)
+    # No agent (residual Qwen seat): no --agent token at all.
+    sr.invoke_opencode("P", gdir, [], "openrouter/qwen/qwen3-vl-235b-a22b-instruct", timeout=99)
     assert "--agent" not in captured["cmd"]
 
-    # agent="vote" (Muse path): --agent vote is present.
+    # agent="vote" (Kimi / Muse path): --agent vote is present.
     sr.invoke_opencode("P", gdir, [], "meta/muse-spark-1.1", timeout=99, agent="vote")
     cmd = captured["cmd"]
     assert "--agent" in cmd and cmd[cmd.index("--agent") + 1] == "vote"
 
 
+def test_invoke_opencode_isolates_db_per_invocation(monkeypatch, tmp_path):
+    """Each opencode invocation runs against its OWN sqlite DB (OPENCODE_DB) so
+    concurrent kimi+muse votes don't contend on the shared ~/.opencode/opencode.db
+    ("database is locked" retries). The override is ADDED to a copy of the ambient
+    environment (the subprocess still needs META_API_KEY etc.), and the per-invocation
+    temp DB dir is cleaned up afterward.
+    """
+    import subprocess as sp
+
+    gdir = tmp_path / "grp"
+    gdir.mkdir()
+    (gdir / "overview.png").write_bytes(b"\x89PNG")
+
+    # A sentinel ambient var must survive into the child env untouched.
+    monkeypatch.setenv("META_API_KEY", "sentinel-key")
+
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return sp.CompletedProcess(
+            cmd, 0, stdout='{"choice":"A","confidence":1,"reasoning":"x"}', stderr=""
+        )
+
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+
+    sr.invoke_opencode("P", gdir, [], "openrouter/moonshotai/kimi-k2.6", timeout=99)
+
+    env = captured["env"]
+    assert env is not None, "invoke_opencode must pass an explicit env"
+    # A per-invocation OPENCODE_DB override is present and points at a real path.
+    assert "OPENCODE_DB" in env
+    db_path = Path(env["OPENCODE_DB"])
+    assert db_path.name == "opencode.db"
+    # The ambient environment is preserved (copied, not replaced).
+    assert env["META_API_KEY"] == "sentinel-key"
+    # The per-invocation temp DB dir is cleaned up once the call returns.
+    assert not db_path.parent.exists()
+
+
 def test_run_provider_on_group_threads_opencode_agent(monkeypatch, tmp_path):
     """run_provider_on_group forwards a spec's ``opencode_agent`` to the invoker
-    as ``--agent`` (Muse), and forwards NOTHING when it is unset (Kimi / every
-    other voter keeps the plain call).
+    as ``--agent`` (Kimi and Muse both run under the tool-less ``vote`` agent),
+    and forwards NOTHING when it is unset (the residual Qwen seat keeps the plain
+    call).
 
-    Muse dispatches under its distinct "muse" provider name yet the ``--agent``
-    threading — keyed on the RESOLVED invoker (``invoker is invoke_opencode``),
-    not the name — still forwards its tool-less ``vote`` agent. Driven at the
-    SUBPROCESS boundary (not by swapping ``_INVOKERS``) so the real invoke_opencode
-    runs and the guard's invoker-identity check is genuinely exercised.
+    Kimi and Muse dispatch under their distinct "kimi"/"muse" provider names yet
+    the ``--agent`` threading — keyed on the RESOLVED invoker (``invoker is
+    invoke_opencode``), not the name — still forwards their tool-less ``vote``
+    agent. Driven at the SUBPROCESS boundary (not by swapping ``_INVOKERS``) so the
+    real invoke_opencode runs and the guard's invoker-identity check is genuinely
+    exercised.
     """
     import subprocess as sp
 
@@ -2125,9 +2173,16 @@ def test_run_provider_on_group_threads_opencode_agent(monkeypatch, tmp_path):
     assert v.choice == "A"
     assert "--agent" in cmds[-1] and cmds[-1][cmds[-1].index("--agent") + 1] == "vote"
 
-    # OPENCODE_KIMI has opencode_agent=None -> no --agent token at all.
+    # OPENCODE_KIMI (name="kimi") also carries opencode_agent="vote" -> --agent vote.
     v = sr.run_provider_on_group(
         sr.OPENCODE_KIMI, "g", gdir, "p", ["A"], {"A": [(R1, T1)]}, timeout=None
+    )
+    assert v.choice == "A"
+    assert "--agent" in cmds[-1] and cmds[-1][cmds[-1].index("--agent") + 1] == "vote"
+
+    # The residual Qwen seat (OPENCODE_QWEN, opencode_agent=None) -> no --agent token.
+    v = sr.run_provider_on_group(
+        sr.OPENCODE_QWEN, "g", gdir, "p", ["A"], {"A": [(R1, T1)]}, timeout=None
     )
     assert v.choice == "A"
     assert "--agent" not in cmds[-1]
@@ -2245,8 +2300,10 @@ def test_quad_candidate_cli_model_overrides_target_distinct_seats(monkeypatch, t
     assert r.exit_code == 0, r.output
     p = captured["panel"]
     assert [x.name for x in p] == ["claude", "codex", "kimi", "muse"]
-    # --kimi-model rewrote ONLY the Kimi seat; Muse kept its own model.
+    # --kimi-model rewrote ONLY the Kimi seat; Muse kept its own model. The Kimi
+    # seat's tool-less vote agent survives the override rebuild.
     assert p[2].name == "kimi" and p[2].model == "openrouter/moonshotai/kimi-k2.7"
+    assert p[2].opencode_agent == "vote"
     # --muse-model rewrote ONLY the Muse seat; its tool-less vote agent survives.
     assert p[3].name == "muse" and p[3].model == "meta/muse-spark-1.2"
     assert p[3].opencode_agent == "vote"

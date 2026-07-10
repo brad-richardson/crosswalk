@@ -1283,7 +1283,7 @@ def run_stitch_panel(
     # named panel's spec). An unconditional typer default would silently clobber
     # the spec for every composition — the #397 opencode fix, now required for
     # every provider because specs differ across panel eras (codex is
-    # gpt-5.6-sol/medium on the v4 default but gpt-5.5/low on the v3 panels).
+    # gpt-5.6-terra/medium on the v4 default but gpt-5.5/low on the v3 panels).
     claude_model: str = typer.Option(
         None,
         "--claude-model",
@@ -1300,7 +1300,7 @@ def run_stitch_panel(
         None,
         "--codex-model",
         help="Override the codex voter's model (default: the named panel's spec — "
-        "gpt-5.6-sol on default/v4, gpt-5.5 on the v3-era panels).",
+        "gpt-5.6-terra on default/v4, gpt-5.5 on the v3-era panels).",
     ),
     codex_effort: str = typer.Option(
         None,
@@ -1318,7 +1318,7 @@ def run_stitch_panel(
         "default",
         "--panel",
         help="Named panel config: 'default'/'v4' (the blessed v4 panel: claude + "
-        "codex/gpt-5.6-sol + kimi/Kimi K2.6), 'v3'/'v2' (the former "
+        "codex/gpt-5.6-terra + kimi/Kimi K2.6), 'v3'/'v2' (the former "
         "claude+codex+agy default; its exports stamp the v3 labelers), "
         "'v3-candidate' (v3 + a 4th opencode/Qwen3-VL voter), 'no-agy' (v3 with "
         "agy swapped for opencode/Qwen — quota-outage fallback), "
@@ -1422,8 +1422,9 @@ def run_stitch_panel(
             effort=ov.get("effort", p.effort),
             timeout=p.timeout,
             # Carry the opencode agent through the rebuild — dropping it would
-            # strip Muse's tool-less ``vote`` agent on the CLI path (--panel
-            # meta-candidate), reverting it to the agentic ``build`` default.
+            # strip the tool-less ``vote`` agent that both the Kimi and Muse seats
+            # run under (e.g. on the v4/meta-candidate CLI path), reverting them to
+            # the agentic ``build`` default and its answer-stalling tool loop.
             opencode_agent=p.opencode_agent,
         )
 
@@ -1853,7 +1854,7 @@ def export_stitch_panel(
         "--allow-nonstandard-panel",
         help=(
             "Export even when a batch's votes.csv (provider, model) voter set "
-            "matches no blessed panel composition (v4: claude+codex/gpt-5.6-sol"
+            "matches no blessed panel composition (v4: claude+codex/gpt-5.6-terra"
             "+kimi/Kimi; v3: claude+codex/gpt-5.5+agy). Labels are "
             "still stamped with the panel_unanimous_* labelers, so only use this "
             "after an explicit provenance decision. A composition with no known "
