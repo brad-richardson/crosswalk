@@ -1269,8 +1269,8 @@ def run_stitch_panel(
         None,
         "--timeout",
         help="Per-provider timeout (s). Default: each provider spec's own timeout "
-        "(480 for the kimi/Kimi K2.6 voter, whose thinking runs long on large "
-        "packs), else 240. An explicit value overrides both.",
+        "(480 for the kimi/Kimi K2.6 and muse/Muse Spark voters, whose thinking "
+        "runs long on large packs), else 240. An explicit value overrides both.",
     ),
     invocation_budget: float = typer.Option(
         300.0,
@@ -1283,7 +1283,8 @@ def run_stitch_panel(
     # named panel's spec). An unconditional typer default would silently clobber
     # the spec for every composition — the #397 opencode fix, now required for
     # every provider because specs differ across panel eras (codex is
-    # gpt-5.6-terra/medium on the v4 default but gpt-5.5/low on the v3 panels).
+    # gpt-5.6-terra/medium on the default/v5/v4 panels but gpt-5.5/low on the
+    # v3 panels).
     claude_model: str = typer.Option(
         None,
         "--claude-model",
@@ -1300,13 +1301,13 @@ def run_stitch_panel(
         None,
         "--codex-model",
         help="Override the codex voter's model (default: the named panel's spec — "
-        "gpt-5.6-terra on default/v4, gpt-5.5 on the v3-era panels).",
+        "gpt-5.6-terra on default/v5/v4, gpt-5.5 on the v3-era panels).",
     ),
     codex_effort: str = typer.Option(
         None,
         "--codex-effort",
         help="Override the codex voter's reasoning effort (default: the named "
-        "panel's spec — medium on default/v4, low on the v3-era panels).",
+        "panel's spec — medium on default/v5/v4, low on the v3-era panels).",
     ),
     agy_model: str = typer.Option(
         None,
@@ -1317,18 +1318,18 @@ def run_stitch_panel(
     panel_name: str = typer.Option(
         "default",
         "--panel",
-        help="Named panel config: 'default'/'v4' (the blessed v4 panel: claude + "
-        "codex/gpt-5.6-terra + kimi/Kimi K2.6), 'v3'/'v2' (the former "
-        "claude+codex+agy default; its exports stamp the v3 labelers), "
-        "'v3-candidate' (v3 + a 4th opencode/Qwen3-VL voter), 'no-agy' (v3 with "
-        "agy swapped for opencode/Qwen — quota-outage fallback), "
-        "'v4-candidate' (the #397 validation composition: v3 with agy swapped "
-        "for Kimi, codex still gpt-5.5), 'meta-candidate' (the v4 default with "
-        "the kimi/Kimi voter swapped for the muse voter — Muse Spark 1.1 on "
-        "Meta's API), or 'quad-candidate' (the FOUR-SEAT calibration panel: the "
-        "full v4 default PLUS the muse voter — claude + codex + kimi/Kimi + "
-        "muse/Muse Spark 1.1). The muse/quad panels are opt-in reasoning-model "
-        "prototypes; use --timeout 480. Non-blessed compositions are refused by "
+        help="Named panel config: 'default'/'v5' (the blessed v5 QUAD: claude + "
+        "codex/gpt-5.6-terra + kimi/Kimi K2.6 + muse/Muse Spark 1.1, paired "
+        "with the quorum consensus rule), 'v4' (the former 3-seat default: "
+        "claude + codex/gpt-5.6-terra + kimi/Kimi), 'v3'/'v2' (the "
+        "claude+codex+agy default before that; its exports stamp the v3 "
+        "labelers), 'v3-candidate' (v3 + a 4th opencode/Qwen3-VL voter), "
+        "'no-agy' (v3 with agy swapped for opencode/Qwen — quota-outage "
+        "fallback), 'v4-candidate' (the #397 validation composition: v3 with "
+        "agy swapped for Kimi, codex still gpt-5.5), 'meta-candidate' (the v4 "
+        "trio with kimi swapped for muse — superseded by v5), or "
+        "'quad-candidate' (alias of the v5 default: the calibration "
+        "composition that became v5). Non-blessed compositions are refused by "
         "stitch-export without --allow-nonstandard-panel.",
     ),
     opencode_model: str = typer.Option(
@@ -1338,7 +1339,7 @@ def run_stitch_panel(
         "seat is ONLY the residual v3-era Qwen3-VL voter (in v3-candidate and "
         "no-agy; default: the named panel's spec — "
         "openrouter/qwen/qwen3-vl-235b-a22b-instruct). NO-OP on "
-        "default/v4/v4-candidate/quad-candidate/meta-candidate, which have no "
+        "default/v5/v4/v4-candidate/quad-candidate/meta-candidate, which have no "
         "'opencode' seat — the Kimi seat is now named 'kimi' (use --kimi-model) "
         "and Muse is 'muse' (use --muse-model).",
     ),
@@ -1347,7 +1348,7 @@ def run_stitch_panel(
         "--kimi-model",
         help="Override the 'kimi' voter's model string (default: the named panel's "
         "spec — openrouter/moonshotai/kimi-k2.6 on "
-        "default/v4/v4-candidate/quad-candidate). The Kimi seat carries its own "
+        "default/v5/v4/v4-candidate/quad-candidate). The Kimi seat carries its own "
         "'kimi' provider name (distinct from the opencode-transport 'opencode'/Qwen "
         "seat and from 'muse'), so this targets ONLY Kimi; a no-op on panels "
         "without a Kimi seat (v3/v2/v3-candidate/no-agy/meta-candidate).",
@@ -1356,10 +1357,11 @@ def run_stitch_panel(
         None,
         "--muse-model",
         help="Override the 'muse' voter's model string (default: the named panel's "
-        "spec — meta/muse-spark-1.1 on meta-candidate/quad-candidate). Distinct "
+        "spec — meta/muse-spark-1.1 on the default/v5 quad and on "
+        "meta-candidate). Distinct "
         "from --kimi-model: Muse and Kimi both ride the opencode transport but "
         "carry separate provider names ('muse'/'kimi') so both can be seated "
-        "(quad-candidate) and pinned independently.",
+        "(the v5 quad) and pinned independently.",
     ),
     resume: bool = typer.Option(
         False,
@@ -1376,14 +1378,17 @@ def run_stitch_panel(
         "default production prompt is untouched.",
     ),
 ):
-    """Run the consensus panel (default v4: claude + codex + kimi/Kimi) on a batch.
+    """Run the consensus panel (default v5 quad: claude + codex + kimi + muse) on a batch.
 
     Writes votes.csv (every raw vote — audit data) and consensus.csv (per-group
-    routing) into the batch dir. Writes NOTHING into labels/.
+    routing) into the batch dir. Writes NOTHING into labels/. Routing uses the
+    quorum rule: all valid votes agreeing with >=3 valid auto-accepts (a 3-of-4
+    accept over an abstention is stamped "quorum", distinct from "unanimous").
 
     Examples:
         crosswalk agent stitch-run --batch data/agents/stitching/batches/us_boston_streets
-        crosswalk agent stitch-run --batch <dir> --panel v3  # former claude+codex+agy panel
+        crosswalk agent stitch-run --batch <dir> --panel v4  # former 3-seat default
+        crosswalk agent stitch-run --batch <dir> --panel v3  # claude+codex+agy era
     """
     from ..agent_labeling.stitch_runner import (
         ProviderInvocationError,
@@ -1842,9 +1847,10 @@ def export_stitch_panel(
         True,
         "--empty-set/--no-empty-set",
         help=(
-            "Also export unanimous-NONE verdicts (panel rejected every option) as "
-            "empty-set reject-all labels tagged panel_unanimous_none_v4 (v3-era "
-            "batches keep the _v3 tag). Default on "
+            "Also export all-valid-NONE verdicts (panel rejected every option) as "
+            "empty-set reject-all labels tagged panel_unanimous_none_v5 — or "
+            "panel_quorum_none_v5 for a quorum NONE (3-of-4 over an abstention); "
+            "older-era batches keep their own tags. Default on "
             "(this is required label production for the learned resolver); pass "
             "--no-empty-set to plan/write the accept path only."
         ),
@@ -1854,9 +1860,10 @@ def export_stitch_panel(
         "--allow-nonstandard-panel",
         help=(
             "Export even when a batch's votes.csv (provider, model) voter set "
-            "matches no blessed panel composition (v4: claude+codex/gpt-5.6-terra"
-            "+kimi/Kimi; v3: claude+codex/gpt-5.5+agy). Labels are "
-            "still stamped with the panel_unanimous_* labelers, so only use this "
+            "matches no blessed panel composition (v5: claude+codex/gpt-5.6-terra"
+            "+kimi/Kimi+muse/Muse Spark; v4: that trio without muse; v3: "
+            "claude+codex/gpt-5.5+agy). Labels are "
+            "still stamped with the panel_* labelers, so only use this "
             "after an explicit provenance decision. A composition with no known "
             "era additionally needs --stamp-era to say WHICH labeler generation "
             "to mint."
@@ -1866,7 +1873,7 @@ def export_stitch_panel(
         None,
         "--stamp-era",
         help=(
-            "Declare the labeler era ('v3' or 'v4') for batches whose "
+            "Declare the labeler era ('v3', 'v4', or 'v5') for batches whose "
             "composition resolves to NO era. FILL-IN only: batches that "
             "resolve to a blessed or known-historical era always keep their "
             "own era — this flag never re-stamps them. Required when any "
@@ -1875,17 +1882,20 @@ def export_stitch_panel(
         ),
     ),
 ):
-    """Export unanimous panel consensus into human-equivalent stitching labels.
+    """Export accepted panel consensus into human-equivalent stitching labels.
 
-    Two verdict classes are promoted. Unanimous ``auto_accept`` groups export
-    their chosen edge set (labeler ``panel_unanimous_v4``); with ``--empty-set``
-    (default) unanimous-NONE groups export a reject-all EMPTY-SET label (labeler
-    ``panel_unanimous_none_v4``, ``selected_edges == []``). Gates are applied in
+    Two verdict classes are promoted. ``auto_accept`` groups export their
+    chosen edge set — labeler ``panel_unanimous_v5`` for a fully unanimous
+    accept, or the DISTINCT ``panel_quorum_v5`` for a quorum accept (all valid
+    votes agree over an abstention, v5 rule) — and with ``--empty-set``
+    (default) all-valid-NONE groups export a reject-all EMPTY-SET label
+    (``panel_unanimous_none_v5`` / ``panel_quorum_none_v5``,
+    ``selected_edges == []``). Gates are applied in
     order and reported per group: (a) routing, (b) size, (c) class-consistency,
     (d) sliver canonicalization, (e) human precedence (the class/sliver gates are
     vacuous on an empty set and are skipped there). Rows upsert by group_id
     (idempotent). Provenance is gated on (provider, model) voter pairs: batches
-    matching the v3-era panel exactly still export, stamped with the v3
+    matching an older blessed era exactly still export, stamped with that era's
     labelers (as do the known-historical v3 transport-swap batches); anything
     matching no blessed composition is refused unless
     ``--allow-nonstandard-panel`` is passed (composition is provenance), and a
@@ -1950,7 +1960,7 @@ def export_stitch_panel(
             console.print(
                 f"[red]Batch {name} was voted by a nonstandard panel "
                 f"({voters_str}) — refusing to stamp its labels "
-                f"with the panel_unanimous_* labelers. Re-run with "
+                f"with the panel_* labelers. Re-run with "
                 f"--allow-nonstandard-panel only after an explicit provenance "
                 f"decision.[/red]"
             )
@@ -2000,15 +2010,15 @@ def export_stitch_panel(
     # operator re-exporting an old batch SEES what it will be stamped as.
     for bd in batch_dirs:
         era = eras[bd]
-        accept_tag, none_tag, decomposed_tag = LABELERS_BY_ERA[era]
+        tags = LABELERS_BY_ERA[era]
+        minted = [tags.accept, tags.none, tags.decomposed]
+        # Quorum labeler variants exist from v5 on (quorum consensus rule).
+        minted += [t for t in (tags.accept_quorum, tags.none_quorum, tags.decomposed_quorum) if t]
         # Mark only the batches that actually took the fill-in (unresolved
         # composition + --stamp-era), not every line whenever the flag is set.
         override = " (--stamp-era fill-in)" if stamp_era and not resolved[bd] else ""
         # Parentheses, not square brackets: rich would swallow [tags] as markup.
-        console.print(
-            f"  Stamp era: {bd.name} -> {era}{override} "
-            f"(mints {accept_tag} / {none_tag} / {decomposed_tag})"
-        )
+        console.print(f"  Stamp era: {bd.name} -> {era}{override} (mints {' / '.join(minted)})")
 
     # Per-group report.
     for g in report.groups:

@@ -345,11 +345,14 @@ def test_consensus_all_abstain():
 
 
 # ---------------------------------------------------------------------------
-# Consensus: 4-voter (quad-candidate) soundness. Nothing in compute_consensus
-# assumes exactly 3 voters — these lock in the quorum behavior a 4-seat panel
-# produces under the CURRENT consensus rules (the quad panel exists to record 4
-# ballots for offline consensus-rule replay), including the abstention path that
-# is ONLY reachable with >=4 voters (panel_routing.REASON_ABSTENTION).
+# Consensus: 4-voter (v5 quad) behavior under the QUORUM rule — auto-accept
+# when all VALID votes agree and >=3 are valid. Full 4/4 unanimity and a
+# 3-of-4 quorum accept (one abstention) are DISTINCT outcomes end-to-end
+# (tier "unanimous" vs "quorum", reason "unanimous" vs "quorum"), and quorum
+# forgives abstention ONLY — a dissenting valid vote still routes to a human.
+# The pre-v5 "abstention blocks unanimity" behavior (REASON_ABSTENTION) is
+# retired from live routing; historical rows keep deriving it (see
+# test_stitching.py::TestDeriveRouteReason).
 # ---------------------------------------------------------------------------
 
 
@@ -369,17 +372,15 @@ def test_consensus_quad_4of4_unanimous_auto_accept():
     assert c.route_reason == "unanimous"
 
 
-def test_consensus_quad_3valid_1abstain_blocks_unanimity():
-    """(b) 3 valid votes agree + 1 ABSTAIN -> majority/human_review, NOT auto_accept.
+def test_consensus_quad_3valid_1abstain_quorum_accepts():
+    """(b) 3 valid votes agree + 1 ABSTAIN -> QUORUM auto-accept (the v5 rule).
 
-    This is the DESIGNED 4-voter behavior, not a bug: any abstention blocks full
-    unanimity (compute_consensus auto-accepts only when agree == len(votes)), and
-    the route reason is the dedicated ``abstention`` code that panel_routing
-    documents as "only reachable with a 4-voter panel". The quad panel's
-    resilience is that the wave SURVIVES a voter abstaining/timing out — the group
-    is adjudicated by a human and all four ballots are recorded — NOT that 3/3
-    valid unanimity silently auto-accepts. (A calibration wave records the raw
-    ballots so an n_valid-based rule could be replayed offline for a v5 decision.)
+    All valid votes agree and n_valid >= 3, so the group auto-accepts — the
+    2026-07-10 quad calibration replay showed the old abstention-block sent
+    clean 3-of-4 agreements to humans for no information gain. The verdict is
+    the DISTINCT "quorum" tier / route reason (never "unanimous"): a 3-of-4
+    accept over an abstention must stay distinguishable from a 4/4 accept all
+    the way into the export labelers (panel_quorum_v5 vs panel_unanimous_v5).
     """
     es = frozenset({(R1, T1)})
     votes = [
@@ -389,15 +390,120 @@ def test_consensus_quad_3valid_1abstain_blocks_unanimity():
         _vote("muse", "ABSTAIN"),
     ]
     c = sr.compute_consensus(votes)
+    assert c.consensus == "quorum"
+    assert c.routing == "auto_accept"
+    assert c.choice == "A"
+    assert c.edge_set == es
+    assert c.n_valid == 3
+    assert c.n_votes == 4
+    assert c.route_reason == "quorum"
+
+
+def test_consensus_quad_2_2_split_human_review():
+    """A 2+2 split has no all-valid agreement -> human review (dissent stamped)."""
+    es = frozenset({(R1, T1)})
+    votes = [
+        _vote("claude", "A", es),
+        _vote("codex", "A", es),
+        _vote("kimi", "B"),
+        _vote("muse", "B"),
+    ]
+    c = sr.compute_consensus(votes)
     assert c.consensus == "majority"
     assert c.routing == "human_review"
+    assert c.route_reason.startswith("dissent:")
+
+
+def test_consensus_quad_4way_split_no_majority():
+    """Four different choices -> no majority, human review."""
+    votes = [
+        _vote("claude", "A"),
+        _vote("codex", "B"),
+        _vote("kimi", "C"),
+        _vote("muse", "NONE"),
+    ]
+    c = sr.compute_consensus(votes)
+    assert c.consensus == "none"
+    assert c.routing == "human_review"
+    assert c.route_reason == "no_majority"
+
+
+def test_consensus_quad_all_abstain():
+    votes = [_vote(p, "ABSTAIN") for p in ("claude", "codex", "kimi", "muse")]
+    c = sr.compute_consensus(votes)
+    assert c.consensus == "none"
+    assert c.n_valid == 0
+    assert c.routing == "human_review"
+    assert c.route_reason == "all_abstained"
+
+
+def test_consensus_quad_quorum_none_routes_to_human():
+    """3 valid NONE + 1 abstain -> the QUORUM analog of unanimous_none.
+
+    A NONE verdict never auto-accepts on either tier (same as unanimous-NONE);
+    the distinct ``quorum_none`` reason keeps the abstention visible so the
+    export path can mint the quorum-NONE reject-all labeler (panel_quorum_none_v5),
+    never the unanimous one.
+    """
+    votes = [
+        _vote("claude", "NONE"),
+        _vote("codex", "NONE"),
+        _vote("kimi", "NONE"),
+        _vote("muse", "ABSTAIN"),
+    ]
+    c = sr.compute_consensus(votes)
+    assert c.consensus == "quorum"
+    assert c.choice == "NONE"
+    assert c.routing == "human_review"
     assert c.n_valid == 3
-    # >=3 valid agree but an abstain blocked unanimity: the 4-voter-only reason.
-    assert c.route_reason == "abstention"
+    assert c.route_reason == "quorum_none"
+
+
+def test_consensus_quad_quorum_accept_still_low_conf_gated():
+    """The low-confidence gate applies to QUORUM accepts over the VALID votes:
+    a 0.6-confidence valid vote in an otherwise quorum-clean group demotes."""
+    es = frozenset({(R1, T1)})
+    votes = [
+        _vote_c("claude", "A", 0.9, es),
+        _vote_c("codex", "A", 0.6, es),
+        _vote_c("kimi", "A", 0.9, es),
+        _vote_c("muse", "ABSTAIN", 0.0),
+    ]
+    c = sr.compute_consensus(votes, min_voter_confidence=0.75)
+    assert c.consensus == "quorum"  # the valid votes still agreed
+    assert c.routing == "human_review"
+    assert c.route_reason == "low_confidence"
+    # The abstain's synthetic 0.0 confidence is NOT counted (valid votes only):
+    # with all three valid votes at/above the floor the quorum accept stands.
+    votes_ok = [_vote_c(p, "A", 0.9, es) for p in ("claude", "codex", "kimi")]
+    votes_ok.append(_vote_c("muse", "ABSTAIN", 0.0))
+    c2 = sr.compute_consensus(votes_ok, min_voter_confidence=0.75)
+    assert c2.routing == "auto_accept"
+    assert c2.route_reason == "quorum"
+
+
+def test_consensus_quad_quorum_accept_still_size_and_class_gated():
+    """The size and class gates demote QUORUM accepts exactly like unanimous ones."""
+    es = frozenset({(R1, T1)})
+    votes = [
+        _vote("claude", "A", es),
+        _vote("codex", "A", es),
+        _vote("kimi", "A", es),
+        _vote("muse", "ABSTAIN"),
+    ]
+    c = sr.compute_consensus(votes, n_candidate_edges=_backstop() + 1)
+    assert c.consensus == "quorum"
+    assert c.routing == "human_review"
+    assert c.route_reason == "size_gated"
+    c2 = sr.compute_consensus(votes, edge_classes=[("footway", "residential")])
+    assert c2.routing == "human_review"
+    assert c2.route_reason == "class-mismatch"
 
 
 def test_consensus_quad_3_1_live_split_majority_human_review():
-    """(c) A live 3-1 split (no abstains) -> majority to human review, dissent stamped."""
+    """(c) A live 3-1 split (no abstains) -> majority to human review, dissent
+    stamped. Quorum forgives ABSTENTION only, never disagreement: 3 agreeing
+    valid votes with a 4th DISSENTING valid vote must never quorum-accept."""
     es = frozenset({(R1, T1)})
     votes = [
         _vote("claude", "A", es),
@@ -426,6 +532,105 @@ def test_consensus_quad_2valid_2abstain_below_quorum():
     assert c.routing == "human_review"
     assert c.n_valid == 2
     assert c.route_reason == "below_quorum:2"
+
+
+def test_quorum_rule_is_noop_for_3voter_panels():
+    """REGRESSION PROOF: for ANY 3-voter panel (v2/v3/v4 composition re-runs),
+    the v5 quorum rule routes byte-identically to the pre-v5 rule.
+
+    Sweeps every 3-vote combination over {A, B, NONE, ABSTAIN} (64 panels) and
+    compares the FULL Consensus row (tier, routing, choice, edge_set, counts,
+    minority, mean_confidence, route_reason) from compute_consensus against a
+    verbatim port of the pre-v5 core (auto-accept iff ``agree == len(votes) >=
+    3``, with the pre-v5 reason derivation inlined so the oracle is fully
+    independent of current code). With 3 voters the two rules coincide:
+    all-valid agreement at quorum (>=3 valid) IS full unanimity, and any
+    abstention drops n_valid below 3 (``below_quorum``) — so a 3-voter wave
+    re-run under v5 reproduces its historical routing exactly. Gates are
+    orthogonal (they run on the routed result over valid votes, unchanged) and
+    are covered by their own tests.
+    """
+    import itertools
+
+    es_by_choice = {"A": frozenset({(R1, T1)}), "B": frozenset({(R2, T2)})}
+    conf_by_provider = {"claude": 0.8, "codex": 0.85, "agy": 0.95}
+
+    def pre_v5_consensus(votes):
+        """Verbatim port of the pre-v5 routing core (no gates), reasons inlined."""
+        group_id = votes[0].group_id if votes else ""
+        valid = [v for v in votes if v.choice != "ABSTAIN"]
+        n_valid = len(valid)
+        tally: dict[str, list] = {}
+        for v in valid:
+            tally.setdefault(v.choice, []).append(v)
+        if not tally:
+            return sr.Consensus(
+                group_id,
+                "none",
+                "",
+                frozenset(),
+                "human_review",
+                len(votes),
+                0,
+                "all providers abstained",
+                0.0,
+                route_reason="all_abstained",
+            )
+        top_choice = max(tally, key=lambda c: len(tally[c]))
+        top_votes = tally[top_choice]
+        agree = len(top_votes)
+        minority_votes = [v for v in valid if v.choice != top_choice]
+        minority = "; ".join(f"{v.provider}={v.choice}" for v in minority_votes)
+        mean_conf = round(sum(v.confidence for v in top_votes) / len(top_votes), 3)
+        edge_set = top_votes[0].edge_set
+        if agree == len(votes) and agree >= 3 and not minority_votes:
+            consensus = "unanimous"
+            routing = "auto_accept" if top_choice != "NONE" else "human_review"
+        elif agree >= 2:
+            consensus = "majority"
+            routing = "human_review"
+        else:
+            consensus = "none"
+            routing = "human_review"
+        # Pre-v5 reason derivation for every row shape reachable gate-free.
+        if routing == "auto_accept":
+            route_reason = "unanimous"
+        elif consensus == "unanimous":  # only a NONE verdict reaches here gate-free
+            route_reason = "unanimous_none"
+        elif consensus == "majority":
+            if minority:
+                route_reason = "dissent:" + minority.replace("; ", ",").replace(" ", "")
+            elif n_valid >= 3:
+                route_reason = "abstention"  # unreachable with 3 voters
+            else:
+                route_reason = f"below_quorum:{n_valid}"
+        else:
+            route_reason = "all_abstained" if n_valid == 0 else "no_majority"
+        return sr.Consensus(
+            group_id=group_id,
+            consensus=consensus,
+            choice=top_choice,
+            edge_set=edge_set,
+            routing=routing,
+            n_votes=len(votes),
+            n_valid=n_valid,
+            minority=minority,
+            mean_confidence=mean_conf,
+            route_reason=route_reason,
+        )
+
+    n_auto = 0
+    for combo in itertools.product(("A", "B", "NONE", "ABSTAIN"), repeat=3):
+        votes = [
+            _vote_c(p, ch, conf_by_provider[p], es_by_choice.get(ch, frozenset()))
+            for p, ch in zip(("claude", "codex", "agy"), combo, strict=True)
+        ]
+        new = sr.compute_consensus(votes)
+        old = pre_v5_consensus(votes)
+        assert new == old, f"3-voter routing diverged for {combo}: {new} != {old}"
+        n_auto += new.routing == "auto_accept"
+    # Sanity: exactly the two all-same-letter panels (AAA, BBB) auto-accept.
+    assert n_auto == 2
 
 
 def test_consensus_quad_low_conf_gate_min_over_4_valid():
@@ -1927,11 +2132,12 @@ def test_parse_vote_ignores_pack_feedback_key():
 # ---------------------------------------------------------------------------
 
 
-def test_default_panel_is_v4():
-    """The blessed v4 panel IS the default: claude + codex/gpt-5.6-terra +
-    kimi/Kimi K2.6 (the 2026-07-09 bless; agy is out of the default)."""
-    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "kimi"]
-    claude, codex, kimi = sr.DEFAULT_PANEL
+def test_default_panel_is_v5_quad():
+    """The blessed v5 QUAD is the default: claude + codex/gpt-5.6-terra +
+    kimi/Kimi K2.6 + muse/Muse Spark 1.1 (the 2026-07-10 bless, paired with
+    the quorum consensus rule)."""
+    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "kimi", "muse"]
+    claude, codex, kimi, muse = sr.DEFAULT_PANEL
     assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
     assert codex.model == "gpt-5.6-terra" and codex.effort == "medium"
     assert kimi.model == "openrouter/moonshotai/kimi-k2.6"
@@ -1940,11 +2146,37 @@ def test_default_panel_is_v4():
     # Kimi runs tool-less under the same ``vote`` agent as Muse (7/30 -> 0/30
     # timeout evidence): a voter with pre-attached packs needs no tools.
     assert kimi.opencode_agent == "vote"
+    # The muse seat: distinct provider name, Meta-API model ref, reasoning-model
+    # timeout, tool-less agent.
+    assert muse is sr.MUSE
+    assert muse.name == "muse" and muse.model == "meta/muse-spark-1.1"
+    assert muse.timeout == 480 and muse.opencode_agent == "vote"
+    # Distinct provider names: no two voters collide on the keying field.
+    assert len({p.name for p in sr.DEFAULT_PANEL}) == 4
     assert sr.get_panel("default") is sr.DEFAULT_PANEL
-    assert sr.get_panel("v4") is sr.DEFAULT_PANEL
+    assert sr.get_panel("v5") is sr.DEFAULT_PANEL
+    # The calibration name that became v5 stays addressable as an alias.
+    assert sr.get_panel("quad-candidate") is sr.DEFAULT_PANEL
     # Empty/None means "no choice made" -> the default panel.
     assert sr.get_panel(None) is sr.DEFAULT_PANEL
     assert sr.get_panel("") is sr.DEFAULT_PANEL
+
+
+def test_v4_panel_remains_reproducible():
+    """The former 3-seat default stays addressable as 'v4' (v4-era waves must
+    be reproducible), and the v5 default is exactly v4 + muse."""
+    v4 = sr.get_panel("v4")
+    assert v4 is sr.PANEL_V4
+    assert [p.name for p in v4] == ["claude", "codex", "kimi"]
+    assert [p.model for p in v4] == [
+        "claude-opus-4-8",
+        "gpt-5.6-terra",
+        "openrouter/moonshotai/kimi-k2.6",
+    ]
+    assert v4[0].effort == "medium" and v4[1].effort == "medium"
+    assert v4 != sr.DEFAULT_PANEL
+    # v5 == v4 + muse, seat for seat (composition lineage, not coincidence).
+    assert [*v4, sr.MUSE] == sr.DEFAULT_PANEL
 
 
 def test_get_panel_unknown_name_is_a_hard_error():
@@ -1998,17 +2230,15 @@ def test_v4_candidate_panel_is_the_397_validation_composition():
 
 
 def test_meta_candidate_panel_composition():
-    """meta-candidate swaps the v4 default's kimi/Kimi third voter for the
-    'muse' voter — Muse Spark 1.1 on Meta's API (opt-in Brad-approved prototype).
-
-    Like v4-candidate w.r.t. the export gate: a 3-voter REPLACEMENT whose
-    (provider, model) triple is intentionally NONSTANDARD (muse/meta-muse-spark-1.1
-    is not the blessed Kimi pair), so its labels are refused by stitch-export
-    without --allow-nonstandard-panel and it never mints a blessed labeler. It
-    carries v4 lineage (claude-opus-4-8 + codex/gpt-5.6-terra, both medium) and must
-    NOT touch DEFAULT_PANEL. Muse's provider NAME is the distinct "muse" (not the
-    transport name "opencode", nor the Kimi seat's "kimi") so it stays individually
-    addressable at every provider-keyed site.
+    """meta-candidate remains the historical Muse-REPLACEMENT prototype: the
+    v4 trio with the kimi/Kimi seat swapped for 'muse' (Muse Spark 1.1 on
+    Meta's API). SUPERSEDED by v5, which seats muse as a FOURTH voter
+    alongside kimi rather than replacing it — so meta-candidate is NOT the
+    default and stays NONSTANDARD to the stitch-export (provider, model) gate
+    (3 voters; no blessed 3-seat set contains the muse pair); kept only to
+    reproduce the Muse validation waves. Muse's provider NAME is the distinct
+    "muse" (not the transport name "opencode", nor the Kimi seat's "kimi") so
+    it stays individually addressable at every provider-keyed site.
     """
     meta = sr.get_panel("meta-candidate")
     assert [p.name for p in meta] == ["claude", "codex", "muse"]
@@ -2022,47 +2252,14 @@ def test_meta_candidate_panel_composition():
     assert muse.model == "meta/muse-spark-1.1"
     assert muse.timeout == 480  # reasoning model runs long on large packs
     assert muse.opencode_agent == "vote"  # tool-less agent forces a pure-text vote
-    # NOT the blessed default; the default stays claude+codex+kimi/Kimi, and
-    # meta-candidate's third-voter (provider, model) differs -> nonstandard.
+    # NOT the blessed default (v5 seats BOTH kimi and muse; meta-candidate
+    # replaced kimi) -> nonstandard to the export gate.
     assert meta != sr.DEFAULT_PANEL
-    assert sr.DEFAULT_PANEL[2].model == "openrouter/moonshotai/kimi-k2.6"
-    assert muse.model != sr.DEFAULT_PANEL[2].model
+    assert "kimi" not in {p.name for p in meta}
     # Muse dispatches through the SAME transport as Kimi despite the distinct name.
     assert sr._INVOKERS["muse"] is sr.invoke_opencode
-
-
-def test_quad_candidate_panel_composition():
-    """quad-candidate is the FOUR-SEAT calibration panel: the full v4 default
-    PLUS the distinctly-named Muse voter.
-
-    Seats claude + codex/gpt-5.6-terra + kimi/Kimi K2.6 + muse/Muse Spark 1.1.
-    Kimi and Muse ride the same opencode transport but carry DISTINCT provider
-    names so both stay individually addressable at every provider-keyed site. It
-    is intentionally NONSTANDARD to the stitch-export (provider, model) gate (four
-    voters, one on the Meta API), so its labels are refused without
-    --allow-nonstandard-panel and it never mints a blessed labeler. Must NOT touch
-    DEFAULT_PANEL (still the 3-seat v4 default).
-    """
-    quad = sr.get_panel("quad-candidate")
-    assert [p.name for p in quad] == ["claude", "codex", "kimi", "muse"]
-    claude, codex, kimi, muse = quad
-    assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
-    assert codex.model == "gpt-5.6-terra" and codex.effort == "medium"
-    assert kimi.model == "openrouter/moonshotai/kimi-k2.6" and kimi.timeout == 480
-    # Both opencode-transport voters run tool-less under the ``vote`` agent.
-    assert kimi.opencode_agent == "vote"
-    assert muse is sr.MUSE
-    assert muse.name == "muse" and muse.model == "meta/muse-spark-1.1"
-    assert muse.timeout == 480 and muse.opencode_agent == "vote"
-    # Distinct provider names -> no two voters collide on the keying field.
-    assert len({p.name for p in quad}) == 4
-    # The full v4 default is a prefix of quad (quad = default + muse), and adding
-    # a fourth voter must NOT mutate DEFAULT_PANEL.
-    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "kimi"]
-    assert quad != sr.DEFAULT_PANEL
     # Both opencode-transport voters (kimi + muse) resolve to invoke_opencode.
     assert sr._INVOKERS["kimi"] is sr.invoke_opencode
-    assert sr._INVOKERS["muse"] is sr.invoke_opencode
 
 
 def test_invoke_opencode_agent_flag(monkeypatch, tmp_path):
@@ -2440,8 +2637,9 @@ def test_opencode_hard_fails_on_invocation_error(monkeypatch):
         )
 
 
-def test_four_voter_consensus_unanimous_needs_all_four():
-    """With a 4-voter panel, unanimity requires all four agreeing (3/4 is majority)."""
+def test_four_voter_consensus_tiers():
+    """4-voter tiers: 4/4 is unanimous; 3/4 with a live dissent is majority
+    (human review); 3 agree + 1 abstain is a QUORUM accept (v5 rule)."""
     es = frozenset({(R1, T1)})
     four_agree = [
         _vote("claude", "A", es),
@@ -2452,7 +2650,9 @@ def test_four_voter_consensus_unanimous_needs_all_four():
     c = sr.compute_consensus(four_agree)
     assert c.consensus == "unanimous"
     assert c.routing == "auto_accept"
-    # 3/4 with a lone dissenter is a majority -> human review (never auto-accept).
+    assert c.route_reason == "unanimous"
+    # 3/4 with a lone dissenter is a majority -> human review (never auto-accept:
+    # quorum forgives abstention only, never disagreement).
     three_one = [
         _vote("claude", "A", es),
         _vote("codex", "A", es),
@@ -2464,8 +2664,9 @@ def test_four_voter_consensus_unanimous_needs_all_four():
     assert c2.routing == "human_review"
     assert "opencode=B" in c2.minority
     assert c2.route_reason == "dissent:opencode=B"
-    # 3 agree + 1 abstain: quorum met (>=3 valid) but the abstention blocked
-    # full unanimity — stamped "abstention", not below_quorum.
+    # 3 agree + 1 abstain: all valid votes agree at quorum (>=3 valid) — the
+    # v5 quorum rule auto-accepts under the DISTINCT "quorum" tier/reason
+    # (pre-v5 this was blocked as "abstention").
     three_abstain = [
         _vote("claude", "A", es),
         _vote("codex", "A", es),
@@ -2473,9 +2674,9 @@ def test_four_voter_consensus_unanimous_needs_all_four():
         _vote("opencode", "ABSTAIN"),
     ]
     c3 = sr.compute_consensus(three_abstain)
-    assert c3.consensus == "majority"
-    assert c3.routing == "human_review"
-    assert c3.route_reason == "abstention"
+    assert c3.consensus == "quorum"
+    assert c3.routing == "auto_accept"
+    assert c3.route_reason == "quorum"
 
 
 # ---------------------------------------------------------------------------
