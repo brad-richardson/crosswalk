@@ -89,7 +89,50 @@ def _edge(ref: str, tgt: str, span: float = 1.0) -> dict:
     }
 
 
-def make_batch(batch_dir: Path, dataset: str, groups: list[dict]) -> Path:
+# Blessed voter compositions, written out literally (not imported) so a panel
+# change that forgets the provenance decision fails these tests loudly.
+_V3_VOTERS = [
+    ("claude", "claude-opus-4-8"),
+    ("codex", "gpt-5.5"),
+    ("agy", "Gemini 3.5 Flash (Medium)"),
+]
+_V4_VOTERS = [
+    ("claude", "claude-opus-4-8"),
+    ("codex", "gpt-5.6-sol"),
+    ("opencode", "openrouter/moonshotai/kimi-k2.6"),
+]
+# The 2026-07-07 transport-swap composition (commit 80dbe1f): Gemini via
+# opencode instead of agy. Committed v3 labels trace to it, so era resolution
+# must keep stamping it v3 (while the export gate still flags it).
+_HISTORICAL_GEMINI_TRANSPORT_VOTERS = [
+    ("claude", "claude-opus-4-8"),
+    ("codex", "gpt-5.5"),
+    ("opencode", "openrouter/google/gemini-3.5-flash"),
+]
+
+
+def _write_votes_csv(
+    batch_dir: Path, voters: list[tuple[str, str]], include_model_col: bool = True
+) -> None:
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    with open(batch_dir / "votes.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        if include_model_col:
+            w.writerow(["group_id", "provider", "model", "choice"])
+            for p, m in voters:
+                w.writerow(["g1", p, m, "A"])
+        else:
+            w.writerow(["group_id", "provider", "choice"])
+            for p, _m in voters:
+                w.writerow(["g1", p, "A"])
+
+
+def make_batch(
+    batch_dir: Path,
+    dataset: str,
+    groups: list[dict],
+    voters: list[tuple[str, str]] | None = _V4_VOTERS,
+) -> Path:
     """Write a synthetic batch dir (consensus.csv, batch.json, metadata.yaml).
 
     Each ``groups`` entry:
@@ -98,8 +141,15 @@ def make_batch(batch_dir: Path, dataset: str, groups: list[dict]) -> Path:
       ref_classes / target_classes: {id: class},
       sliver_edges: set of (ref, tgt) to encode as tiny-span (sliver) edges,
       candidate_edges: optional extra (ref, tgt) present in batch.json but not chosen.
+
+    ``voters`` writes a votes.csv with those (provider, model) ballots so the
+    batch resolves to a labeler era (default: the blessed v4 composition —
+    write_exports refuses era-less batches). Pass ``voters=None`` to omit
+    votes.csv and exercise the era-less path.
     """
     batch_dir.mkdir(parents=True, exist_ok=True)
+    if voters is not None:
+        _write_votes_csv(batch_dir, voters)
 
     # consensus.csv
     with (batch_dir / "consensus.csv").open("w", newline="") as f:
@@ -771,8 +821,8 @@ def test_vote_provenance_tolerates_missing_votes_csv(tmp_path):
                 "edges": [("r1", "t1")],
             }
         ],
+        voters=None,  # deliberately no votes.csv
     )
-    # deliberately no _write_votes(b1)
     votes_dir = tmp_path / "votes"
     n_votes, n_consensus = write_vote_provenance([b1], DATASET, votes_dir=votes_dir)
     assert n_votes == 0 and n_consensus == 1
@@ -848,41 +898,204 @@ def test_vote_provenance_best_effort_on_malformed_votes(tmp_path):
     assert (votes_dir / f"dataset={DATASET}" / "consensus.csv").exists()
 
 
+def test_vote_provenance_rearchive_replaces_batch_wholesale(tmp_path):
+    """Re-archiving a batch REPLACES all of its previous rows: a batch re-run
+    with a different panel composition must not leave stale ballots from the
+    old composition lingering under the same source_batch (a 4-voter chimera:
+    archived agy rows surviving a v4-panel re-run). Other batches' rows are
+    untouched, and a listed batch whose votes.csv is unreadable keeps its
+    archive (never delete ballots without a replacement)."""
+    votes_dir = tmp_path / "votes"
+    grp = {"group_id": "g1", "match_type": "1:1", "routing": "auto_accept", "edges": [("r1", "t1")]}
+    wave = tmp_path / "wave1"
+    make_batch(wave, DATASET, [grp])
+    other = tmp_path / "wave_other"
+    make_batch(other, DATASET, [dict(grp, group_id="g9")])
+
+    # First archive: wave1 voted by the old claude/codex/agy composition.
+    _write_votes(wave, _voter_rows("g1"))  # providers claude/codex/agy
+    _write_votes(other, _voter_rows("g9"))
+    write_vote_provenance([wave, other], DATASET, votes_dir=votes_dir)
+
+    # Re-run wave1 with the v4 panel (agy replaced by opencode) and re-archive.
+    v4_rows = [
+        dict(r, provider=p, model=m)
+        for r, (p, m) in zip(_voter_rows("g1"), _V4_VOTERS, strict=True)
+    ]
+    _write_votes(wave, v4_rows)
+    n_votes, _ = write_vote_provenance([wave], DATASET, votes_dir=votes_dir)
+
+    out = votes_dir / f"dataset={DATASET}"
+    votes = list(csv.DictReader((out / "votes.csv").open()))
+    wave1_rows = [v for v in votes if v["source_batch"] == "wave1"]
+    # Exactly the new composition — no lingering agy chimera row.
+    assert {(v["provider"], v["model"]) for v in wave1_rows} == set(_V4_VOTERS)
+    # The other batch's archive is untouched.
+    assert {v["provider"] for v in votes if v["source_batch"] == "wave_other"} == {
+        "claude",
+        "codex",
+        "agy",
+    }
+    assert n_votes == 6  # 3 refreshed wave1 rows + 3 untouched wave_other rows
+
+    # A listed batch whose votes.csv is unreadable keeps its archived rows.
+    (wave / "votes.csv").write_text("")  # EmptyDataError -> no replacement rows
+    n_votes, _ = write_vote_provenance([wave], DATASET, votes_dir=votes_dir)
+    assert n_votes == 6  # nothing deleted, nothing added
+    votes = list(csv.DictReader((out / "votes.csv").open()))
+    assert {(v["provider"], v["model"]) for v in votes if v["source_batch"] == "wave1"} == set(
+        _V4_VOTERS
+    )
+
+
+def test_vote_provenance_header_only_votes_preserves_archive(tmp_path):
+    """A HEADER-ONLY (readable, zero-row) votes.csv is as empty as a 0-byte
+    one: it must not mark the batch as contributing in the wholesale
+    replacement, or it would delete the batch's archived ballots with no
+    replacement rows (#398 re-review, finding 2)."""
+    votes_dir = tmp_path / "votes"
+    grp = {"group_id": "g1", "match_type": "1:1", "routing": "auto_accept", "edges": [("r1", "t1")]}
+    wave = tmp_path / "wave1"
+    make_batch(wave, DATASET, [grp])
+    _write_votes(wave, _voter_rows("g1"))
+    write_vote_provenance([wave], DATASET, votes_dir=votes_dir)
+
+    # Re-archive with a header-only votes.csv: archived ballots must survive.
+    _write_votes(wave, [])  # header row only, zero data rows
+    n_votes, _ = write_vote_provenance([wave], DATASET, votes_dir=votes_dir)
+    assert n_votes == 3  # nothing deleted, nothing added
+    out = votes_dir / f"dataset={DATASET}"
+    votes = list(csv.DictReader((out / "votes.csv").open()))
+    assert {v["provider"] for v in votes if v["source_batch"] == "wave1"} == {
+        "claude",
+        "codex",
+        "agy",
+    }
+
+
 # ---------------------------------------------------------------------------
-# Nonstandard-panel export guard (provenance: PANEL_LABELER is composition-bound)
+# Nonstandard-panel export guard (provenance: PANEL_LABELER is composition-bound,
+# keyed on (provider, model) VOTER pairs since the v4 bless)
 # ---------------------------------------------------------------------------
 
 
-def _write_votes_csv(batch_dir: Path, providers: list[str]) -> None:
-    batch_dir.mkdir(parents=True, exist_ok=True)
-    with open(batch_dir / "votes.csv", "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["group_id", "provider", "model", "choice"])
-        for p in providers:
-            w.writerow(["g1", p, "m", "A"])
+def test_standard_v3_and_v4_batches_pass(tmp_path):
+    """Both blessed eras validate: v3 history is never retroactively flagged."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    v3 = tmp_path / "batch_v3"
+    _write_votes_csv(v3, _V3_VOTERS)
+    v4 = tmp_path / "batch_v4"
+    _write_votes_csv(v4, _V4_VOTERS)
+    assert nonstandard_panel_batches([v3, v4]) == {}
+
+
+def test_default_panel_voters_match_runner_default_panel():
+    """stitch_export's blessed v4 set stays in lockstep with the live DEFAULT_PANEL.
+
+    A composition change in stitch_runner without a provenance decision here
+    (bump the labeler + the blessed set) must fail CI, not silently drift.
+    """
+    from crosswalk.agent_labeling.stitch_export import (
+        DEFAULT_PANEL_VOTERS,
+        PANEL_VOTERS_V4,
+    )
+    from crosswalk.agent_labeling.stitch_runner import DEFAULT_PANEL
+
+    assert DEFAULT_PANEL_VOTERS == PANEL_VOTERS_V4
+    assert frozenset((p.name, p.model) for p in DEFAULT_PANEL) == DEFAULT_PANEL_VOTERS
 
 
 def test_nonstandard_panel_batches_flags_swapped_voter(tmp_path):
-    """A no-agy batch (opencode swapped in) is flagged; a default batch is not."""
+    """A no-agy batch (opencode/Qwen swapped in) is flagged with its voter pairs."""
     from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
 
     ok = tmp_path / "batch_default"
-    _write_votes_csv(ok, ["claude", "codex", "agy"])
+    _write_votes_csv(ok, _V4_VOTERS)
     bad = tmp_path / "batch_noagy"
-    _write_votes_csv(bad, ["claude", "codex", "opencode"])
+    noagy = [v for v in _V3_VOTERS if v[0] != "agy"] + [
+        ("opencode", "openrouter/qwen/qwen3-vl-235b-a22b-instruct")
+    ]
+    _write_votes_csv(bad, noagy)
 
     offending = nonstandard_panel_batches([ok, bad])
     assert set(offending) == {"batch_noagy"}
-    assert offending["batch_noagy"] == {"claude", "codex", "opencode"}
+    assert offending["batch_noagy"] == set(noagy)
+
+
+def test_nonstandard_panel_batches_flags_wrong_model_same_provider(tmp_path):
+    """The whole point of (provider, model) keying: same provider NAMES as the
+    blessed v4 panel, but opencode driving Gemini instead of Kimi -> flagged.
+    (Under the old provider-name-only gate this batch was indistinguishable
+    from a blessed one.)"""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = tmp_path / "batch_opencode_gemini"
+    voters = [v for v in _V4_VOTERS if v[0] != "opencode"] + [
+        ("opencode", "openrouter/google/gemini-3.5-flash")
+    ]
+    _write_votes_csv(b, voters)
+    assert set(nonstandard_panel_batches([b])) == {"batch_opencode_gemini"}
+
+
+def test_nonstandard_panel_batches_flags_mixed_era_composition(tmp_path):
+    """A cross-era mix (v3 codex model + v4 Kimi voter) matches neither blessed
+    set exactly -> flagged (this is the historical v4-candidate composition)."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = tmp_path / "batch_v4_candidate"
+    voters = [v for v in _V3_VOTERS if v[0] != "agy"] + [
+        ("opencode", "openrouter/moonshotai/kimi-k2.6")
+    ]
+    _write_votes_csv(b, voters)
+    assert set(nonstandard_panel_batches([b])) == {"batch_v4_candidate"}
+
+
+def test_nonstandard_panel_batches_flags_blank_model(tmp_path):
+    """A blank/NaN model on any vote row reads as (provider, "") -> flagged,
+    never a crash and never mistakable for the blessed panel."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = tmp_path / "batch_blank_model"
+    voters = [v for v in _V4_VOTERS if v[0] != "opencode"] + [("opencode", "")]
+    _write_votes_csv(b, voters)
+    offending = nonstandard_panel_batches([b])
+    assert set(offending) == {"batch_blank_model"}
+    assert ("opencode", "") in offending["batch_blank_model"]
+
+
+def test_nonstandard_panel_batches_flags_missing_model_column(tmp_path):
+    """A votes.csv with NO model column (pre-provenance format) is flagged —
+    incomplete provenance must not pass as the blessed panel."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = tmp_path / "batch_no_model_col"
+    _write_votes_csv(b, _V4_VOTERS, include_model_col=False)
+    offending = nonstandard_panel_batches([b])
+    assert set(offending) == {"batch_no_model_col"}
+    assert all(m == "" for _p, m in offending["batch_no_model_col"])
 
 
 def test_nonstandard_panel_batches_flags_subset_panel(tmp_path):
-    """A degraded 2-provider batch is also nonstandard (missing voter)."""
+    """A degraded 2-voter batch is also nonstandard (missing voter)."""
     from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
 
     b = tmp_path / "batch_two"
-    _write_votes_csv(b, ["claude", "codex"])
+    _write_votes_csv(b, _V4_VOTERS[:2])
     assert set(nonstandard_panel_batches([b])) == {"batch_two"}
+
+
+def test_nonstandard_panel_batches_explicit_expected_pins_one_composition(tmp_path):
+    """Passing expected= pins a single composition: a v3 batch then flags."""
+    from crosswalk.agent_labeling.stitch_export import (
+        PANEL_VOTERS_V4,
+        nonstandard_panel_batches,
+    )
+
+    v3 = tmp_path / "batch_v3"
+    _write_votes_csv(v3, _V3_VOTERS)
+    assert set(nonstandard_panel_batches([v3], expected=PANEL_VOTERS_V4)) == {"batch_v3"}
+    assert nonstandard_panel_batches([v3], expected=frozenset(_V3_VOTERS)) == {}
 
 
 def test_nonstandard_panel_batches_skips_missing_votes(tmp_path):
@@ -892,6 +1105,147 @@ def test_nonstandard_panel_batches_skips_missing_votes(tmp_path):
     b = tmp_path / "batch_novotes"
     b.mkdir()
     assert nonstandard_panel_batches([b]) == {}
+
+
+def test_batch_panel_era_resolution(tmp_path):
+    """batch_panel_era: v3 -> "v3", v4 -> "v4", known-historical -> its era,
+    anything else -> None (no silent default)."""
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    v3 = tmp_path / "b_v3"
+    _write_votes_csv(v3, _V3_VOTERS)
+    v4 = tmp_path / "b_v4"
+    _write_votes_csv(v4, _V4_VOTERS)
+    hist = tmp_path / "b_hist"
+    _write_votes_csv(hist, _HISTORICAL_GEMINI_TRANSPORT_VOTERS)
+    odd = tmp_path / "b_odd"
+    _write_votes_csv(odd, _V4_VOTERS[:2])
+    none = tmp_path / "b_none"
+    none.mkdir()
+
+    assert batch_panel_era(v3) == "v3"
+    assert batch_panel_era(v4) == "v4"
+    assert batch_panel_era(hist) == "v3"
+    assert batch_panel_era(odd) is None
+    assert batch_panel_era(none) is None
+
+
+def _one_group_batch(root: Path, name: str, gid: str, **make_kw) -> Path:
+    """A minimal exportable single-group batch dir."""
+    return make_batch(
+        root / name,
+        DATASET,
+        [
+            {
+                "group_id": gid,
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+                "n_edges": 1,
+                "n_corridors": 1,
+                "n_assignment_components": 1,
+            }
+        ],
+        **make_kw,
+    )
+
+
+def test_write_exports_stamps_labeler_by_batch_era(tmp_path, labels_dir):
+    """Era-scoped labeler stamping: a v3-era batch mints panel_unanimous_v3 and
+    a v4 batch mints panel_unanimous_v4. Re-exporting committed v3 history must
+    never silently rewrite its provenance to v4."""
+    from crosswalk.agent_labeling.stitch_export import PANEL_LABELER_V3
+
+    b_v3 = _one_group_batch(tmp_path, "b_v3", "g_v3", voters=_V3_VOTERS)
+    b_v4 = _one_group_batch(tmp_path, "b_v4", "g_v4", voters=_V4_VOTERS)
+
+    report = plan_exports([b_v3, b_v4], DATASET, labels_dir)
+    assert {g.group_id: g.panel_era for g in report.groups} == {"g_v3": "v3", "g_v4": "v4"}
+    assert write_exports(report, DATASET, labels_dir) == 2
+
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    labelers = dict(zip(df["group_id"], df["labeler"], strict=True))
+    assert labelers == {"g_v3": PANEL_LABELER_V3, "g_v4": PANEL_LABELER}
+
+
+def test_historical_transport_swap_batch_stamps_v3_but_stays_gated(tmp_path, labels_dir):
+    """THE reviewer-proven regression (w0707 wave, commit 80dbe1f): the
+    claude + codex/gpt-5.5 + opencode/Gemini transport-swap composition minted
+    committed v3 labels via --allow-nonstandard-panel. Its era must resolve to
+    v3 (a re-export re-stamps panel_unanimous_v3, never v4) while the export
+    gate STILL flags it as nonstandard, exactly as at original export time."""
+    from crosswalk.agent_labeling.stitch_export import (
+        PANEL_LABELER_V3,
+        nonstandard_panel_batches,
+    )
+
+    b = _one_group_batch(tmp_path, "b_w0707", "g_hist", voters=_HISTORICAL_GEMINI_TRANSPORT_VOTERS)
+
+    # Gate behavior unchanged: still nonstandard (needs --allow-nonstandard-panel).
+    assert set(nonstandard_panel_batches([b])) == {"b_w0707"}
+
+    # Stamping: era resolves v3 and a (re-)export mints the v3 tag.
+    report = plan_exports([b], DATASET, labels_dir)
+    assert [g.panel_era for g in report.groups] == ["v3"]
+    assert write_exports(report, DATASET, labels_dir) == 1
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    assert list(df["labeler"]) == [PANEL_LABELER_V3]
+
+
+def test_write_exports_refuses_era_less_batches(tmp_path, labels_dir):
+    """An exported group from a batch with NO resolvable era (unknown
+    composition or no votes.csv) makes write_exports raise — never a silent
+    current-era stamp."""
+    b_unknown = _one_group_batch(tmp_path, "b_unknown", "g_unknown", voters=None)
+
+    report = plan_exports([b_unknown], DATASET, labels_dir)
+    assert [g.panel_era for g in report.groups] == [""]
+    with pytest.raises(ValueError, match="no known panel era.*stamp-era"):
+        write_exports(report, DATASET, labels_dir)
+    # Nothing was written.
+    assert StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET).empty
+
+
+def test_stamp_era_fills_in_era_less_batches_only(tmp_path, labels_dir):
+    """plan_exports(stamp_era=...) is a FILL-IN, not a whole-run override: an
+    era-less batch exports under the declared generation's tags, while a batch
+    that genuinely resolves to an era in the SAME run keeps its own — passing
+    --stamp-era v3 for one unknown batch must never re-stamp a blessed-v4
+    batch's labels as v3 (#398 re-review, finding 1)."""
+    from crosswalk.agent_labeling.stitch_export import PANEL_LABELER_V3
+
+    b_unknown = _one_group_batch(tmp_path, "b_unknown", "g_unknown", voters=None)
+
+    report = plan_exports([b_unknown], DATASET, labels_dir, stamp_era="v3")
+    assert [g.panel_era for g in report.groups] == ["v3"]
+    assert write_exports(report, DATASET, labels_dir) == 1
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    assert list(df["labeler"]) == [PANEL_LABELER_V3]
+
+    # Mixed set: the blessed-v4 batch keeps v4; only the era-less one fills in.
+    b_v4 = _one_group_batch(tmp_path, "b_v4", "g_v4", voters=_V4_VOTERS)
+    report = plan_exports([b_unknown, b_v4], DATASET, labels_dir, stamp_era="v3")
+    assert {g.group_id: g.panel_era for g in report.groups} == {
+        "g_unknown": "v3",
+        "g_v4": "v4",
+    }
+    assert write_exports(report, DATASET, labels_dir) == 2
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    labelers = dict(zip(df["group_id"], df["labeler"], strict=True))
+    assert labelers["g_v4"] == PANEL_LABELER  # never re-stamped by the fill-in
+    assert labelers["g_unknown"] == PANEL_LABELER_V3
+
+    with pytest.raises(ValueError, match="stamp_era"):
+        plan_exports([b_unknown], DATASET, labels_dir, stamp_era="v9")
+
+
+def test_plan_exports_refuses_duplicate_batch_basenames(tmp_path, labels_dir):
+    """Era stamping keys batches by basename: two dirs with the same basename
+    would mis-attribute one dir's era to the other (last-dir-wins). Refused up
+    front, before planning."""
+    b1 = _one_group_batch(tmp_path / "left", "same_name", "g1")
+    b2 = _one_group_batch(tmp_path / "right", "same_name", "g2")
+    with pytest.raises(ValueError, match="duplicate basenames"):
+        plan_exports([b1, b2], DATASET, labels_dir)
 
 
 # ---------------------------------------------------------------------------
