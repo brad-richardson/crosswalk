@@ -61,6 +61,26 @@ The web UI uses FastAPI + HTMX + Leaflet. Code in `src/crosswalk/web/`. Modes:
 | `/browser` | Browse features and labeled pairs per dataset |
 | `/stitching-review` | Review and curate M:N group edge selections |
 
+### Drift-aware "already reviewed" filter (stitching queue)
+
+Stitch group ids are content hashes of the ref/target id sets, so re-running the
+optimizer re-mints ids for already-reviewed geometry. The review queue (build
+time: `crosswalk data stitch-batch`; serve time: `/stitching-review`) and the
+agent panel feed (`crosswalk agent stitch-batch`) therefore do NOT filter on
+exact group_id alone — they map prior labels onto current groups with the same
+drift mapping eval uses (`recover_labeled_groups`, via
+`labeling/stitch_coverage.py`):
+
+- **Exact id / fully covered** (all current members were affirmatively kept by a
+  prior label): treated as reviewed, excluded from the queue and from panel waves.
+- **Partially covered** (the group gained members the label never saw): stays
+  queued with a `prior_label` delta — the UI shows a coverage banner, prefills
+  kept ∩ current, and flags new-since-label pills. Stays votable in panel waves.
+- **No mapping**: queued as before.
+
+`crosswalk agent stitch-batch --calibration` disables the reviewed exclusion for
+deliberate calibration waves (voting on labeled groups to score voter accuracy).
+
 ### Reviewing your stitching choices offline
 
 `scripts/render_review_diffs.py` reflects curated `/stitching-review` choices back

@@ -378,6 +378,31 @@ BENCHMARKING.md "Stitch-level quality gate". The scoring core is shared between
 `matcher.agent_labeling.stitch_eval` and the matcher-free `mbench.eval.stitch_metrics`,
 parity-guarded by `tests/unit/test_mbench_set_metric_parity.py`.
 
+**Drift-aware review queue.** `group_id` is a content hash of the exact
+ref/target id sets, so regenerating the optimizer output re-mints ids for
+already-reviewed geometry — an exact-id "already reviewed" filter would re-queue
+a relabeled group as brand new (the Bogotá `3c3e6853` → `8e32a935` case).
+`labeling/stitch_coverage.py` classifies every current group against the
+dataset's labels using the SAME drift mapping eval/rekey use
+(`stitch_eval.recover_labeled_groups`: pair labels by selected-edge overlap, set
+labels by membership overlap, #354 deterministic tie-break). Semantics per
+current group G and mapped label L (kept membership = set-label
+`ref_ids`/`target_ids`, or pair-label edge endpoints ∪ id columns):
+
+| Coverage | Rule | Queue behavior |
+|----------|------|----------------|
+| Exact id | L's `group_id` survives verbatim | Reviewed → excluded (pre-drift behavior, id-stable paths unaffected) |
+| Full | G.refs ⊆ L.kept_refs AND G.targets ⊆ L.kept_targets | Reviewed → excluded (re-review would be a mechanical re-approve) |
+| Partial | maps, but G has members outside L's kept universes | Queued with `prior_label` delta (banner, kept ∩ current prefill, new-member pill flags) |
+| None | no label maps | Queued as before |
+
+Applied at batch build (`cli/data.py::_generate_stitch_batch_for_dataset`),
+serve time (`web/services.py::get_unreviewed_stitch_groups`, per owning dataset
+in the `__all__` queue, recomputed fresh each request), and the agent panel feed
+(`crosswalk agent stitch-batch`; `--calibration` lifts the exclusion for
+deliberate ground-truth waves). A merged group covered only by the UNION of
+several labels is never auto-excluded — one label must fully cover it.
+
 ### Panel v5: the quad composition and the quorum consensus rule
 
 The consensus panel (`crosswalk agent stitch-run`, `agent_labeling/stitch_runner.py`)

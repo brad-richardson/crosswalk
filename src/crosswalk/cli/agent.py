@@ -922,6 +922,17 @@ def generate_stitch_batch(
         "group can ever export, so production waves must not burn quota on them "
         "(their verdicts route to human review via the size gate).",
     ),
+    calibration: bool = typer.Option(
+        False,
+        "--calibration",
+        help="Calibration wave: keep HUMAN-LABELED groups votable so voter "
+        "accuracy can be scored against settled ground truth. By default a "
+        "production wave excludes exact-id-reviewed groups AND drift-mapped "
+        "FULLY-covered groups (labeling/stitch_coverage.py) — re-adjudicating "
+        "them burns quota on settled answers. Partially-covered groups stay "
+        "votable either way (genuinely open questions). Tier-sampled batches "
+        "only; explicit --group-ids/--recover-* selections are unaffected.",
+    ),
     decompose: bool = typer.Option(
         False,
         "--decompose",
@@ -1078,7 +1089,37 @@ def generate_stitch_batch(
                 target_geoms=g.get("target_geometries", {}),
                 k=k_alternatives,
             )
-        reviewed = StitchingLabelStore(dataset).get_reviewed_group_ids(dataset)
+        # Pre-vote reviewed exclusion. Production waves must not spend votes
+        # re-adjudicating settled ground truth: exact-id-reviewed groups AND
+        # drift-mapped FULLY-covered groups (a regenerated sidecar re-mints
+        # group_ids for already-reviewed geometry — see stitch_coverage) are
+        # dropped before sampling. Partially-covered groups stay votable (new
+        # membership makes them genuinely open). --calibration inverts this:
+        # a calibration wave deliberately votes on labeled groups to score
+        # voter accuracy, so NO reviewed exclusion is applied.
+        store = StitchingLabelStore(dataset)
+        if calibration:
+            reviewed = set()
+            console.print(
+                "[yellow]--calibration: human-labeled groups stay votable "
+                "(no reviewed exclusion)[/yellow]"
+            )
+        else:
+            from ..labeling.stitch_coverage import (
+                compute_prior_coverage,
+                fully_covered_group_ids,
+            )
+
+            reviewed = store.get_reviewed_group_ids(dataset)
+            coverage = compute_prior_coverage(groups, store.load(dataset))
+            drift_covered = fully_covered_group_ids(coverage) - reviewed
+            if drift_covered:
+                console.print(
+                    f"[blue]Drift-aware exclusion: {len(drift_covered)} group(s) "
+                    f"fully covered by drift-mapped prior labels dropped from the "
+                    f"wave (pass --calibration to vote labeled groups)[/blue]"
+                )
+            reviewed |= drift_covered
         # Panel waves exclude over-backstop groups by default: the export
         # backstop blocks any verdict on them from minting a label, so
         # selecting them (the old Tier-1 rule ALWAYS took the single largest
