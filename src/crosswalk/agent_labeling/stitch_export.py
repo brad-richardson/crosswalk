@@ -1,6 +1,6 @@
-"""Export unanimous LLM-panel consensus into human-equivalent stitching labels.
+"""Export accepted LLM-panel consensus into human-equivalent stitching labels.
 
-The 3-provider stitching panel (see :mod:`stitch_runner`) votes on M:N group edge
+The stitching panel (see :mod:`stitch_runner`) votes on M:N group edge
 selections and writes a ``consensus.csv`` per batch. This module promotes the
 subset of those verdicts that are safe to treat as durable labels into
 ``labels/stitching`` alongside the human labels, tagged with a ``panel_*``
@@ -9,18 +9,26 @@ sonnet/gpt-5.4/Gemini-Flash-Low panel; v2 the Opus 4.8/gpt-5.5/Gemini-3.5-Flash
 panel on pre-enrichment packs; v3 that composition on #302-enriched packs; v4
 the 2026-07-09 bless — Opus 4.8 / gpt-5.6-terra / Kimi K2.6 (the codex model was
 swapped gpt-5.6-sol -> gpt-5.6-terra in place on 2026-07-10, no era bump, as v4
-had minted no committed rows). The tag is bumped
+had minted no committed rows); v5 the 2026-07-10 quad bless — the v4 trio PLUS
+muse/Muse Spark 1.1, paired with the quorum consensus rule. The tag is bumped
 whenever the panel composition OR its pack inputs change, and each batch is
 stamped with ITS OWN era's tag — see :data:`STANDARD_PANEL_VOTERS`).
 
 Two verdict classes are promoted:
 
-  * **Unanimous accept** (routing == ``auto_accept``) -> a normal pair label with
-    the panel's chosen edge set, tagged ``panel_unanimous_v4`` (v3-era batches:
-    ``panel_unanimous_v3``).
-  * **Unanimous NONE** (all panelists voted "none of the options fit"; routed to
-    ``human_review`` with route_reason ``unanimous_none``) -> an EMPTY-SET pair
-    label (``selected_edges == []``), tagged ``panel_unanimous_none_v4``. This is
+  * **Accept** (routing == ``auto_accept``) -> a normal pair label with the
+    panel's chosen edge set. Since v5 the accept tier is part of provenance:
+    a FULLY UNANIMOUS accept (every recorded vote valid and agreeing, e.g.
+    4/4) is tagged ``panel_unanimous_v5`` while a QUORUM accept (all valid
+    votes agree over >=1 abstention, e.g. 3-of-4) is tagged the DISTINCT
+    ``panel_quorum_v5`` — the two must stay distinguishable end-to-end.
+    v4/v3-era batches keep their ``panel_unanimous_v4``/``_v3`` tags (their
+    3-voter rule could not produce a quorum accept).
+  * **All-valid NONE** (every valid vote was "none of the options fit"; routed
+    to ``human_review`` with route_reason ``unanimous_none``, or its v5 quorum
+    analog ``quorum_none``) -> an EMPTY-SET pair label
+    (``selected_edges == []``), tagged ``panel_unanimous_none_v5`` (4/4) or
+    ``panel_quorum_none_v5`` (3-of-4 over an abstention). This is
     the reject-all ground truth the learned group resolver needs to train/eval on
     rejects (see ``research/learned_optimizer_design.md`` §2.4a / milestone L1):
     the cross-mode defect (a cycleway wrongly grouped with a parallel road) has
@@ -30,14 +38,18 @@ Two verdict classes are promoted:
 
 A third class covers DECOMPOSED groups (#367 Mode B, ``stitch-batch
 --decompose``): an over-backstop group split into panel-sized sub-problems is
-recomposed here — a whole-group label (labeler ``panel_unanimous_decomposed_v4``,
-the union of the sub-selections) is minted ONLY when every sub-problem in the
-batch.json roster resolved as a unanimous accept; any failed or unvoted
+recomposed here — a whole-group label (the union of the sub-selections) is
+minted ONLY when every sub-problem in the batch.json roster resolved as a
+panel accept; any failed or unvoted
 sub-problem blocks the group (``subproblem_failed`` / ``subproblems_unvoted``),
 as does a sub-verdict set whose contributing batch dirs resolve to different
 panel eras (``subproblem_era_mixed`` — a mixed-composition union must not be
-stamped under a single era). Sub-problem consensus rows are consumed by that
-recomposition and never export individually. See
+stamped under a single era). The recomposed labeler is
+``panel_unanimous_decomposed_v5`` only when EVERY consumed sub-verdict was
+fully unanimous; if ANY sub-problem was quorum-accepted the whole
+recomposition is conservatively tagged ``panel_quorum_decomposed_v5`` (quorum
+taints the union — the label's weakest link names it). Sub-problem consensus
+rows are consumed by that recomposition and never export individually. See
 :mod:`crosswalk.matching.group_decomposition`.
 
 The empty-set label uses the SAME on-disk representation as a human reject-all
@@ -102,7 +114,13 @@ from ..matching.group_decomposition import (
 )
 from ..matching.optimizer import group_is_structurally_simple
 from ..matching.sliver import annotate_group_sliver_flags
-from .panel_routing import REASON_UNANIMOUS_NONE, _int_or_none, derive_route_reason
+from .panel_routing import (
+    REASON_QUORUM,
+    REASON_QUORUM_NONE,
+    REASON_UNANIMOUS_NONE,
+    _int_or_none,
+    derive_route_reason,
+)
 from .stitch_eval import (
     _is_set_label,
     _load_group_metadata,
@@ -119,19 +137,36 @@ from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mod
 # (2026-07-09 bless: agy/Gemini replaced by kimi/Kimi K2.6, codex bumped
 # gpt-5.5 -> gpt-5.6-sol; validated in #397). The v4 codex model was later
 # swapped gpt-5.6-sol -> gpt-5.6-terra IN PLACE (2026-07-10, no era bump: v4 had
-# minted no committed rows). Existing v1/v2/v3 labels stay
-# untouched — the v3 constants below remain the write-time tags for v3-era
-# batches (see :data:`STANDARD_PANEL_VOTERS` era scoping) — and new default-
-# panel waves are tagged v4. Any labeler with the PANEL_LABELER_PREFIX is a
+# minted no committed rows); v4 -> v5 when the composition changed again
+# (2026-07-10 quad bless: the v4 trio PLUS muse/Muse Spark 1.1, blessed
+# together with the quorum consensus rule). Existing v1/v2/v3 labels stay
+# untouched — the era-suffixed constants below remain the write-time tags for
+# their eras (see :data:`STANDARD_PANEL_VOTERS` era scoping) — and new default-
+# panel waves are tagged v5. Any labeler with the PANEL_LABELER_PREFIX is a
 # panel (non-human) label and is excluded from the human-precedence check below.
 PANEL_LABELER_V3 = "panel_unanimous_v3"
 PANEL_NONE_LABELER_V3 = "panel_unanimous_none_v3"
 PANEL_DECOMPOSED_LABELER_V3 = "panel_unanimous_decomposed_v3"
 
-PANEL_LABELER = "panel_unanimous_v4"
+# v4-era tags. The v4 3-voter rule could not produce a quorum accept (all-valid
+# agreement among 3 voters IS full unanimity), so v4 has no quorum variants.
+PANEL_LABELER_V4 = "panel_unanimous_v4"
+PANEL_NONE_LABELER_V4 = "panel_unanimous_none_v4"
+PANEL_DECOMPOSED_LABELER_V4 = "panel_unanimous_decomposed_v4"
+
+# Current-era (v5) tags. The unsuffixed names always track the CURRENT era.
+PANEL_LABELER = "panel_unanimous_v5"
 PANEL_LABELER_PREFIX = "panel_"
 
-# Distinct labeler for unanimous-NONE (reject-all / empty-set) verdicts. Kept
+# QUORUM-accept labeler (v5+): all valid votes agreed but >=1 panelist
+# abstained (e.g. 3-of-4). A *separate* tag (rather than reusing PANEL_LABELER)
+# keeps the provenance distinction end-to-end: a 4/4 unanimous accept and a
+# 3-of-4 quorum accept are different evidentiary claims, and per-labeler eval
+# must be able to slice them apart (e.g. to audit whether quorum accepts are
+# noisier). Kept under the ``panel_`` prefix (non-human).
+PANEL_QUORUM_LABELER = "panel_quorum_v5"
+
+# Distinct labeler for all-valid-NONE (reject-all / empty-set) verdicts. Kept
 # UNDER the ``panel_`` prefix so every consumer that buckets labels by that
 # prefix -- the human-precedence filter here, ``mbench.eval.stitch_metrics``
 # (``_labeler_class`` -> "panel"), ``xprod``/``cli.data`` -- still classes it as
@@ -140,16 +175,23 @@ PANEL_LABELER_PREFIX = "panel_"
 # semantically a different verdict (select nothing vs select a subset) and the
 # cross-mode acceptance test reports rejects as their own table
 # (research/learned_optimizer_design.md §6.3). Version suffix tracks PANEL_LABELER
-# (same panel composition / pack inputs).
-PANEL_NONE_LABELER = "panel_unanimous_none_v4"
+# (same panel composition / pack inputs). The quorum variant is the reject-all
+# analog of PANEL_QUORUM_LABELER (3-of-4 NONE over an abstention).
+PANEL_NONE_LABELER = "panel_unanimous_none_v5"
+PANEL_QUORUM_NONE_LABELER = "panel_quorum_none_v5"
 
 # Distinct labeler for a RECOMPOSED whole-group label (#367 Mode B): the union
-# of unanimous per-sub-problem verdicts from a decomposed over-backstop group.
+# of accepted per-sub-problem verdicts from a decomposed over-backstop group.
 # No single panel saw the whole group, so this is a different labeling process
 # than PANEL_LABELER and must stay sliceable on its own in per-labeler eval.
 # Kept under the ``panel_`` prefix (non-human); version suffix tracks
-# PANEL_LABELER (same panel composition / pack inputs per sub-problem).
-PANEL_DECOMPOSED_LABELER = "panel_unanimous_decomposed_v4"
+# PANEL_LABELER (same panel composition / pack inputs per sub-problem). The
+# unanimous variant requires EVERY consumed sub-verdict to be fully unanimous;
+# if ANY sub-problem was quorum-accepted the whole recomposition is
+# conservatively stamped with the quorum variant (quorum taints the union —
+# the label's weakest link names it).
+PANEL_DECOMPOSED_LABELER = "panel_unanimous_decomposed_v5"
+PANEL_QUORUM_DECOMPOSED_LABELER = "panel_quorum_decomposed_v5"
 
 #: Blessed (provider, model) voter compositions, keyed by labeler era. The gate
 #: keys on the PAIR, not the provider name alone: the opencode transport has
@@ -180,14 +222,34 @@ PANEL_VOTERS_V4 = frozenset(
     }
 )
 
+#: The v5 quad (2026-07-10 bless): the v4 trio plus muse/Muse Spark 1.1.
+#: Introducing v5 carries NO committed-provenance constraint: zero committed
+#: labels/votes rows reference any gpt-5.6, kimi/Moonshot, or muse model (v4
+#: minted nothing committed; the only committed codex model is v3-era gpt-5.5),
+#: verified against the tracked ``labels/`` tree at bless time. The 2026-07-10
+#: ``*_quadcal0710`` calibration batches DO match this set exactly (they were
+#: voted with the quad composition) and thus resolve to era v5 on export — safe
+#: because every calibration group corresponds to an existing human label and
+#: human precedence blocks the export (verified; the Boston batch additionally
+#: mixes sol+terra codex ballots -> era-less -> refused outright).
+PANEL_VOTERS_V5 = frozenset(
+    {
+        ("claude", "claude-opus-4-8"),
+        ("codex", "gpt-5.6-terra"),
+        ("kimi", "openrouter/moonshotai/kimi-k2.6"),
+        ("muse", "meta/muse-spark-1.1"),
+    }
+)
+
 #: Era -> blessed voter set. A batch matching an era's set exactly is STANDARD
 #: for that era: it passes the export gate and its labels are stamped with that
 #: era's labeler tags (v3-era batches keep minting ``*_v3`` labels on
 #: re-export — the committed v3 history is never retroactively flagged as
-#: nonstandard, nor silently re-stamped ``*_v4``).
+#: nonstandard, nor silently re-stamped with the current era's tags).
 STANDARD_PANEL_VOTERS: dict[str, frozenset[tuple[str, str]]] = {
     "v3": PANEL_VOTERS_V3,
     "v4": PANEL_VOTERS_V4,
+    "v5": PANEL_VOTERS_V5,
 }
 
 #: STAMPING-ONLY historical compositions -> labeler era. These compositions
@@ -217,7 +279,7 @@ HISTORICAL_ERA_VOTERS: dict[frozenset[tuple[str, str]], str] = {
 #: tests/unit/test_stitch_export.py, so a panel change without a provenance
 #: decision here fails CI). Replaces the provider-name-only
 #: ``DEFAULT_PANEL_PROVIDERS``.
-DEFAULT_PANEL_VOTERS = PANEL_VOTERS_V4
+DEFAULT_PANEL_VOTERS = PANEL_VOTERS_V5
 
 
 def _batch_voters(batch_dir: Path) -> set[tuple[str, str]] | None:
@@ -248,7 +310,7 @@ def _batch_voters(batch_dir: Path) -> set[tuple[str, str]] | None:
 
 
 def batch_panel_era(batch_dir: Path) -> str | None:
-    """Return the labeler era ("v3"/"v4") a batch's voter composition belongs to.
+    """Return the labeler era ("v3"/"v4"/"v5") a batch's voter composition belongs to.
 
     Resolution order: the blessed sets (:data:`STANDARD_PANEL_VOTERS`), then the
     stamping-only historical map (:data:`HISTORICAL_ERA_VOTERS`) — compositions
@@ -358,8 +420,15 @@ class GroupExport:
     from_decomposition: bool = False
     n_subproblems: int = 0
     n_subproblems_resolved: int = 0
-    # Labeler era of the SOURCE BATCH ("v3"/"v4", from batch_panel_era or an
-    # explicit stamp_era), or "" when the batch matches no known composition.
+    # True when the verdict is a QUORUM one (v5 rule; see _is_quorum_accept):
+    # a direct accept with >=1 abstention among the panel; an all-valid NONE
+    # over an abstention (quorum_none); or a recomposition ANY of whose
+    # consumed sub-verdicts was quorum-accepted (quorum taints the union).
+    # write_exports mints the panel_quorum_* labeler variants for these so the
+    # unanimous/quorum provenance distinction survives end-to-end.
+    is_quorum: bool = False
+    # Labeler era of the SOURCE BATCH ("v3"/"v4"/"v5", from batch_panel_era or
+    # an explicit stamp_era), or "" when the batch matches no known composition.
     # write_exports stamps each era's own labeler tags and REFUSES to write an
     # exported group with era "" — an unknown composition never silently mints
     # the current era's provenance (declare one via plan_exports(stamp_era=...)
@@ -376,8 +445,9 @@ class ExportReport:
     n_total_groups: int
     n_auto_accept: int
     groups: list[GroupExport]
-    # Count of unanimous-NONE candidate groups seen (the empty-set path's analog
-    # of ``n_auto_accept``). Zero when ``export_empty_set`` is off.
+    # Count of all-valid-NONE candidate groups seen (unanimous_none plus the
+    # v5 quorum_none analog — the empty-set path's analog of ``n_auto_accept``).
+    # Zero when ``export_empty_set`` is off.
     n_unanimous_none: int = 0
     # Decomposition (#367 Mode B): consensus rows consumed as sub-problem
     # verdicts (never exported individually), and parents with a roster.
@@ -490,20 +560,26 @@ def _meta_from_group(grp: dict) -> dict | None:
     }
 
 
-def _is_unanimous_none(row: dict) -> bool:
-    """True when a consensus row is a unanimous-NONE (reject-all) verdict.
+def _none_verdict_kind(row: dict) -> str | None:
+    """Classify a consensus row as a reject-all verdict: "unanimous", "quorum", or None.
+
+    ``"unanimous"``: every recorded vote was a valid NONE (``unanimous_none``).
+    ``"quorum"`` (v5 rule): all valid votes were NONE at quorum with >=1
+    abstention (``quorum_none``) — the reject-all analog of a quorum accept,
+    minted under the distinct quorum-NONE labeler. ``None``: not a reject-all
+    candidate at all.
 
     Reuses the shared route-reason derivation so it matches both freshly-stamped
-    rows (``route_reason == "unanimous_none"``) and historical waves that predate
+    rows and historical waves that predate
     the stamp (derived from ``consensus == "unanimous"`` + ``choice == "NONE"``).
-    A unanimous-NONE row routes to ``human_review`` (it is never ``auto_accept``),
+    A reject-all row routes to ``human_review`` (it is never ``auto_accept``),
     so it is disjoint from the accept path.
 
     Defense-in-depth quorum check (this path mints reject ground truth): the
-    derivation trusts the ``consensus`` column verbatim, but "unanimous" is only
-    meaningful with a full quorum (``compute_consensus`` requires >= 3 agreeing
-    valid votes). A hand-edited or pre-quorum-rule historical row claiming
-    ``consensus=unanimous`` with ``n_valid < 3`` must not be exported, so:
+    derivation trusts the ``consensus`` column verbatim, but all-valid agreement
+    is only meaningful with a full quorum (``compute_consensus`` requires >= 3
+    agreeing valid votes). A hand-edited or pre-quorum-rule historical row
+    claiming an all-NONE tier with ``n_valid < 3`` must not be exported, so:
 
     * ``n_valid`` present -> require ``n_valid >= 3`` (contradicting evidence
       blocks the export even when a ``route_reason`` stamp is present);
@@ -511,15 +587,38 @@ def _is_unanimous_none(row: dict) -> bool:
       ``route_reason`` stamp (written only by ``compute_consensus``, which
       enforces the quorum) rather than deriving from consensus/choice alone.
     """
-    if derive_route_reason(row) != REASON_UNANIMOUS_NONE:
-        return False
+    reason = derive_route_reason(row)
+    if reason not in (REASON_UNANIMOUS_NONE, REASON_QUORUM_NONE):
+        return None
     n_valid = _int_or_none(row.get("n_valid"))
     if n_valid is not None:
-        return n_valid >= 3
-    # No n_valid evidence: trust only the compute_consensus stamp (accepting the
-    # legacy "unanimous_NONE" spelling normalized by derive_route_reason).
-    stamp = str(row.get("route_reason") or "").strip()
-    return stamp in (REASON_UNANIMOUS_NONE, "unanimous_NONE")
+        if n_valid < 3:
+            return None
+    else:
+        # No n_valid evidence: trust only the compute_consensus stamp (accepting
+        # the legacy "unanimous_NONE" spelling normalized by derive_route_reason).
+        stamp = str(row.get("route_reason") or "").strip()
+        if stamp not in (REASON_UNANIMOUS_NONE, "unanimous_NONE", REASON_QUORUM_NONE):
+            return None
+    return "quorum" if reason == REASON_QUORUM_NONE else "unanimous"
+
+
+def _is_quorum_accept(row: dict) -> bool:
+    """True when an ``auto_accept`` consensus row is a QUORUM accept (v5 rule).
+
+    A quorum accept is an all-valid agreement over >=1 abstention (e.g. 3-of-4
+    with one abstain) — a weaker evidentiary claim than full unanimity, so it
+    must mint the distinct ``panel_quorum_*`` labelers. Detection is
+    deliberately CONSERVATIVE toward the quorum tag: the shared derivation
+    (tier stamp, or ``n_valid < n_votes`` on the counts) decides, so any
+    abstention evidence on an accept row downgrades the claim to quorum —
+    mislabeling a unanimous accept as quorum is safe (a weaker claim);
+    the reverse would launder an abstention into full-unanimity provenance.
+    Pre-v5 auto_accept rows always have ``n_valid == n_votes`` -> False.
+    """
+    if str(row.get("routing")) != "auto_accept":
+        return False
+    return derive_route_reason(row) == REASON_QUORUM
 
 
 def plan_exports(
@@ -538,7 +637,7 @@ def plan_exports(
     Pure w.r.t. the label store: reads human labels but writes nothing. Call
     :func:`write_exports` with the returned report to persist.
 
-    ``stamp_era`` ("v3"/"v4") is a FILL-IN for era-less batches only: each
+    ``stamp_era`` ("v3"/"v4"/"v5") is a FILL-IN for era-less batches only: each
     batch is first resolved via :func:`batch_panel_era`, and ``stamp_era``
     applies solely to batches whose composition resolves to NO era (unknown
     compositions, which :func:`write_exports` otherwise refuses). A batch that
@@ -559,8 +658,9 @@ def plan_exports(
     group's candidate count, so the backstop invariant (no over-backstop group
     ever auto-exports) holds on the legacy path too.
 
-    When ``export_empty_set`` (default), unanimous-NONE groups (all panelists
-    voted "none of the options fit") additionally become EMPTY-SET candidates:
+    When ``export_empty_set`` (default), all-valid-NONE groups (every valid
+    vote was "none of the options fit" at quorum — ``unanimous_none``, or the
+    v5 ``quorum_none`` analog) additionally become EMPTY-SET candidates:
     reject-all pair labels with ``selected_edges == []`` (see
     :func:`_gate_empty_group`). Set it False to plan the accept path only.
     """
@@ -651,7 +751,7 @@ def plan_exports(
         if gid in sub_to_parent:
             continue  # sub-problem rows are recomposition inputs, not candidates
         is_accept = str(row.get("routing")) == "auto_accept"
-        is_none = export_empty_set and _is_unanimous_none(row)
+        is_none = export_empty_set and _none_verdict_kind(row) is not None
         if not (is_accept or is_none):
             continue
         grp = batch_groups.get(bd, {}).get(gid)
@@ -719,42 +819,44 @@ def plan_exports(
             n_sub_rows += 1
             continue
         # Gate (a): route each candidate row to its path. auto_accept -> accept
-        # gates; unanimous-NONE -> empty-set gates (when enabled). Everything
-        # else is not a candidate at all.
+        # gates; all-valid NONE (unanimous or quorum) -> empty-set gates (when
+        # enabled). Everything else is not a candidate at all. The verdict's
+        # quorum/unanimous tier rides onto the outcome (is_quorum) so
+        # write_exports can mint the matching labeler variant.
         if str(row.get("routing")) == "auto_accept":
             n_auto += 1
-            groups.append(
-                _gate_group(
-                    gid=gid,
-                    bd=bd,
-                    row=row,
-                    grp=batch_groups.get(bd, {}).get(gid, {}),
-                    meta=candidate_metas.get(gid),
-                    human_gids=human_gids,
-                    overlap_map=overlap_map,
-                    max_edges=max_edges,
-                    max_assignment_components=max_assignment_components,
-                    soft_max_edges=soft_max_edges,
-                    backstop_max_edges=backstop_max_edges,
-                )
+            ge = _gate_group(
+                gid=gid,
+                bd=bd,
+                row=row,
+                grp=batch_groups.get(bd, {}).get(gid, {}),
+                meta=candidate_metas.get(gid),
+                human_gids=human_gids,
+                overlap_map=overlap_map,
+                max_edges=max_edges,
+                max_assignment_components=max_assignment_components,
+                soft_max_edges=soft_max_edges,
+                backstop_max_edges=backstop_max_edges,
             )
-        elif export_empty_set and _is_unanimous_none(row):
+            ge.is_quorum = _is_quorum_accept(row)
+            groups.append(ge)
+        elif export_empty_set and (none_kind := _none_verdict_kind(row)) is not None:
             n_none += 1
-            groups.append(
-                _gate_empty_group(
-                    gid=gid,
-                    bd=bd,
-                    row=row,
-                    grp=batch_groups.get(bd, {}).get(gid, {}),
-                    meta=candidate_metas.get(gid),
-                    human_gids=human_gids,
-                    overlap_map=overlap_map,
-                    max_edges=max_edges,
-                    backstop_max_edges=backstop_max_edges,
-                )
+            ge = _gate_empty_group(
+                gid=gid,
+                bd=bd,
+                row=row,
+                grp=batch_groups.get(bd, {}).get(gid, {}),
+                meta=candidate_metas.get(gid),
+                human_gids=human_gids,
+                overlap_map=overlap_map,
+                max_edges=max_edges,
+                backstop_max_edges=backstop_max_edges,
             )
+            ge.is_quorum = none_kind == "quorum"
+            groups.append(ge)
 
-    # Per-dir labeler era ("v3"/"v4"; "" for unattributable). stamp_era is a
+    # Per-dir labeler era ("v3"/"v4"/"v5"; "" for unattributable). stamp_era is a
     # FILL-IN for dirs that resolve to no era — a genuinely-resolved batch
     # always keeps its own era (resolution first), so an operator passing
     # --stamp-era v3 for one era-less batch can never re-stamp a blessed-v4
@@ -789,6 +891,12 @@ def plan_exports(
         # Weakest-link confidence: the minimum accepted sub-panel mean, so a
         # reviewer sees the least-certain sub-decision.
         min_conf = min(sub_confs) if sub_confs else 0.0
+        # Weakest-link provenance (v5 quorum rule): if ANY consumed sub-problem
+        # was quorum-accepted (an abstention among its panel), the whole
+        # recomposed label is conservatively a QUORUM label — one abstention
+        # anywhere in the union must not be laundered into full-unanimity
+        # provenance (panel_quorum_decomposed_* vs panel_unanimous_decomposed_*).
+        sub_quorum = any(_is_quorum_accept(merged[sid][1]) for sid in roster_ids if sid in merged)
 
         # Era of the recomposed label = the era of the batch dirs whose
         # consensus rows the recomposition CONSUMED (merged precedence), not
@@ -811,6 +919,7 @@ def plan_exports(
                     from_decomposition=True,
                     n_subproblems=rec.n_subproblems,
                     n_subproblems_resolved=rec.n_resolved,
+                    is_quorum=sub_quorum,
                 )
             )
             continue
@@ -825,6 +934,7 @@ def plan_exports(
             mean_confidence=min_conf,
         )
         ge.panel_era = next(iter(sub_eras))
+        ge.is_quorum = sub_quorum
         groups.append(ge)
 
     # Stamp every DIRECT outcome with its source batch's era so write_exports
@@ -1109,14 +1219,43 @@ def _gate_recomposed_group(
     )
 
 
-#: Era -> (accept, reject-all, decomposed) labeler tags for write_exports.
-#: v3-era batches keep minting v3-tagged labels on (re-)export; v4 batches mint
-#: the current tags. There is deliberately NO fallback entry: an era-less group
-#: ("" — unknown composition, or no readable votes.csv) makes write_exports
-#: refuse rather than silently mint the current era's provenance.
-LABELERS_BY_ERA: dict[str, tuple[str, str, str]] = {
-    "v3": (PANEL_LABELER_V3, PANEL_NONE_LABELER_V3, PANEL_DECOMPOSED_LABELER_V3),
-    "v4": (PANEL_LABELER, PANEL_NONE_LABELER, PANEL_DECOMPOSED_LABELER),
+@dataclass(frozen=True)
+class EraLabelers:
+    """One era's labeler tags for :func:`write_exports`.
+
+    The ``*_quorum`` variants exist only from v5 on (the quorum consensus rule
+    shipped with the v5 bless; a 3-voter era cannot produce a quorum accept —
+    all-valid agreement among 3 voters IS full unanimity). ``None`` makes
+    :func:`write_exports` REFUSE a quorum-flagged group in that era: a quorum
+    verdict attributed to a pre-quorum era is a provenance anomaly (hand-edited
+    rows / tampered votes.csv), never something to blur into a unanimous tag.
+    """
+
+    accept: str
+    none: str
+    decomposed: str
+    accept_quorum: str | None = None
+    none_quorum: str | None = None
+    decomposed_quorum: str | None = None
+
+
+#: Era -> labeler tags for write_exports. v3/v4-era batches keep minting their
+#: own era's tags on (re-)export; v5 batches mint the current tags (with the
+#: quorum variants for quorum verdicts). There is deliberately NO fallback
+#: entry: an era-less group ("" — unknown composition, or no readable
+#: votes.csv) makes write_exports refuse rather than silently mint the current
+#: era's provenance.
+LABELERS_BY_ERA: dict[str, EraLabelers] = {
+    "v3": EraLabelers(PANEL_LABELER_V3, PANEL_NONE_LABELER_V3, PANEL_DECOMPOSED_LABELER_V3),
+    "v4": EraLabelers(PANEL_LABELER_V4, PANEL_NONE_LABELER_V4, PANEL_DECOMPOSED_LABELER_V4),
+    "v5": EraLabelers(
+        PANEL_LABELER,
+        PANEL_NONE_LABELER,
+        PANEL_DECOMPOSED_LABELER,
+        accept_quorum=PANEL_QUORUM_LABELER,
+        none_quorum=PANEL_QUORUM_NONE_LABELER,
+        decomposed_quorum=PANEL_QUORUM_DECOMPOSED_LABELER,
+    ),
 }
 
 
@@ -1127,17 +1266,23 @@ def write_exports(
 ) -> int:
     """Persist the report's exported groups as ``panel_*`` stitching labels.
 
-    Accept groups are stamped ``panel_unanimous_v4`` with their chosen edge set;
-    reject-all (empty-set) groups are stamped ``panel_unanimous_none_v4`` with
+    Accept groups are stamped ``panel_unanimous_v5`` with their chosen edge set
+    (``panel_quorum_v5`` for quorum accepts — a 4/4 and a 3-of-4 verdict must
+    stay distinguishable); reject-all (empty-set) groups are stamped
+    ``panel_unanimous_none_v5`` / ``panel_quorum_none_v5`` with
     ``selected_edges == []`` (PAIR semantics, num_refs/num_targets == 0 — the same
     on-disk shape as a human reject-all); recomposed decomposed-group verdicts
-    (#367 Mode B) are stamped ``panel_unanimous_decomposed_v4`` with the union of
-    their sub-problem selections. Groups whose source batch is a v3-era panel
-    (``panel_era == "v3"``, see :func:`batch_panel_era`) are stamped with the v3
-    variants instead — re-exporting committed v3 history never rewrites its
-    provenance to v4 — and a group with NO resolvable era raises ``ValueError``
+    (#367 Mode B) are stamped ``panel_unanimous_decomposed_v5`` with the union of
+    their sub-problem selections — or ``panel_quorum_decomposed_v5`` when ANY
+    consumed sub-verdict was a quorum accept. Groups whose source batch is an
+    older-era panel (``panel_era`` "v3"/"v4", see :func:`batch_panel_era`) are
+    stamped with that era's variants instead — re-exporting committed history
+    never rewrites its provenance to the current era — and a group with NO
+    resolvable era raises ``ValueError``
     (declare one explicitly via ``plan_exports(stamp_era=...)`` / CLI
-    ``--stamp-era``) instead of silently minting current-era provenance.
+    ``--stamp-era``) instead of silently minting current-era provenance. A
+    QUORUM-flagged group in an era without quorum labelers (pre-v5) also raises:
+    that combination is a provenance anomaly, never blurred into a unanimous tag.
     Upserts by ``group_id`` (the store replaces an
     existing row for the same group_id), so this is idempotent. The source batch
     name is recorded in the ``session_id`` field for provenance.
@@ -1156,13 +1301,21 @@ def write_exports(
     store = StitchingLabelStore(dataset, labels_dir=labels_dir)
     written = 0
     for g in report.exported:
-        accept_tag, none_tag, decomposed_tag = LABELERS_BY_ERA[g.panel_era]
+        tags = LABELERS_BY_ERA[g.panel_era]
         if g.is_empty_set:
-            labeler = none_tag
+            labeler = tags.none_quorum if g.is_quorum else tags.none
         elif g.from_decomposition:
-            labeler = decomposed_tag
+            labeler = tags.decomposed_quorum if g.is_quorum else tags.decomposed
         else:
-            labeler = accept_tag
+            labeler = tags.accept_quorum if g.is_quorum else tags.accept
+        if labeler is None:
+            raise ValueError(
+                f"group {g.group_id} (batch {g.source_batch}) is a QUORUM verdict "
+                f"but its era {g.panel_era!r} predates the quorum rule — a "
+                f"{g.panel_era}-era panel cannot have produced an accept with an "
+                f"abstention. Refusing to blur quorum/unanimous provenance; "
+                f"investigate the batch's consensus.csv."
+            )
         ref_ids = {e["ref_id"] for e in g.selected_edges}
         tgt_ids = {e["target_id"] for e in g.selected_edges}
         store.add(

@@ -1,12 +1,13 @@
 """Consensus-panel runner for agent stitching-group labeling.
 
-Runs a heterogeneous multi-provider panel (claude + codex + kimi/Kimi K2.6
-since the 2026-07-09 v4 bless; previously claude + codex + agy) on each group's
-evidence pack, in parallel. Each provider returns a JSON option pick; votes are
-validated (choice must be a real option letter or NONE), retried once on
-garbage, and recorded as audit data. A consensus rule routes each group: ALL
+Runs a heterogeneous 4-provider panel (claude + codex + kimi/Kimi K2.6 +
+muse/Muse Spark 1.1 since the 2026-07-10 v5 bless; previously the 3-seat
+claude + codex + kimi v4 panel, and claude + codex + agy before that) on each
+group's evidence pack, in parallel. Each provider returns a JSON option pick;
+votes are validated (choice must be a real option letter or NONE), retried once
+on garbage, and recorded as audit data. A consensus rule routes each group: ALL
 VALID (non-abstaining) votes agreeing with at least 3 valid votes auto-accepts
-— full unanimity and a quorum accept (agreement over an abstention) stay
+— full 4/4 unanimity and a 3-of-4 quorum accept (one abstention) stay
 distinguishable end-to-end (see :func:`compute_consensus`).
 
 Votes are audit data and are stored under the batch dir (``votes.csv``),
@@ -165,22 +166,31 @@ OPENCODE_KIMI = ProviderSpec(
     name="kimi", model="openrouter/moonshotai/kimi-k2.6", timeout=480, opencode_agent="vote"
 )
 
-# Candidate REPLACEMENT third voter (default OFF): opencode driving Meta's
-# "Muse Spark 1.1" via Meta's OpenAI-compatible developer API (api.meta.ai/v1),
-# wired as an opencode CUSTOM provider — see the repo-root ``opencode.json``
-# (baseURL + apiKey via ``{env:META_API_KEY}``, never inlined). A FIFTH model
-# family (Meta, vs the Anthropic/OpenAI/Google/Moonshot voices already in the
-# quorum), so its errors are decorrelated; vision is confirmed working and the
-# opencode invoker force-attaches every pack PNG, so it sees the full visual
-# evidence like Kimi. Muse is a REASONING model with hidden reasoning tokens:
-# with a low output budget its JSON answer truncates mid-object (observed
-# finish_reason "length" + null content when max_tokens starved the answer of
-# room after the reasoning trace), so ``opencode.json`` gives the model a
-# generous ``limit.output``; the spec carries the same 480s timeout as Kimi
-# (reasoning models run long on large packs). An explicit ``--timeout`` still
-# overrides it (see resolve_timeout). Brad-approved prototyping on the Meta API;
-# labels from this composition are NONSTANDARD to the stitch-export
-# (provider, model) gate (like v4-candidate) and never mint a blessed labeler.
+# The v5 FOURTH voter (blessed 2026-07-10; formerly the meta-candidate /
+# quad-candidate prototype seat): opencode driving Meta's "Muse Spark 1.1" via
+# Meta's OpenAI-compatible developer API (api.meta.ai/v1), wired as an opencode
+# CUSTOM provider — see the repo-root ``opencode.json`` (baseURL + apiKey via
+# ``{env:META_API_KEY}``, never inlined). A FIFTH model family (Meta, vs the
+# Anthropic/OpenAI/Google/Moonshot voices already in the quorum), so its errors
+# are decorrelated; vision is confirmed working and the opencode invoker
+# force-attaches every pack PNG, so it sees the full visual evidence like Kimi.
+#
+# Bless evidence (2026-07-10 quad calibration wave: 53 groups / 212 ballots on
+# human-labeled groups): Muse had the TOP exact accuracy vs the human label
+# (~67%; claude 65%, codex 63%, kimi 57%), 0/53 abstains, at ~$0.03/vote — and
+# it exact-matched the human label on Boston group 0e3e10ad where the
+# claude+codex majority got it wrong (a decorrelated voice paying rent). Known
+# caveat, monitored: a recall-leaning A-bias (all 5 sole dissents leaned toward
+# the inclusive option A; 2 Bogotá over-inclusions) — structurally CONTAINED by
+# the consensus rules, because a dissent only ever blocks an auto-accept and
+# routes the group to a human; a single voter can never mint a label.
+#
+# Muse is a REASONING model with hidden reasoning tokens: with a low output
+# budget its JSON answer truncates mid-object (observed finish_reason "length"
+# + null content when max_tokens starved the answer of room after the reasoning
+# trace), so ``opencode.json`` gives the model a generous ``limit.output``; the
+# spec carries the same 480s timeout as Kimi (reasoning models run long on
+# large packs). An explicit ``--timeout`` still overrides it (resolve_timeout).
 #
 # Provider NAME is deliberately ``"muse"`` — distinct from the Kimi seat's
 # ``"kimi"`` — even though Muse rides the SAME opencode transport as Kimi. The
@@ -201,8 +211,9 @@ OPENCODE_KIMI = ProviderSpec(
 # committed), so the rename rewrites nothing on disk.
 MUSE = ProviderSpec(name="muse", model="meta/muse-spark-1.1", timeout=480, opencode_agent="vote")
 
-# Panel v4 — the production DEFAULT since the 2026-07-09 bless (#397 validated
-# the swap; this composition mints the ``*_v4`` export labelers):
+# Panel v4 — the FORMER production default (2026-07-09 bless, #397; superseded
+# by the v5 quad below on 2026-07-10). Kept as a named panel ("v4") so v4-era
+# waves can be reproduced exactly, like "v3"/"v2":
 #
 #   * agy/Gemini Flash is REPLACED by kimi/Kimi K2.6. agy position-anchored
 #     (11/12 votes "A" at constant 0.95 confidence in the w0707 waves) and only
@@ -224,13 +235,30 @@ MUSE = ProviderSpec(name="muse", model="meta/muse-spark-1.1", timeout=480, openc
 # edit (no era bump): v4 has minted ZERO committed rows — the only codex model
 # in committed labels/votes is v3-era gpt-5.5 — so it rewrites nothing on disk,
 # same argument as the #402 kimi rename. PANEL_VOTERS_V4 moves in lockstep.
-DEFAULT_PANEL = [
+PANEL_V4 = [
     ProviderSpec(name="claude", model="claude-opus-4-8", effort="medium"),
     ProviderSpec(name="codex", model="gpt-5.6-terra", effort="medium"),
     OPENCODE_KIMI,
 ]
 
-# Named panel configurations. DEFAULT_PANEL (v4) is the default; historical
+# Panel v5 — the production DEFAULT since the 2026-07-10 bless: the 4-seat
+# "quad" composition (the v4 trio PLUS muse/Muse Spark 1.1 as a decorrelated
+# fourth voice), blessed TOGETHER with the quorum consensus rule
+# (compute_consensus: auto-accept when all valid votes agree and >=3 are
+# valid), which is what makes a 4th seat pay for itself — an abstaining voter
+# no longer blocks an otherwise-clean 3-of-4 agreement, it merely downgrades
+# the accept's provenance from ``panel_unanimous_v5`` to ``panel_quorum_v5``.
+#
+# Bless evidence (2026-07-10 quad calibration wave, 53 groups / 212 ballots on
+# human-labeled groups): muse top exact accuracy ~67% (claude 65%, codex 63%,
+# kimi 57%), 0/53 muse abstains, ~$0.03/vote; muse exact-matched the human
+# label on Boston 0e3e10ad where the claude+codex majority got it wrong. Known
+# muse caveat (see the MUSE spec note): recall-leaning A-bias — contained,
+# since a dissent only blocks auto-accept and can never mint a label.
+# PANEL_VOTERS_V5 in stitch_export moves in lockstep (CI-asserted).
+DEFAULT_PANEL = [*PANEL_V4, MUSE]
+
+# Named panel configurations. DEFAULT_PANEL (v5) is the default; historical
 # compositions stay addressable so old batches can be reproduced exactly.
 #
 # ``no-agy`` is a QUOTA-OUTAGE fallback for v3-era reruns (observed 2026-07-06:
@@ -238,11 +266,15 @@ DEFAULT_PANEL = [
 # swaps agy for the opencode/Qwen voter so a wave can proceed 3-wide. NOTE:
 # panel composition is part of export-label provenance — stitch-export keys its
 # gate on (provider, model) pairs, so labels from any non-blessed composition
-# (no-agy, v3-candidate, v4-candidate) are refused without
+# (no-agy, v3-candidate, v4-candidate, meta-candidate) are refused without
 # --allow-nonstandard-panel.
 PANELS: dict[str, list[ProviderSpec]] = {
     "default": DEFAULT_PANEL,
-    "v4": DEFAULT_PANEL,
+    "v5": DEFAULT_PANEL,
+    # The FORMER 3-seat default (2026-07-09 bless). Kept addressable so v4-era
+    # waves can be re-run/reproduced; its exports are stamped with the v4
+    # labelers by stitch_export's era scoping.
+    "v4": PANEL_V4,
     # v3-era compositions (v2 == v3 composition; the labeler bump was pack
     # inputs). Kept so v3-era batches can be re-run/reproduced; their exports
     # are stamped with the v3 labelers by stitch_export's era scoping.
@@ -251,36 +283,24 @@ PANELS: dict[str, list[ProviderSpec]] = {
     "v3-candidate": [*PANEL_V3, OPENCODE_QWEN],
     "no-agy": [*(p for p in PANEL_V3 if p.name != "agy"), OPENCODE_QWEN],
     # The #397 validation composition: the v3 panel with agy swapped for Kimi
-    # (codex still gpt-5.5/low). SUPERSEDED by the blessed default above, which
-    # also bumps the codex model — so this remains NONSTANDARD to the
+    # (codex still gpt-5.5/low). SUPERSEDED by the v4 bless (which also bumped
+    # the codex model) and then by v5 — so this remains NONSTANDARD to the
     # stitch-export (provider, model) gate; kept only to reproduce the
-    # validation waves.
+    # calibration/validation waves.
     "v4-candidate": [*(p for p in PANEL_V3 if p.name != "agy"), OPENCODE_KIMI],
-    # Third-voter REPLACEMENT candidate on the v4 default: kimi/Kimi ->
-    # muse/Muse Spark 1.1 (Meta API). Same shape as v4-candidate w.r.t. the
-    # export gate: intentionally NONSTANDARD to the (provider, model) voter set
-    # (the muse voter is meta/muse-spark-1.1, not the blessed
-    # openrouter/moonshotai/kimi-k2.6), so its labels are refused by
-    # stitch-export without --allow-nonstandard-panel and it never mints a
-    # blessed labeler. Opt-in Brad-approved prototyping on the Meta developer
-    # API; run its waves with the spec's 480s timeout (Muse is a reasoning
-    # model). Filter drops the v4 default's Kimi seat (now provider-named "kimi").
-    "meta-candidate": [*(p for p in DEFAULT_PANEL if p.name != "kimi"), MUSE],
-    # Opt-in FOUR-SEAT panel: the full v4 default (claude + codex/gpt-5.6-terra +
-    # kimi/Kimi K2.6) PLUS Muse Spark 1.1 as a distinct fourth voter. Exists
-    # to run a CALIBRATION wave with all four voters RECORDED under the CURRENT
-    # consensus rules, so the ballots can be replayed offline against candidate
-    # v5 consensus rules before a bless decision. INTENTIONALLY NONSTANDARD to
-    # the stitch-export (provider, model) gate (four voters, and one of them is
-    # meta/muse-spark-1.1) — like meta-candidate/v4-candidate, its labels are
-    # refused without --allow-nonstandard-panel and it never mints a blessed
-    # labeler. Kimi and Muse ride the same opencode transport but carry DISTINCT
-    # provider names ("kimi" vs "muse") so every keying site (provenance
-    # dedupe, monitor stats, minority strings, resume check, --*-model overrides)
-    # addresses them separately. compute_consensus is n-agnostic (unanimity among
-    # >=3 valid votes), so 4/4 unanimity auto-accepts; run its waves with the
-    # spec's 480s timeout (both Kimi and Muse run long on large packs).
-    "quad-candidate": [*DEFAULT_PANEL, MUSE],
+    # Third-voter REPLACEMENT prototype on the v4 trio: kimi/Kimi -> muse/Muse
+    # Spark 1.1 (Meta API). SUPERSEDED by v5 (which seats muse as a FOURTH
+    # voter alongside kimi rather than replacing it); remains NONSTANDARD to
+    # the stitch-export (provider, model) gate — kept only to reproduce the
+    # Muse validation waves. Filter drops the v4 trio's Kimi seat.
+    "meta-candidate": [*(p for p in PANEL_V4 if p.name != "kimi"), MUSE],
+    # The 4-seat CALIBRATION composition that ran the 2026-07-10 quadcal0710
+    # waves under the pre-quorum rules and was then blessed AS v5 (same
+    # (provider, model) seats). Kept as an alias of the default so wave
+    # scripts/docs that pinned --panel quad-candidate keep working and the
+    # calibration waves stay reproducible; SUPERSEDED by "v5" as the name to
+    # use going forward.
+    "quad-candidate": DEFAULT_PANEL,
 }
 
 
@@ -290,7 +310,7 @@ def get_panel(name: str | None) -> list[ProviderSpec]:
     An UNKNOWN name is a hard error, not a silent default: panel choice is
     era-load-bearing (it decides which export labeler generation a wave's
     labels are stamped with), so a typo like ``--panel v3-candiate`` quietly
-    running the v4 default would corrupt a wave's intended provenance.
+    running the v5 default would corrupt a wave's intended provenance.
     """
     if not name:
         return DEFAULT_PANEL
@@ -1622,7 +1642,7 @@ def run_batch(
     provider cap, crash) loses at most the in-flight group. With ``resume=True``
     the driver reloads those partials and skips any group already recorded,
     resuming from where it stopped. This is panel-size agnostic — it works
-    identically for the 3-voter default and the 4-voter ``v3-candidate`` panel.
+    identically for the 4-voter v5 default and the 3-voter era panels.
 
     Resume safety: partial rows are only reused when the recorded provider set
     matches the CURRENT panel — resuming a ``v3-candidate`` run over partials

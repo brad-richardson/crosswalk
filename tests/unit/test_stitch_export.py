@@ -101,6 +101,13 @@ _V4_VOTERS = [
     ("codex", "gpt-5.6-terra"),
     ("kimi", "openrouter/moonshotai/kimi-k2.6"),
 ]
+# The v5 quad (2026-07-10 bless): the v4 trio plus muse/Muse Spark 1.1.
+_V5_VOTERS = [
+    ("claude", "claude-opus-4-8"),
+    ("codex", "gpt-5.6-terra"),
+    ("kimi", "openrouter/moonshotai/kimi-k2.6"),
+    ("muse", "meta/muse-spark-1.1"),
+]
 # The 2026-07-07 transport-swap composition (commit 80dbe1f): Gemini via
 # opencode instead of agy. Committed v3 labels trace to it, so era resolution
 # must keep stamping it v3 (while the export gate still flags it).
@@ -131,7 +138,7 @@ def make_batch(
     batch_dir: Path,
     dataset: str,
     groups: list[dict],
-    voters: list[tuple[str, str]] | None = _V4_VOTERS,
+    voters: list[tuple[str, str]] | None = _V5_VOTERS,
 ) -> Path:
     """Write a synthetic batch dir (consensus.csv, batch.json, metadata.yaml).
 
@@ -143,9 +150,11 @@ def make_batch(
       candidate_edges: optional extra (ref, tgt) present in batch.json but not chosen.
 
     ``voters`` writes a votes.csv with those (provider, model) ballots so the
-    batch resolves to a labeler era (default: the blessed v4 composition —
+    batch resolves to a labeler era (default: the blessed v5 quad —
     write_exports refuses era-less batches). Pass ``voters=None`` to omit
-    votes.csv and exercise the era-less path.
+    votes.csv and exercise the era-less path. Consensus rows default to a
+    fully unanimous 4/4 vote (n_votes/n_valid overridable per group, e.g. for
+    quorum rows).
     """
     batch_dir.mkdir(parents=True, exist_ok=True)
     if voters is not None:
@@ -163,8 +172,8 @@ def make_batch(
                     "choice": g.get("choice", "A"),
                     "edge_set": json.dumps([[r, t] for r, t in g["edges"]]),
                     "routing": g["routing"],
-                    "n_votes": g.get("n_votes", 3),
-                    "n_valid": g.get("n_valid", 3),
+                    "n_votes": g.get("n_votes", 4),
+                    "n_valid": g.get("n_valid", 4),
                     "minority": g.get("minority", ""),
                     "mean_confidence": g.get("mean_confidence", 0.9),
                     "route_reason": g.get("route_reason", "unanimous_non_none_small"),
@@ -1035,31 +1044,36 @@ def test_vote_provenance_header_only_votes_preserves_archive(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_standard_v3_and_v4_batches_pass(tmp_path):
-    """Both blessed eras validate: v3 history is never retroactively flagged."""
+def test_standard_v3_v4_v5_batches_pass(tmp_path):
+    """All blessed eras validate: older history is never retroactively flagged."""
     from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
 
     v3 = tmp_path / "batch_v3"
     _write_votes_csv(v3, _V3_VOTERS)
     v4 = tmp_path / "batch_v4"
     _write_votes_csv(v4, _V4_VOTERS)
-    assert nonstandard_panel_batches([v3, v4]) == {}
+    v5 = tmp_path / "batch_v5"
+    _write_votes_csv(v5, _V5_VOTERS)
+    assert nonstandard_panel_batches([v3, v4, v5]) == {}
 
 
 def test_default_panel_voters_match_runner_default_panel():
-    """stitch_export's blessed v4 set stays in lockstep with the live DEFAULT_PANEL.
+    """stitch_export's blessed v5 set stays in lockstep with the live DEFAULT_PANEL.
 
     A composition change in stitch_runner without a provenance decision here
     (bump the labeler + the blessed set) must fail CI, not silently drift.
     """
     from crosswalk.agent_labeling.stitch_export import (
         DEFAULT_PANEL_VOTERS,
-        PANEL_VOTERS_V4,
+        PANEL_VOTERS_V5,
     )
     from crosswalk.agent_labeling.stitch_runner import DEFAULT_PANEL
 
-    assert DEFAULT_PANEL_VOTERS == PANEL_VOTERS_V4
+    assert DEFAULT_PANEL_VOTERS == PANEL_VOTERS_V5
     assert frozenset((p.name, p.model) for p in DEFAULT_PANEL) == DEFAULT_PANEL_VOTERS
+    # The v5 quad is written out literally here too, so a silent edit of BOTH
+    # constants still fails loudly.
+    assert frozenset(_V5_VOTERS) == DEFAULT_PANEL_VOTERS
 
 
 def test_nonstandard_panel_batches_flags_swapped_voter(tmp_path):
@@ -1165,14 +1179,16 @@ def test_nonstandard_panel_batches_skips_missing_votes(tmp_path):
 
 
 def test_batch_panel_era_resolution(tmp_path):
-    """batch_panel_era: v3 -> "v3", v4 -> "v4", known-historical -> its era,
-    anything else -> None (no silent default)."""
+    """batch_panel_era: v3 -> "v3", v4 -> "v4", v5 -> "v5", known-historical ->
+    its era, anything else -> None (no silent default)."""
     from crosswalk.agent_labeling.stitch_export import batch_panel_era
 
     v3 = tmp_path / "b_v3"
     _write_votes_csv(v3, _V3_VOTERS)
     v4 = tmp_path / "b_v4"
     _write_votes_csv(v4, _V4_VOTERS)
+    v5 = tmp_path / "b_v5"
+    _write_votes_csv(v5, _V5_VOTERS)
     hist = tmp_path / "b_hist"
     _write_votes_csv(hist, _HISTORICAL_GEMINI_TRANSPORT_VOTERS)
     odd = tmp_path / "b_odd"
@@ -1182,6 +1198,7 @@ def test_batch_panel_era_resolution(tmp_path):
 
     assert batch_panel_era(v3) == "v3"
     assert batch_panel_era(v4) == "v4"
+    assert batch_panel_era(v5) == "v5"
     assert batch_panel_era(hist) == "v3"
     assert batch_panel_era(odd) is None
     assert batch_panel_era(none) is None
@@ -1207,21 +1224,31 @@ def _one_group_batch(root: Path, name: str, gid: str, **make_kw) -> Path:
 
 
 def test_write_exports_stamps_labeler_by_batch_era(tmp_path, labels_dir):
-    """Era-scoped labeler stamping: a v3-era batch mints panel_unanimous_v3 and
-    a v4 batch mints panel_unanimous_v4. Re-exporting committed v3 history must
-    never silently rewrite its provenance to v4."""
-    from crosswalk.agent_labeling.stitch_export import PANEL_LABELER_V3
+    """Era-scoped labeler stamping: a v3-era batch mints panel_unanimous_v3, a
+    v4 batch panel_unanimous_v4, and a v5 batch panel_unanimous_v5.
+    Re-exporting committed older-era history must never silently rewrite its
+    provenance to the current era."""
+    from crosswalk.agent_labeling.stitch_export import PANEL_LABELER_V3, PANEL_LABELER_V4
 
     b_v3 = _one_group_batch(tmp_path, "b_v3", "g_v3", voters=_V3_VOTERS)
     b_v4 = _one_group_batch(tmp_path, "b_v4", "g_v4", voters=_V4_VOTERS)
+    b_v5 = _one_group_batch(tmp_path, "b_v5", "g_v5", voters=_V5_VOTERS)
 
-    report = plan_exports([b_v3, b_v4], DATASET, labels_dir)
-    assert {g.group_id: g.panel_era for g in report.groups} == {"g_v3": "v3", "g_v4": "v4"}
-    assert write_exports(report, DATASET, labels_dir) == 2
+    report = plan_exports([b_v3, b_v4, b_v5], DATASET, labels_dir)
+    assert {g.group_id: g.panel_era for g in report.groups} == {
+        "g_v3": "v3",
+        "g_v4": "v4",
+        "g_v5": "v5",
+    }
+    assert write_exports(report, DATASET, labels_dir) == 3
 
     df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
     labelers = dict(zip(df["group_id"], df["labeler"], strict=True))
-    assert labelers == {"g_v3": PANEL_LABELER_V3, "g_v4": PANEL_LABELER}
+    assert labelers == {
+        "g_v3": PANEL_LABELER_V3,
+        "g_v4": PANEL_LABELER_V4,
+        "g_v5": PANEL_LABELER,
+    }
 
 
 def test_historical_transport_swap_batch_stamps_v3_but_stays_gated(tmp_path, labels_dir):
@@ -1278,17 +1305,17 @@ def test_stamp_era_fills_in_era_less_batches_only(tmp_path, labels_dir):
     df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
     assert list(df["labeler"]) == [PANEL_LABELER_V3]
 
-    # Mixed set: the blessed-v4 batch keeps v4; only the era-less one fills in.
-    b_v4 = _one_group_batch(tmp_path, "b_v4", "g_v4", voters=_V4_VOTERS)
-    report = plan_exports([b_unknown, b_v4], DATASET, labels_dir, stamp_era="v3")
+    # Mixed set: the blessed-v5 batch keeps v5; only the era-less one fills in.
+    b_v5 = _one_group_batch(tmp_path, "b_v5", "g_v5", voters=_V5_VOTERS)
+    report = plan_exports([b_unknown, b_v5], DATASET, labels_dir, stamp_era="v3")
     assert {g.group_id: g.panel_era for g in report.groups} == {
         "g_unknown": "v3",
-        "g_v4": "v4",
+        "g_v5": "v5",
     }
     assert write_exports(report, DATASET, labels_dir) == 2
     df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
     labelers = dict(zip(df["group_id"], df["labeler"], strict=True))
-    assert labelers["g_v4"] == PANEL_LABELER  # never re-stamped by the fill-in
+    assert labelers["g_v5"] == PANEL_LABELER  # never re-stamped by the fill-in
     assert labelers["g_unknown"] == PANEL_LABELER_V3
 
     with pytest.raises(ValueError, match="stamp_era"):
@@ -1303,6 +1330,232 @@ def test_plan_exports_refuses_duplicate_batch_basenames(tmp_path, labels_dir):
     b2 = _one_group_batch(tmp_path / "right", "same_name", "g2")
     with pytest.raises(ValueError, match="duplicate basenames"):
         plan_exports([b1, b2], DATASET, labels_dir)
+
+
+# ---------------------------------------------------------------------------
+# v5 quorum provenance: a 4/4 unanimous accept and a 3-of-4 quorum accept mint
+# DISTINCT labelers (panel_unanimous_v5 vs panel_quorum_v5), end-to-end.
+# ---------------------------------------------------------------------------
+
+
+def _quorum_group(group_id: str, edges, **kw) -> dict:
+    """An auto-accepted QUORUM group (v5 rule): 3 valid agree, 1 abstained."""
+    return {
+        "group_id": group_id,
+        "routing": "auto_accept",
+        "consensus": "quorum",
+        "edges": list(edges),
+        "n_votes": 4,
+        "n_valid": 3,
+        "route_reason": "quorum",
+        **kw,
+    }
+
+
+def test_quorum_accept_mints_quorum_labeler(tmp_path, labels_dir):
+    """PROVENANCE DISTINCTION: in one v5 batch, a fully unanimous accept mints
+    panel_unanimous_v5 while a quorum accept (one abstention) mints the
+    DISTINCT panel_quorum_v5."""
+    from crosswalk.agent_labeling.stitch_export import PANEL_QUORUM_LABELER
+
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "g_unanimous",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+                "route_reason": "unanimous",
+            },
+            _quorum_group("g_quorum", [("r2", "t2")]),
+        ],
+    )
+    report = plan_exports([b], DATASET, labels_dir)
+    by_gid = {g.group_id: g for g in report.groups}
+    assert by_gid["g_unanimous"].is_quorum is False
+    assert by_gid["g_quorum"].is_quorum is True
+    assert write_exports(report, DATASET, labels_dir) == 2
+
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    labelers = dict(zip(df["group_id"], df["labeler"], strict=True))
+    assert labelers == {"g_unanimous": PANEL_LABELER, "g_quorum": PANEL_QUORUM_LABELER}
+
+
+def test_quorum_accept_detected_from_counts_without_stamp(tmp_path, labels_dir):
+    """CONSERVATIVE detection: an auto_accept row with n_valid < n_votes is a
+    quorum accept even without the tier/reason stamps — abstention evidence
+    always downgrades the claim, never launders into unanimous provenance."""
+    from crosswalk.agent_labeling.stitch_export import PANEL_QUORUM_LABELER
+
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "g_bare",
+                "routing": "auto_accept",
+                "consensus": "unanimous",  # stale tier
+                "edges": [("r1", "t1")],
+                "n_votes": 4,
+                "n_valid": 3,
+                "route_reason": "",  # no stamp
+            }
+        ],
+    )
+    report = plan_exports([b], DATASET, labels_dir)
+    assert [g.is_quorum for g in report.groups] == [True]
+    assert write_exports(report, DATASET, labels_dir) == 1
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    assert list(df["labeler"]) == [PANEL_QUORUM_LABELER]
+
+
+def test_quorum_none_mints_quorum_none_labeler(tmp_path, labels_dir):
+    """A quorum NONE (3 valid NONE + 1 abstain) exports as a reject-all
+    empty-set label under panel_quorum_none_v5 — never the unanimous-NONE tag."""
+    from crosswalk.agent_labeling.stitch_export import PANEL_QUORUM_NONE_LABELER
+
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "g_qnone",
+                "routing": "human_review",
+                "consensus": "quorum",
+                "choice": "NONE",
+                "edges": [],
+                "candidate_edges": [("r1", "t1"), ("r2", "t2")],
+                "n_votes": 4,
+                "n_valid": 3,
+                "route_reason": "quorum_none",
+            }
+        ],
+    )
+    report = plan_exports([b], DATASET, labels_dir)
+    g = next(g for g in report.groups if g.group_id == "g_qnone")
+    assert g.exported and g.is_empty_set and g.is_quorum
+    assert report.n_unanimous_none == 1
+    assert write_exports(report, DATASET, labels_dir) == 1
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    assert list(df["labeler"]) == [PANEL_QUORUM_NONE_LABELER]
+    assert json.loads(df.iloc[0]["selected_edges"]) == []
+
+
+def test_quorum_none_below_quorum_not_exported(tmp_path, labels_dir):
+    """quorum_none still requires >=3 valid votes: a 2-valid NONE row (however
+    stamped) must not mint reject ground truth."""
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "g_2none",
+                "routing": "human_review",
+                "consensus": "quorum",
+                "choice": "NONE",
+                "edges": [],
+                "candidate_edges": [("r1", "t1")],
+                "n_votes": 4,
+                "n_valid": 2,
+                "route_reason": "quorum_none",
+            }
+        ],
+    )
+    report = plan_exports([b], DATASET, labels_dir)
+    assert report.n_unanimous_none == 0
+    assert write_exports(report, DATASET, labels_dir) == 0
+
+
+def test_quorum_verdict_in_pre_quorum_era_refused(tmp_path, labels_dir):
+    """A quorum-flagged verdict attributed to a pre-v5 era is a provenance
+    anomaly (a 3-voter panel cannot accept over an abstention): write_exports
+    refuses rather than blurring it into that era's unanimous tag."""
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [_quorum_group("g_anomaly", [("r1", "t1")])],
+        voters=_V4_VOTERS,  # batch resolves to era v4, which has no quorum tags
+    )
+    report = plan_exports([b], DATASET, labels_dir)
+    assert [(g.panel_era, g.is_quorum) for g in report.groups] == [("v4", True)]
+    with pytest.raises(ValueError, match="predates the quorum rule"):
+        write_exports(report, DATASET, labels_dir)
+    assert StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET).empty
+
+
+# ---------------------------------------------------------------------------
+# 2026-07-10 quadcal0710 calibration batches (awareness item): batches voted
+# entirely post-#404 carry voter sets EXACTLY equal to PANEL_VOTERS_V5, so they
+# resolve to era v5 and pass the gate — safe only because every calibration
+# group corresponds to an existing human label (human precedence blocks the
+# export). The Boston batch mixes sol+terra codex ballots -> era-less-> refused.
+# ---------------------------------------------------------------------------
+
+
+def test_quadcal_shaped_batch_resolves_v5_but_human_precedence_blocks(tmp_path, labels_dir):
+    """A calibration-shaped batch (exact v5 voter set, auto_accept verdict on a
+    group a HUMAN already labeled) resolves to era v5 and passes the panel
+    gate, but exports nothing: human precedence decides the group."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = make_batch(
+        tmp_path / "cal_b",
+        DATASET,
+        [
+            {
+                "group_id": "g_cal",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+                "n_edges": 1,
+                "n_corridors": 1,
+                "n_assignment_components": 1,
+            }
+        ],
+        voters=_V5_VOTERS,
+    )
+    # The quad composition is the blessed v5 set: standard, era v5.
+    assert nonstandard_panel_batches([b]) == {}
+
+    # A prior HUMAN label on the same group (exact group_id) takes precedence.
+    store = StitchingLabelStore(DATASET, labels_dir=labels_dir)
+    store.add(
+        group_id="g_cal",
+        selected_edges=[{"ref_id": "r1", "target_id": "t1"}],
+        match_type="1:1",
+        num_refs=1,
+        num_targets=1,
+        labeler="brad",
+        session_id="human-session",
+    )
+    report = plan_exports([b], DATASET, labels_dir)
+    g = next(g for g in report.groups if g.group_id == "g_cal")
+    assert g.exported is False
+    assert g.reason == REASON_HUMAN_PRECEDENCE
+    assert write_exports(report, DATASET, labels_dir) == 0
+    # The human row is untouched.
+    df = store.load(DATASET)
+    assert list(df["labeler"]) == ["brad"]
+
+
+def test_mixed_codex_model_batch_is_era_less_and_refused(tmp_path, labels_dir):
+    """The Boston quadcal batch shape: BOTH sol and terra codex ballots (5
+    distinct voter pairs) matches no blessed set -> flagged nonstandard AND
+    era-less, so an export is refused outright (needs --allow-nonstandard-panel
+    AND --stamp-era)."""
+    from crosswalk.agent_labeling.stitch_export import (
+        batch_panel_era,
+        nonstandard_panel_batches,
+    )
+
+    boston_shape = [*_V5_VOTERS, ("codex", "gpt-5.6-sol")]
+    b = _one_group_batch(tmp_path, "b_boston_cal", "g1", voters=boston_shape)
+    assert set(nonstandard_panel_batches([b])) == {"b_boston_cal"}
+    assert batch_panel_era(b) is None
+    report = plan_exports([b], DATASET, labels_dir)
+    assert [g.panel_era for g in report.groups] == [""]
+    with pytest.raises(ValueError, match="no known panel era"):
+        write_exports(report, DATASET, labels_dir)
 
 
 # ---------------------------------------------------------------------------

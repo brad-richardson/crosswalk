@@ -36,6 +36,7 @@ from crosswalk.matching.group_decomposition import subproblem_id
 from .test_stitch_export import (
     _V3_VOTERS,
     _V4_VOTERS,
+    _V5_VOTERS,
     CONSENSUS_COLUMNS,
     _edge,
     _line,
@@ -59,7 +60,7 @@ def make_decomposed_batch(
     target_classes: dict | None = None,
     sliver_edges: set | None = None,
     roster_extra: list[str] | None = None,
-    voters: list[tuple[str, str]] | None = _V4_VOTERS,
+    voters: list[tuple[str, str]] | None = _V5_VOTERS,
 ) -> tuple[Path, list[str]]:
     """Write a synthetic decomposed batch dir.
 
@@ -68,12 +69,15 @@ def make_decomposed_batch(
       chosen: pairs the panel selected (defaults to all edges),
       routing: consensus routing (default auto_accept),
       voted: False to omit the consensus row entirely (unvoted sub-problem),
-      mean_confidence: consensus confidence.
+      mean_confidence: consensus confidence,
+      consensus / n_votes / n_valid / route_reason: consensus-row overrides
+        (default: a fully unanimous 4/4 vote; pass e.g. consensus="quorum",
+        n_valid=3, route_reason="quorum" for a v5 quorum sub-verdict).
 
     ``roster_extra`` appends extra ids to the parent's roster (e.g. a size-gated
     oversized sub-problem that was never packed or voted). ``voters`` writes a
-    votes.csv so the batch resolves to a labeler era (default: the blessed v4
-    composition — write_exports refuses era-less batches); ``None`` omits it.
+    votes.csv so the batch resolves to a labeler era (default: the blessed v5
+    quad — write_exports refuses era-less batches); ``None`` omits it.
     Returns the batch dir and the ordered sub-problem ids.
     """
     batch_dir.mkdir(parents=True, exist_ok=True)
@@ -124,12 +128,12 @@ def make_decomposed_batch(
         consensus_rows.append(
             {
                 "group_id": sid,
-                "consensus": "unanimous",
+                "consensus": spec.get("consensus", "unanimous"),
                 "choice": "A",
                 "edge_set": json.dumps([[r, t] for r, t in chosen]),
                 "routing": spec.get("routing", "auto_accept"),
-                "n_votes": 3,
-                "n_valid": 3,
+                "n_votes": spec.get("n_votes", 4),
+                "n_valid": spec.get("n_valid", 4),
                 "minority": "",
                 "mean_confidence": spec.get("mean_confidence", 0.9),
                 "route_reason": spec.get("route_reason", "unanimous"),
@@ -206,12 +210,45 @@ def test_recomposed_export_stamped_decomposed_labeler(tmp_path, labels_dir):
         tmp_path / "b1", [{"edges": [("r1", "t1")]}, {"edges": [("r2", "t2")]}]
     )
     report = _plan([b], labels_dir)
+    # Every sub-verdict fully unanimous -> the unanimous decomposed tag.
+    assert _by_gid(report)[PARENT].is_quorum is False
     assert write_exports(report, DATASET, labels_dir) == 1
     df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
     assert list(df["group_id"]) == [PARENT]
     assert list(df["labeler"]) == [PANEL_DECOMPOSED_LABELER]
     stored = json.loads(df.iloc[0]["selected_edges"])
     assert len(stored) == 2
+
+
+def test_quorum_subverdict_taints_whole_recomposition(tmp_path, labels_dir):
+    """CONSERVATIVE quorum taint (v5): if ANY consumed sub-problem was
+    quorum-accepted (an abstention among its panel), the recomposed whole-group
+    label mints panel_quorum_decomposed_v5 — one abstention anywhere in the
+    union must not be laundered into full-unanimity provenance."""
+    from crosswalk.agent_labeling.stitch_export import PANEL_QUORUM_DECOMPOSED_LABELER
+
+    b, _ = make_decomposed_batch(
+        tmp_path / "b1",
+        [
+            {"edges": [("r1", "t1")]},  # fully unanimous 4/4
+            {
+                "edges": [("r2", "t2")],
+                "consensus": "quorum",
+                "n_votes": 4,
+                "n_valid": 3,
+                "route_reason": "quorum",
+            },
+        ],
+    )
+    report = _plan([b], labels_dir)
+    parent = _by_gid(report)[PARENT]
+    assert parent.exported is True
+    assert parent.is_quorum is True
+    assert write_exports(report, DATASET, labels_dir) == 1
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    assert list(df["labeler"]) == [PANEL_QUORUM_DECOMPOSED_LABELER]
+    # The union still spans both sub-selections.
+    assert len(json.loads(df.iloc[0]["selected_edges"])) == 2
 
 
 def test_one_failed_subproblem_blocks_group(tmp_path, labels_dir):
@@ -475,7 +512,7 @@ def test_recomposition_blocks_on_mixed_era_subproblems(tmp_path, labels_dir):
 def test_recomposition_stamps_era_of_contributing_dirs(tmp_path, labels_dir):
     """A sub-problem re-voted in a SECOND batch dir of the SAME era recomposes
     fine — and the label is stamped with the contributing dirs' era (v3), even
-    though the current write-time default is v4."""
+    though the current write-time default is v5."""
     e1, e2 = [("r1", "t1")], [("r2", "t2")]
     b1, sub_ids = make_decomposed_batch(
         tmp_path / "b1",

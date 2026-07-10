@@ -2132,11 +2132,12 @@ def test_parse_vote_ignores_pack_feedback_key():
 # ---------------------------------------------------------------------------
 
 
-def test_default_panel_is_v4():
-    """The blessed v4 panel IS the default: claude + codex/gpt-5.6-terra +
-    kimi/Kimi K2.6 (the 2026-07-09 bless; agy is out of the default)."""
-    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "kimi"]
-    claude, codex, kimi = sr.DEFAULT_PANEL
+def test_default_panel_is_v5_quad():
+    """The blessed v5 QUAD is the default: claude + codex/gpt-5.6-terra +
+    kimi/Kimi K2.6 + muse/Muse Spark 1.1 (the 2026-07-10 bless, paired with
+    the quorum consensus rule)."""
+    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "kimi", "muse"]
+    claude, codex, kimi, muse = sr.DEFAULT_PANEL
     assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
     assert codex.model == "gpt-5.6-terra" and codex.effort == "medium"
     assert kimi.model == "openrouter/moonshotai/kimi-k2.6"
@@ -2145,11 +2146,37 @@ def test_default_panel_is_v4():
     # Kimi runs tool-less under the same ``vote`` agent as Muse (7/30 -> 0/30
     # timeout evidence): a voter with pre-attached packs needs no tools.
     assert kimi.opencode_agent == "vote"
+    # The muse seat: distinct provider name, Meta-API model ref, reasoning-model
+    # timeout, tool-less agent.
+    assert muse is sr.MUSE
+    assert muse.name == "muse" and muse.model == "meta/muse-spark-1.1"
+    assert muse.timeout == 480 and muse.opencode_agent == "vote"
+    # Distinct provider names: no two voters collide on the keying field.
+    assert len({p.name for p in sr.DEFAULT_PANEL}) == 4
     assert sr.get_panel("default") is sr.DEFAULT_PANEL
-    assert sr.get_panel("v4") is sr.DEFAULT_PANEL
+    assert sr.get_panel("v5") is sr.DEFAULT_PANEL
+    # The calibration name that became v5 stays addressable as an alias.
+    assert sr.get_panel("quad-candidate") is sr.DEFAULT_PANEL
     # Empty/None means "no choice made" -> the default panel.
     assert sr.get_panel(None) is sr.DEFAULT_PANEL
     assert sr.get_panel("") is sr.DEFAULT_PANEL
+
+
+def test_v4_panel_remains_reproducible():
+    """The former 3-seat default stays addressable as 'v4' (v4-era waves must
+    be reproducible), and the v5 default is exactly v4 + muse."""
+    v4 = sr.get_panel("v4")
+    assert v4 is sr.PANEL_V4
+    assert [p.name for p in v4] == ["claude", "codex", "kimi"]
+    assert [p.model for p in v4] == [
+        "claude-opus-4-8",
+        "gpt-5.6-terra",
+        "openrouter/moonshotai/kimi-k2.6",
+    ]
+    assert v4[0].effort == "medium" and v4[1].effort == "medium"
+    assert v4 != sr.DEFAULT_PANEL
+    # v5 == v4 + muse, seat for seat (composition lineage, not coincidence).
+    assert [*v4, sr.MUSE] == sr.DEFAULT_PANEL
 
 
 def test_get_panel_unknown_name_is_a_hard_error():
@@ -2203,17 +2230,15 @@ def test_v4_candidate_panel_is_the_397_validation_composition():
 
 
 def test_meta_candidate_panel_composition():
-    """meta-candidate swaps the v4 default's kimi/Kimi third voter for the
-    'muse' voter — Muse Spark 1.1 on Meta's API (opt-in Brad-approved prototype).
-
-    Like v4-candidate w.r.t. the export gate: a 3-voter REPLACEMENT whose
-    (provider, model) triple is intentionally NONSTANDARD (muse/meta-muse-spark-1.1
-    is not the blessed Kimi pair), so its labels are refused by stitch-export
-    without --allow-nonstandard-panel and it never mints a blessed labeler. It
-    carries v4 lineage (claude-opus-4-8 + codex/gpt-5.6-terra, both medium) and must
-    NOT touch DEFAULT_PANEL. Muse's provider NAME is the distinct "muse" (not the
-    transport name "opencode", nor the Kimi seat's "kimi") so it stays individually
-    addressable at every provider-keyed site.
+    """meta-candidate remains the historical Muse-REPLACEMENT prototype: the
+    v4 trio with the kimi/Kimi seat swapped for 'muse' (Muse Spark 1.1 on
+    Meta's API). SUPERSEDED by v5, which seats muse as a FOURTH voter
+    alongside kimi rather than replacing it — so meta-candidate is NOT the
+    default and stays NONSTANDARD to the stitch-export (provider, model) gate
+    (3 voters; no blessed 3-seat set contains the muse pair); kept only to
+    reproduce the Muse validation waves. Muse's provider NAME is the distinct
+    "muse" (not the transport name "opencode", nor the Kimi seat's "kimi") so
+    it stays individually addressable at every provider-keyed site.
     """
     meta = sr.get_panel("meta-candidate")
     assert [p.name for p in meta] == ["claude", "codex", "muse"]
@@ -2227,47 +2252,14 @@ def test_meta_candidate_panel_composition():
     assert muse.model == "meta/muse-spark-1.1"
     assert muse.timeout == 480  # reasoning model runs long on large packs
     assert muse.opencode_agent == "vote"  # tool-less agent forces a pure-text vote
-    # NOT the blessed default; the default stays claude+codex+kimi/Kimi, and
-    # meta-candidate's third-voter (provider, model) differs -> nonstandard.
+    # NOT the blessed default (v5 seats BOTH kimi and muse; meta-candidate
+    # replaced kimi) -> nonstandard to the export gate.
     assert meta != sr.DEFAULT_PANEL
-    assert sr.DEFAULT_PANEL[2].model == "openrouter/moonshotai/kimi-k2.6"
-    assert muse.model != sr.DEFAULT_PANEL[2].model
+    assert "kimi" not in {p.name for p in meta}
     # Muse dispatches through the SAME transport as Kimi despite the distinct name.
     assert sr._INVOKERS["muse"] is sr.invoke_opencode
-
-
-def test_quad_candidate_panel_composition():
-    """quad-candidate is the FOUR-SEAT calibration panel: the full v4 default
-    PLUS the distinctly-named Muse voter.
-
-    Seats claude + codex/gpt-5.6-terra + kimi/Kimi K2.6 + muse/Muse Spark 1.1.
-    Kimi and Muse ride the same opencode transport but carry DISTINCT provider
-    names so both stay individually addressable at every provider-keyed site. It
-    is intentionally NONSTANDARD to the stitch-export (provider, model) gate (four
-    voters, one on the Meta API), so its labels are refused without
-    --allow-nonstandard-panel and it never mints a blessed labeler. Must NOT touch
-    DEFAULT_PANEL (still the 3-seat v4 default).
-    """
-    quad = sr.get_panel("quad-candidate")
-    assert [p.name for p in quad] == ["claude", "codex", "kimi", "muse"]
-    claude, codex, kimi, muse = quad
-    assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
-    assert codex.model == "gpt-5.6-terra" and codex.effort == "medium"
-    assert kimi.model == "openrouter/moonshotai/kimi-k2.6" and kimi.timeout == 480
-    # Both opencode-transport voters run tool-less under the ``vote`` agent.
-    assert kimi.opencode_agent == "vote"
-    assert muse is sr.MUSE
-    assert muse.name == "muse" and muse.model == "meta/muse-spark-1.1"
-    assert muse.timeout == 480 and muse.opencode_agent == "vote"
-    # Distinct provider names -> no two voters collide on the keying field.
-    assert len({p.name for p in quad}) == 4
-    # The full v4 default is a prefix of quad (quad = default + muse), and adding
-    # a fourth voter must NOT mutate DEFAULT_PANEL.
-    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "kimi"]
-    assert quad != sr.DEFAULT_PANEL
     # Both opencode-transport voters (kimi + muse) resolve to invoke_opencode.
     assert sr._INVOKERS["kimi"] is sr.invoke_opencode
-    assert sr._INVOKERS["muse"] is sr.invoke_opencode
 
 
 def test_invoke_opencode_agent_flag(monkeypatch, tmp_path):
