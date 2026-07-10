@@ -114,7 +114,7 @@ from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mod
 # (#302 enrichment: per-edge overlap meters, BORDERLINE tags, junction zoom
 # crops -- votes are not comparable across pack versions, see
 # research/panel_enriched_ab.md); v3 -> v4 when the composition changed again
-# (2026-07-09 bless: agy/Gemini replaced by opencode/Kimi K2.6, codex bumped
+# (2026-07-09 bless: agy/Gemini replaced by kimi/Kimi K2.6, codex bumped
 # gpt-5.5 -> gpt-5.6-sol; validated in #397). Existing v1/v2/v3 labels stay
 # untouched — the v3 constants below remain the write-time tags for v3-era
 # batches (see :data:`STANDARD_PANEL_VOTERS` era scoping) — and new default-
@@ -148,9 +148,11 @@ PANEL_NONE_LABELER = "panel_unanimous_none_v4"
 PANEL_DECOMPOSED_LABELER = "panel_unanimous_decomposed_v4"
 
 #: Blessed (provider, model) voter compositions, keyed by labeler era. The gate
-#: keys on the PAIR, not the provider name alone: opencode has driven Gemini
-#: Flash (no-agy quota-outage waves), Qwen3-VL (v3-candidate), and Kimi K2.6
-#: (the blessed v4 voter), and a provider-name-only set cannot tell them apart.
+#: keys on the PAIR, not the provider name alone: the opencode transport has
+#: driven Gemini Flash (no-agy quota-outage waves) and Qwen3-VL (v3-candidate)
+#: under the SAME ``opencode`` provider name, and a provider-name-only set cannot
+#: tell them apart. (The blessed v4 Kimi voter now carries its own ``kimi``
+#: provider name; older opencode-transport rows still key on ``opencode``.)
 PANEL_VOTERS_V3 = frozenset(
     {
         ("claude", "claude-opus-4-8"),
@@ -162,7 +164,7 @@ PANEL_VOTERS_V4 = frozenset(
     {
         ("claude", "claude-opus-4-8"),
         ("codex", "gpt-5.6-sol"),
-        ("opencode", "openrouter/moonshotai/kimi-k2.6"),
+        ("kimi", "openrouter/moonshotai/kimi-k2.6"),
     }
 )
 
@@ -272,9 +274,10 @@ def nonstandard_panel_batches(
     and v4 batches validate against the v4 set. Pass an explicit ``expected``
     frozenset of (provider, model) pairs to pin a single composition.
 
-    Keying on the pair (not the provider name) is the point of this gate: a
-    batch voted by opencode/Kimi (blessed) is now distinguishable from
-    opencode/Gemini or opencode/Qwen (not blessed). A vote row with a
+    Keying on the pair (not the provider name) is the point of this gate: the
+    two unblessed opencode-transport voters opencode/Gemini and opencode/Qwen
+    (which share the ``opencode`` provider name) are distinguishable from each
+    other and from the blessed kimi/Kimi voter by their model. A vote row with a
     blank/missing model reads as ``(provider, "")`` and therefore flags — it is
     never treated as standard and never a crash. Batches with a
     missing/unreadable ``votes.csv`` are skipped (the CLI already hard-requires

@@ -246,6 +246,67 @@ def test_stats_work_without_consensus():
     assert POSITION_ANCHOR in stat.alarms  # position alarm needs no consensus
 
 
+def test_quad_panel_kimi_and_muse_are_distinct_voter_rows():
+    """A 4-voter (quad-candidate) wave produces FOUR distinct per-voter rows.
+
+    Kimi (kimi) and Muse (muse) ride the same transport but carry distinct
+    provider names, so ``compute_voter_stats`` (grouped by provider) must NOT pool
+    them into one row — otherwise the monitor would silently average a Meta model
+    with a Moonshot model. Every voter votes "A" on every group here, so pooling
+    would still yield one row; the assertion that BOTH names surface as their own
+    rows is what catches a regression.
+    """
+    rows = []
+    for i in range(6):
+        for prov, model in [
+            ("claude", "claude-opus-4-8"),
+            ("codex", "gpt-5.6-sol"),
+            ("kimi", "openrouter/moonshotai/kimi-k2.6"),
+            ("muse", "meta/muse-spark-1.1"),
+        ]:
+            rows.append({"provider": prov, "model": model, "group_id": f"g{i}", "choice": "A"})
+    stats = compute_voter_stats(_votes(rows))
+    providers = {s.provider for s in stats}
+    assert {"claude", "codex", "kimi", "muse"} <= providers
+    # Kimi and Muse are SEPARATE rows carrying their own model strings (not pooled).
+    assert _one(stats, "kimi").model == "openrouter/moonshotai/kimi-k2.6"
+    assert _one(stats, "muse").model == "meta/muse-spark-1.1"
+
+
+def test_cli_panel_stats_shows_muse_as_its_own_row(tmp_path, monkeypatch):
+    """`crosswalk agent panel-stats` renders the Muse voter as its own row on a
+    4-voter provenance snapshot — distinct from the kimi/Kimi seat."""
+    # Widen the rich console so the voter/model cells aren't truncated to an
+    # ellipsis in the narrow 12-column table (default non-tty width is 80).
+    monkeypatch.setenv("COLUMNS", "400")
+    rows = []
+    for i in range(6):
+        for prov, model in [
+            ("claude", "claude-opus-4-8"),
+            ("codex", "gpt-5.6-sol"),
+            ("kimi", "openrouter/moonshotai/kimi-k2.6"),
+            ("muse", "meta/muse-spark-1.1"),
+        ]:
+            rows.append(
+                {
+                    "provider": prov,
+                    "model": model,
+                    "group_id": f"g{i}",
+                    "choice": "A",
+                    "confidence": 0.5 + 0.05 * i,
+                }
+            )
+    votes = _votes(rows)
+    consensus = pd.DataFrame([{"group_id": f"g{i}", "choice": "A"} for i in range(6)])
+    _write_provenance(tmp_path, "quad_demo", votes, consensus)
+
+    result = runner.invoke(app, ["agent", "panel-stats", "--data-root", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    # Both kimi/Kimi and muse surface as their own voter rows (not pooled).
+    assert "muse" in result.output
+    assert "kimi" in result.output
+
+
 # ---------------------------------------------------------------------------
 # Wave-time surfacing
 # ---------------------------------------------------------------------------

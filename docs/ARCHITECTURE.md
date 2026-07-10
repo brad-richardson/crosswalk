@@ -378,19 +378,48 @@ BENCHMARKING.md "Stitch-level quality gate". The scoring core is shared between
 `matcher.agent_labeling.stitch_eval` and the matcher-free `mbench.eval.stitch_metrics`,
 parity-guarded by `tests/unit/test_mbench_set_metric_parity.py`.
 
-### Panel voter transports and the `meta-candidate` (Muse) prototype
+### Panel voter transports and the `meta-candidate` / `quad-candidate` (Muse) prototypes
 
 The consensus panel (`crosswalk agent stitch-run`, `agent_labeling/stitch_runner.py`)
-runs each voter through its own CLI. Two voters drive **opencode**: the blessed
-v4 third voter (`opencode/openrouter/moonshotai/kimi-k2.6`, via opencode's native
-OpenRouter auth stored by `opencode auth`) and the opt-in `meta-candidate` third
-voter (`opencode/meta/muse-spark-1.1`, Meta's OpenAI-compatible developer API).
+runs each voter through its own CLI. Three seats drive the **opencode** transport,
+each under its OWN provider name: the blessed v4 third voter Kimi (provider name
+`kimi`, `openrouter/moonshotai/kimi-k2.6`, via opencode's native OpenRouter auth
+stored by `opencode auth`); the residual v3-era Qwen voter (provider name
+`opencode`, `openrouter/qwen/qwen3-vl-235b-a22b-instruct`; only in the
+`v3-candidate`/`no-agy` panels); and the opt-in Muse voter (provider name `muse`,
+`meta/muse-spark-1.1`, Meta's OpenAI-compatible developer API).
 
-`meta-candidate` (opt-in only; `--panel meta-candidate`) is the v4 default with
-opencode/Kimi swapped for **Muse Spark 1.1**. Its `(provider, model)` triple is
-intentionally **nonstandard** to the `stitch-export` gate (`PANEL_VOTERS_V4` in
-`stitch_export.py`), so its labels are refused without `--allow-nonstandard-panel`
-and it never mints a blessed labeler — exactly like `v4-candidate`.
+**Each opencode-transport seat carries its own provider name (`kimi`, `muse`, and
+the residual `opencode`/Qwen), not the shared transport name.** The provider string
+is a keying field in several places (vote-provenance dedupe on
+`(source_batch, group_id, provider)`; the panel monitor's per-voter stats; the
+`provider=letter` minority strings; the resume-consistency provider-set check; the
+`--*-model` CLI overrides). The `quad-candidate` panel seats **both** Kimi and Muse,
+so a shared name would put two indistinguishable voters in one wave (collapsed
+provenance rows = silent vote loss, pooled monitor stats, an ambiguous `--*-model`).
+Distinct names keep every voter addressable; each invoker is resolved via
+`_INVOKERS["kimi" | "muse" | "opencode"] -> invoke_opencode`, and the `--agent`
+threading keys on the resolved invoker (not the name) so Muse still gets its
+tool-less `vote` agent. `--kimi-model` / `--muse-model` pin Kimi / Muse; the kept
+`--opencode-model` now targets only the residual Qwen seat.
+
+`meta-candidate` (opt-in; `--panel meta-candidate`) is the v4 default with the
+kimi/Kimi seat **swapped** for `muse`/Muse Spark 1.1. `quad-candidate` (opt-in;
+`--panel quad-candidate`) is the full v4 default **plus** `muse` — a four-seat
+calibration panel that records all four ballots per group under the current
+consensus rules for offline consensus-rule replay. Both are intentionally
+**nonstandard** to the `stitch-export` gate (`PANEL_VOTERS_V4` in
+`stitch_export.py`) — `meta-candidate` swaps the blessed pair and `quad-candidate`
+has four voters — so their labels are refused without `--allow-nonstandard-panel`
+and they never mint a blessed labeler, exactly like `v4-candidate`.
+
+`compute_consensus` is n-agnostic (auto-accept requires unanimous agreement with
+`agree == len(votes)` and `>= 3` votes), so `quad-candidate` auto-accepts on 4/4
+unanimity; a 3-valid-unanimous group with one abstention routes to human review
+with route reason `abstention` (`panel_routing.REASON_ABSTENTION`, "only reachable
+with a 4-voter panel") — an abstention blocks unanimity by design, so the panel's
+resilience is that the wave survives an abstaining/timed-out voter (the group is
+adjudicated by a human, all ballots recorded), not that 3/3 auto-accepts.
 
 Setup (no machine-level config required):
 
@@ -405,7 +434,7 @@ Setup (no machine-level config required):
 - **Tool-less `vote` agent**: `opencode.json` also defines a `vote` agent with all
   tools disabled. Muse is an agentic reasoning model — under opencode's default
   `build` agent it burns its turn on (auto-rejected) `ls`/`cat`/`read` tool calls
-  instead of answering. `OPENCODE_MUSE` sets `opencode_agent="vote"`, threaded to
+  instead of answering. The `MUSE` spec sets `opencode_agent="vote"`, threaded to
   `invoke_opencode` as `--agent vote`; the Kimi invocation passes no agent and is
   byte-identical to before this knob existed.
 - **Output budget**: Muse emits hidden reasoning tokens; a low output budget
