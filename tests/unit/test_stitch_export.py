@@ -849,40 +849,157 @@ def test_vote_provenance_best_effort_on_malformed_votes(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Nonstandard-panel export guard (provenance: PANEL_LABELER is composition-bound)
+# Nonstandard-panel export guard (provenance: PANEL_LABELER is composition-bound,
+# keyed on (provider, model) VOTER pairs since the v4 bless)
 # ---------------------------------------------------------------------------
 
+# Blessed voter compositions, written out literally (not imported) so a panel
+# change that forgets the provenance decision fails these tests loudly.
+_V3_VOTERS = [
+    ("claude", "claude-opus-4-8"),
+    ("codex", "gpt-5.5"),
+    ("agy", "Gemini 3.5 Flash (Medium)"),
+]
+_V4_VOTERS = [
+    ("claude", "claude-opus-4-8"),
+    ("codex", "gpt-5.6-sol"),
+    ("opencode", "openrouter/moonshotai/kimi-k2.6"),
+]
 
-def _write_votes_csv(batch_dir: Path, providers: list[str]) -> None:
+
+def _write_votes_csv(
+    batch_dir: Path, voters: list[tuple[str, str]], include_model_col: bool = True
+) -> None:
     batch_dir.mkdir(parents=True, exist_ok=True)
     with open(batch_dir / "votes.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["group_id", "provider", "model", "choice"])
-        for p in providers:
-            w.writerow(["g1", p, "m", "A"])
+        if include_model_col:
+            w.writerow(["group_id", "provider", "model", "choice"])
+            for p, m in voters:
+                w.writerow(["g1", p, m, "A"])
+        else:
+            w.writerow(["group_id", "provider", "choice"])
+            for p, _m in voters:
+                w.writerow(["g1", p, "A"])
+
+
+def test_standard_v3_and_v4_batches_pass(tmp_path):
+    """Both blessed eras validate: v3 history is never retroactively flagged."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    v3 = tmp_path / "batch_v3"
+    _write_votes_csv(v3, _V3_VOTERS)
+    v4 = tmp_path / "batch_v4"
+    _write_votes_csv(v4, _V4_VOTERS)
+    assert nonstandard_panel_batches([v3, v4]) == {}
+
+
+def test_default_panel_voters_match_runner_default_panel():
+    """stitch_export's blessed v4 set stays in lockstep with the live DEFAULT_PANEL.
+
+    A composition change in stitch_runner without a provenance decision here
+    (bump the labeler + the blessed set) must fail CI, not silently drift.
+    """
+    from crosswalk.agent_labeling.stitch_export import (
+        DEFAULT_PANEL_VOTERS,
+        PANEL_VOTERS_V4,
+    )
+    from crosswalk.agent_labeling.stitch_runner import DEFAULT_PANEL
+
+    assert DEFAULT_PANEL_VOTERS == PANEL_VOTERS_V4
+    assert frozenset((p.name, p.model) for p in DEFAULT_PANEL) == DEFAULT_PANEL_VOTERS
 
 
 def test_nonstandard_panel_batches_flags_swapped_voter(tmp_path):
-    """A no-agy batch (opencode swapped in) is flagged; a default batch is not."""
+    """A no-agy batch (opencode/Qwen swapped in) is flagged with its voter pairs."""
     from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
 
     ok = tmp_path / "batch_default"
-    _write_votes_csv(ok, ["claude", "codex", "agy"])
+    _write_votes_csv(ok, _V4_VOTERS)
     bad = tmp_path / "batch_noagy"
-    _write_votes_csv(bad, ["claude", "codex", "opencode"])
+    noagy = [v for v in _V3_VOTERS if v[0] != "agy"] + [
+        ("opencode", "openrouter/qwen/qwen3-vl-235b-a22b-instruct")
+    ]
+    _write_votes_csv(bad, noagy)
 
     offending = nonstandard_panel_batches([ok, bad])
     assert set(offending) == {"batch_noagy"}
-    assert offending["batch_noagy"] == {"claude", "codex", "opencode"}
+    assert offending["batch_noagy"] == set(noagy)
+
+
+def test_nonstandard_panel_batches_flags_wrong_model_same_provider(tmp_path):
+    """The whole point of (provider, model) keying: same provider NAMES as the
+    blessed v4 panel, but opencode driving Gemini instead of Kimi -> flagged.
+    (Under the old provider-name-only gate this batch was indistinguishable
+    from a blessed one.)"""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = tmp_path / "batch_opencode_gemini"
+    voters = [v for v in _V4_VOTERS if v[0] != "opencode"] + [
+        ("opencode", "openrouter/google/gemini-3.5-flash")
+    ]
+    _write_votes_csv(b, voters)
+    assert set(nonstandard_panel_batches([b])) == {"batch_opencode_gemini"}
+
+
+def test_nonstandard_panel_batches_flags_mixed_era_composition(tmp_path):
+    """A cross-era mix (v3 codex model + v4 Kimi voter) matches neither blessed
+    set exactly -> flagged (this is the historical v4-candidate composition)."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = tmp_path / "batch_v4_candidate"
+    voters = [v for v in _V3_VOTERS if v[0] != "agy"] + [
+        ("opencode", "openrouter/moonshotai/kimi-k2.6")
+    ]
+    _write_votes_csv(b, voters)
+    assert set(nonstandard_panel_batches([b])) == {"batch_v4_candidate"}
+
+
+def test_nonstandard_panel_batches_flags_blank_model(tmp_path):
+    """A blank/NaN model on any vote row reads as (provider, "") -> flagged,
+    never a crash and never mistakable for the blessed panel."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = tmp_path / "batch_blank_model"
+    voters = [v for v in _V4_VOTERS if v[0] != "opencode"] + [("opencode", "")]
+    _write_votes_csv(b, voters)
+    offending = nonstandard_panel_batches([b])
+    assert set(offending) == {"batch_blank_model"}
+    assert ("opencode", "") in offending["batch_blank_model"]
+
+
+def test_nonstandard_panel_batches_flags_missing_model_column(tmp_path):
+    """A votes.csv with NO model column (pre-provenance format) is flagged —
+    incomplete provenance must not pass as the blessed panel."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    b = tmp_path / "batch_no_model_col"
+    _write_votes_csv(b, _V4_VOTERS, include_model_col=False)
+    offending = nonstandard_panel_batches([b])
+    assert set(offending) == {"batch_no_model_col"}
+    assert all(m == "" for _p, m in offending["batch_no_model_col"])
 
 
 def test_nonstandard_panel_batches_flags_subset_panel(tmp_path):
-    """A degraded 2-provider batch is also nonstandard (missing voter)."""
+    """A degraded 2-voter batch is also nonstandard (missing voter)."""
     from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
 
     b = tmp_path / "batch_two"
-    _write_votes_csv(b, ["claude", "codex"])
+    _write_votes_csv(b, _V4_VOTERS[:2])
     assert set(nonstandard_panel_batches([b])) == {"batch_two"}
+
+
+def test_nonstandard_panel_batches_explicit_expected_pins_one_composition(tmp_path):
+    """Passing expected= pins a single composition: a v3 batch then flags."""
+    from crosswalk.agent_labeling.stitch_export import (
+        PANEL_VOTERS_V4,
+        nonstandard_panel_batches,
+    )
+
+    v3 = tmp_path / "batch_v3"
+    _write_votes_csv(v3, _V3_VOTERS)
+    assert set(nonstandard_panel_batches([v3], expected=PANEL_VOTERS_V4)) == {"batch_v3"}
+    assert nonstandard_panel_batches([v3], expected=frozenset(_V3_VOTERS)) == {}
 
 
 def test_nonstandard_panel_batches_skips_missing_votes(tmp_path):
@@ -892,6 +1009,71 @@ def test_nonstandard_panel_batches_skips_missing_votes(tmp_path):
     b = tmp_path / "batch_novotes"
     b.mkdir()
     assert nonstandard_panel_batches([b]) == {}
+
+
+def test_batch_panel_era_resolution(tmp_path):
+    """batch_panel_era: v3 batch -> "v3", v4 -> "v4", anything else -> None."""
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    v3 = tmp_path / "b_v3"
+    _write_votes_csv(v3, _V3_VOTERS)
+    v4 = tmp_path / "b_v4"
+    _write_votes_csv(v4, _V4_VOTERS)
+    odd = tmp_path / "b_odd"
+    _write_votes_csv(odd, _V4_VOTERS[:2])
+    none = tmp_path / "b_none"
+    none.mkdir()
+
+    assert batch_panel_era(v3) == "v3"
+    assert batch_panel_era(v4) == "v4"
+    assert batch_panel_era(odd) is None
+    assert batch_panel_era(none) is None
+
+
+def test_write_exports_stamps_labeler_by_batch_era(tmp_path, labels_dir):
+    """Era-scoped labeler stamping: a v3-era batch mints panel_unanimous_v3, a
+    v4 batch mints panel_unanimous_v4, and a batch with no votes.csv (unknown
+    era) falls back to the CURRENT (v4) tag. Re-exporting committed v3 history
+    must never silently rewrite its provenance to v4."""
+    from crosswalk.agent_labeling.stitch_export import PANEL_LABELER_V3
+
+    def _one_group_batch(name: str, gid: str) -> Path:
+        return make_batch(
+            tmp_path / name,
+            DATASET,
+            [
+                {
+                    "group_id": gid,
+                    "routing": "auto_accept",
+                    "edges": [("r1", "t1")],
+                    "n_edges": 1,
+                    "n_corridors": 1,
+                    "n_assignment_components": 1,
+                }
+            ],
+        )
+
+    b_v3 = _one_group_batch("b_v3", "g_v3")
+    _write_votes_csv(b_v3, _V3_VOTERS)
+    b_v4 = _one_group_batch("b_v4", "g_v4")
+    _write_votes_csv(b_v4, _V4_VOTERS)
+    b_unknown = _one_group_batch("b_unknown", "g_unknown")  # no votes.csv
+
+    report = plan_exports([b_v3, b_v4, b_unknown], DATASET, labels_dir)
+    assert {g.group_id: g.panel_era for g in report.groups} == {
+        "g_v3": "v3",
+        "g_v4": "v4",
+        "g_unknown": "",
+    }
+    assert write_exports(report, DATASET, labels_dir) == 3
+
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    labelers = dict(zip(df["group_id"], df["labeler"], strict=True))
+    assert labelers == {
+        "g_v3": PANEL_LABELER_V3,
+        "g_v4": PANEL_LABELER,
+        "g_unknown": PANEL_LABELER,
+    }
 
 
 # ---------------------------------------------------------------------------

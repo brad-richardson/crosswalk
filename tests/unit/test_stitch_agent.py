@@ -1821,34 +1821,94 @@ def test_parse_vote_ignores_pack_feedback_key():
 # ---------------------------------------------------------------------------
 
 
-def test_opencode_registered_and_v3_panel_composition():
-    """The 4th voter is wired into the invoker registry and the opt-in panel."""
-    assert "opencode" in sr._INVOKERS
-    # DEFAULT_PANEL (production) is unchanged: still the 3 incumbents.
-    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "agy"]
-    # v3-candidate adds opencode as a distinct 4th, decorrelated model family.
-    v3 = sr.get_panel("v3-candidate")
-    assert [p.name for p in v3] == ["claude", "codex", "agy", "opencode"]
-    assert v3[3].model == "openrouter/qwen/qwen3-vl-235b-a22b-instruct"
-    # Named-panel resolution: default/v2 == 3 voters; unknown/empty -> default.
-    assert [p.name for p in sr.get_panel("default")] == ["claude", "codex", "agy"]
-    assert [p.name for p in sr.get_panel("v2")] == ["claude", "codex", "agy"]
+def test_default_panel_is_v4():
+    """The blessed v4 panel IS the default: claude + codex/gpt-5.6-sol +
+    opencode/Kimi K2.6 (the 2026-07-09 bless; agy is out of the default)."""
+    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "opencode"]
+    claude, codex, kimi = sr.DEFAULT_PANEL
+    assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
+    assert codex.model == "gpt-5.6-sol" and codex.effort == "medium"
+    assert kimi.model == "openrouter/moonshotai/kimi-k2.6"
+    # Kimi's thinking runs long on large packs: the spec carries its own timeout.
+    assert kimi.timeout == 480
+    assert sr.get_panel("default") is sr.DEFAULT_PANEL
+    assert sr.get_panel("v4") is sr.DEFAULT_PANEL
     assert sr.get_panel("nonexistent") is sr.DEFAULT_PANEL
     assert sr.get_panel(None) is sr.DEFAULT_PANEL
 
 
-def test_v4_candidate_panel_composition():
-    """v4-candidate swaps the agy third voter for opencode/Kimi K2.6 (opt-in).
+def test_v3_panels_remain_reproducible():
+    """The former default stays addressable as 'v3'/'v2' (old batches must be
+    reproducible), and the v3-era candidate/fallback panels build on it."""
+    assert "opencode" in sr._INVOKERS
+    v3 = sr.get_panel("v3")
+    assert [p.name for p in v3] == ["claude", "codex", "agy"]
+    assert [p.model for p in v3] == [
+        "claude-opus-4-8",
+        "gpt-5.5",
+        "Gemini 3.5 Flash (Medium)",
+    ]
+    assert v3[1].effort == "low"  # codex ran low effort in the v3 era
+    assert sr.get_panel("v2") is v3 or sr.get_panel("v2") == v3
+    # v3-candidate adds opencode/Qwen as a distinct 4th voter on top of v3.
+    v3c = sr.get_panel("v3-candidate")
+    assert [p.name for p in v3c] == ["claude", "codex", "agy", "opencode"]
+    assert v3c[3].model == "openrouter/qwen/qwen3-vl-235b-a22b-instruct"
+    # no-agy swaps agy for opencode/Qwen (v3-era quota-outage fallback).
+    noagy = sr.get_panel("no-agy")
+    assert [p.name for p in noagy] == ["claude", "codex", "opencode"]
+    assert noagy[1].model == "gpt-5.5"
+    assert noagy[2].model == "openrouter/qwen/qwen3-vl-235b-a22b-instruct"
 
-    The composition is a REPLACEMENT (3 voters, agy out) — not an addition like
-    v3-candidate — and must not touch DEFAULT_PANEL: labels from it are refused
-    by stitch-export without --allow-nonstandard-panel until blessed as v4.
-    """
-    v4 = sr.get_panel("v4-candidate")
-    assert [p.name for p in v4] == ["claude", "codex", "opencode"]
-    assert v4[2].model == "openrouter/moonshotai/kimi-k2.6"
-    # Production default remains the 3 incumbents.
-    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "agy"]
+
+def test_v4_candidate_panel_is_the_397_validation_composition():
+    """v4-candidate stays the EXACT #397 validation composition (codex still
+    gpt-5.5/low, agy swapped for Kimi) — it is NOT an alias of the blessed v4
+    default, whose codex model was also bumped. It therefore remains
+    nonstandard to the stitch-export (provider, model) gate; kept only so the
+    validation waves can be reproduced."""
+    v4c = sr.get_panel("v4-candidate")
+    assert [p.name for p in v4c] == ["claude", "codex", "opencode"]
+    assert v4c[1].model == "gpt-5.5" and v4c[1].effort == "low"
+    assert v4c[2].model == "openrouter/moonshotai/kimi-k2.6"
+    assert v4c != sr.DEFAULT_PANEL
+
+
+def test_resolve_timeout_precedence():
+    """Explicit caller/CLI timeout > per-spec timeout > global default."""
+    kimi = sr.ProviderSpec(name="opencode", model="m", timeout=480)
+    plain = sr.ProviderSpec(name="claude", model="m")
+    # Per-spec beats the global default when nothing explicit is passed.
+    assert sr.resolve_timeout(kimi, None) == 480
+    # No spec timeout -> global default.
+    assert sr.resolve_timeout(plain, None) == sr.DEFAULT_VOTE_TIMEOUT_S == 240
+    # An explicit value beats BOTH (even when smaller than the spec's).
+    assert sr.resolve_timeout(kimi, 300) == 300
+    assert sr.resolve_timeout(plain, 600) == 600
+
+
+def test_run_provider_on_group_resolves_per_spec_timeout(monkeypatch):
+    """run_provider_on_group hands the RESOLVED timeout to the invoker: the
+    spec's own timeout when the caller passes None, the caller's value when
+    explicit."""
+    seen: list[int] = []
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        seen.append(timeout)
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    monkeypatch.setitem(sr._INVOKERS, "opencode", fake_invoker)
+    spec = sr.ProviderSpec(name="opencode", model="m", timeout=480)
+
+    v = sr.run_provider_on_group(spec, "g1", None, "p", ["A"], {"A": []}, timeout=None)
+    assert v.choice == "A" and seen[-1] == 480
+
+    v = sr.run_provider_on_group(spec, "g1", None, "p", ["A"], {"A": []}, timeout=120)
+    assert v.choice == "A" and seen[-1] == 120
+
+    plain = sr.ProviderSpec(name="opencode", model="m")
+    v = sr.run_provider_on_group(plain, "g1", None, "p", ["A"], {"A": []}, timeout=None)
+    assert v.choice == "A" and seen[-1] == sr.DEFAULT_VOTE_TIMEOUT_S
 
 
 def test_invoke_opencode_arg_construction(monkeypatch, tmp_path):

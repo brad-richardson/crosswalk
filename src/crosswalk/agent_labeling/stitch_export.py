@@ -6,16 +6,19 @@ subset of those verdicts that are safe to treat as durable labels into
 ``labels/stitching`` alongside the human labels, tagged with a ``panel_*``
 labeler so their provenance stays visible (v1 tagged the earlier
 sonnet/gpt-5.4/Gemini-Flash-Low panel; v2 the Opus 4.8/gpt-5.5/Gemini-3.5-Flash
-panel on pre-enrichment packs; the tag is bumped whenever the panel composition
-OR its pack inputs change).
+panel on pre-enrichment packs; v3 that composition on #302-enriched packs; v4
+the 2026-07-09 bless — Opus 4.8 / gpt-5.6-sol / Kimi K2.6. The tag is bumped
+whenever the panel composition OR its pack inputs change, and each batch is
+stamped with ITS OWN era's tag — see :data:`STANDARD_PANEL_VOTERS`).
 
 Two verdict classes are promoted:
 
   * **Unanimous accept** (routing == ``auto_accept``) -> a normal pair label with
-    the panel's chosen edge set, tagged ``panel_unanimous_v3``.
+    the panel's chosen edge set, tagged ``panel_unanimous_v4`` (v3-era batches:
+    ``panel_unanimous_v3``).
   * **Unanimous NONE** (all panelists voted "none of the options fit"; routed to
     ``human_review`` with route_reason ``unanimous_none``) -> an EMPTY-SET pair
-    label (``selected_edges == []``), tagged ``panel_unanimous_none_v3``. This is
+    label (``selected_edges == []``), tagged ``panel_unanimous_none_v4``. This is
     the reject-all ground truth the learned group resolver needs to train/eval on
     rejects (see ``research/learned_optimizer_design.md`` §2.4a / milestone L1):
     the cross-mode defect (a cycleway wrongly grouped with a parallel road) has
@@ -25,7 +28,7 @@ Two verdict classes are promoted:
 
 A third class covers DECOMPOSED groups (#367 Mode B, ``stitch-batch
 --decompose``): an over-backstop group split into panel-sized sub-problems is
-recomposed here — a whole-group label (labeler ``panel_unanimous_decomposed_v3``,
+recomposed here — a whole-group label (labeler ``panel_unanimous_decomposed_v4``,
 the union of the sub-selections) is minted ONLY when every sub-problem in the
 batch.json roster resolved as a unanimous accept; any failed or unvoted
 sub-problem blocks the group (``subproblem_failed`` / ``subproblems_unvoted``).
@@ -107,10 +110,18 @@ from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mod
 # Gemini 3.5 Flash Medium); v2 -> v3 when the evidence-pack inputs changed
 # (#302 enrichment: per-edge overlap meters, BORDERLINE tags, junction zoom
 # crops -- votes are not comparable across pack versions, see
-# research/panel_enriched_ab.md). Existing v1/v2 labels stay untouched; future
-# waves are tagged v3. Any labeler with the PANEL_LABELER_PREFIX is a panel
-# (non-human) label and is excluded from the human-precedence check below.
-PANEL_LABELER = "panel_unanimous_v3"
+# research/panel_enriched_ab.md); v3 -> v4 when the composition changed again
+# (2026-07-09 bless: agy/Gemini replaced by opencode/Kimi K2.6, codex bumped
+# gpt-5.5 -> gpt-5.6-sol; validated in #397). Existing v1/v2/v3 labels stay
+# untouched — the v3 constants below remain the write-time tags for v3-era
+# batches (see :data:`STANDARD_PANEL_VOTERS` era scoping) — and new default-
+# panel waves are tagged v4. Any labeler with the PANEL_LABELER_PREFIX is a
+# panel (non-human) label and is excluded from the human-precedence check below.
+PANEL_LABELER_V3 = "panel_unanimous_v3"
+PANEL_NONE_LABELER_V3 = "panel_unanimous_none_v3"
+PANEL_DECOMPOSED_LABELER_V3 = "panel_unanimous_decomposed_v3"
+
+PANEL_LABELER = "panel_unanimous_v4"
 PANEL_LABELER_PREFIX = "panel_"
 
 # Distinct labeler for unanimous-NONE (reject-all / empty-set) verdicts. Kept
@@ -123,7 +134,7 @@ PANEL_LABELER_PREFIX = "panel_"
 # cross-mode acceptance test reports rejects as their own table
 # (research/learned_optimizer_design.md §6.3). Version suffix tracks PANEL_LABELER
 # (same panel composition / pack inputs).
-PANEL_NONE_LABELER = "panel_unanimous_none_v3"
+PANEL_NONE_LABELER = "panel_unanimous_none_v4"
 
 # Distinct labeler for a RECOMPOSED whole-group label (#367 Mode B): the union
 # of unanimous per-sub-problem verdicts from a decomposed over-backstop group.
@@ -131,38 +142,121 @@ PANEL_NONE_LABELER = "panel_unanimous_none_v3"
 # than PANEL_LABELER and must stay sliceable on its own in per-labeler eval.
 # Kept under the ``panel_`` prefix (non-human); version suffix tracks
 # PANEL_LABELER (same panel composition / pack inputs per sub-problem).
-PANEL_DECOMPOSED_LABELER = "panel_unanimous_decomposed_v3"
+PANEL_DECOMPOSED_LABELER = "panel_unanimous_decomposed_v4"
 
-#: The provider composition PANEL_LABELER is valid provenance for. Composition
-#: changes have historically bumped the labeler (v1 -> v2), so a batch run with
-#: a different panel (e.g. ``--panel no-agy`` during a quota outage) must not be
-#: exported under this labeler without an explicit override.
-DEFAULT_PANEL_PROVIDERS = frozenset({"claude", "codex", "agy"})
+#: Blessed (provider, model) voter compositions, keyed by labeler era. The gate
+#: keys on the PAIR, not the provider name alone: opencode has driven Gemini
+#: Flash (no-agy quota-outage waves), Qwen3-VL (v3-candidate), and Kimi K2.6
+#: (the blessed v4 voter), and a provider-name-only set cannot tell them apart.
+PANEL_VOTERS_V3 = frozenset(
+    {
+        ("claude", "claude-opus-4-8"),
+        ("codex", "gpt-5.5"),
+        ("agy", "Gemini 3.5 Flash (Medium)"),
+    }
+)
+PANEL_VOTERS_V4 = frozenset(
+    {
+        ("claude", "claude-opus-4-8"),
+        ("codex", "gpt-5.6-sol"),
+        ("opencode", "openrouter/moonshotai/kimi-k2.6"),
+    }
+)
+
+#: Era -> blessed voter set. A batch matching an era's set exactly is STANDARD
+#: for that era: it passes the export gate and its labels are stamped with that
+#: era's labeler tags (v3-era batches keep minting ``*_v3`` labels on
+#: re-export — the committed v3 history is never retroactively flagged as
+#: nonstandard, nor silently re-stamped ``*_v4``).
+STANDARD_PANEL_VOTERS: dict[str, frozenset[tuple[str, str]]] = {
+    "v3": PANEL_VOTERS_V3,
+    "v4": PANEL_VOTERS_V4,
+}
+
+#: The (provider, model) composition of the CURRENT default panel — must stay
+#: in lockstep with ``stitch_runner.DEFAULT_PANEL`` (asserted in
+#: tests/unit/test_stitch_export.py, so a panel change without a provenance
+#: decision here fails CI). Replaces the provider-name-only
+#: ``DEFAULT_PANEL_PROVIDERS``.
+DEFAULT_PANEL_VOTERS = PANEL_VOTERS_V4
+
+
+def _batch_voters(batch_dir: Path) -> set[tuple[str, str]] | None:
+    """Read a batch's ``votes.csv`` into its set of (provider, model) voters.
+
+    Returns ``None`` when ``votes.csv`` is missing, unreadable, or has no rows
+    (the CLI already hard-requires ``consensus.csv``; provenance for such
+    batches is best-effort). A missing ``model`` column or a blank/NaN model
+    cell yields pairs with ``model == ""`` — deliberately KEPT rather than
+    skipped, so incomplete provenance reads as a composition mismatch (flagged
+    by :func:`nonstandard_panel_batches`), never as the blessed panel and never
+    as a crash.
+    """
+    votes_path = Path(batch_dir) / "votes.csv"
+    if not votes_path.exists():
+        return None
+    try:
+        df = pd.read_csv(votes_path)
+        providers = df["provider"].fillna("").astype(str).str.strip()
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, KeyError):
+        return None
+    if "model" in df.columns:
+        models = df["model"].fillna("").astype(str).str.strip()
+    else:
+        models = pd.Series([""] * len(df), index=df.index, dtype=str)
+    voters = set(zip(providers, models, strict=True))
+    return voters or None
+
+
+def batch_panel_era(batch_dir: Path) -> str | None:
+    """Return the labeler era ("v3"/"v4") whose blessed voter set a batch matches.
+
+    ``None`` means the batch is not attributable to any blessed composition:
+    a nonstandard panel, or no readable ``votes.csv``. Callers use this both to
+    gate exports (:func:`nonstandard_panel_batches`) and to stamp each era's
+    own labeler tags at write time (:func:`write_exports`).
+    """
+    voters = _batch_voters(batch_dir)
+    if voters is None:
+        return None
+    for era, blessed in STANDARD_PANEL_VOTERS.items():
+        if voters == blessed:
+            return era
+    return None
 
 
 def nonstandard_panel_batches(
     batch_dirs: list[Path],
-    expected: frozenset[str] = DEFAULT_PANEL_PROVIDERS,
-) -> dict[str, set[str]]:
-    """Return ``{batch_name: provider_set}`` for batches with a nonstandard panel.
+    expected: frozenset[tuple[str, str]] | None = None,
+) -> dict[str, set[tuple[str, str]]]:
+    """Return ``{batch_name: voter_pairs}`` for batches with a nonstandard panel.
 
-    Reads each batch's ``votes.csv`` provider column and flags any batch whose
-    provider set differs from ``expected``. Used by ``stitch-export`` to refuse
-    stamping :data:`PANEL_LABELER` on votes from a different panel composition.
-    Batches with a missing/unreadable ``votes.csv`` are skipped (the CLI already
-    hard-requires ``consensus.csv``; provenance for such batches is best-effort).
+    Reads each batch's ``votes.csv`` (provider, model) pairs and flags any batch
+    whose voter set is not a blessed composition. With the default
+    ``expected=None``, a batch passes when it exactly matches ANY era's blessed
+    set (:data:`STANDARD_PANEL_VOTERS`): historical v3 batches (claude+codex+agy
+    with their v3 models) stay standard instead of being retroactively flagged,
+    and v4 batches validate against the v4 set. Pass an explicit ``expected``
+    frozenset of (provider, model) pairs to pin a single composition.
+
+    Keying on the pair (not the provider name) is the point of this gate: a
+    batch voted by opencode/Kimi (blessed) is now distinguishable from
+    opencode/Gemini or opencode/Qwen (not blessed). A vote row with a
+    blank/missing model reads as ``(provider, "")`` and therefore flags — it is
+    never treated as standard and never a crash. Batches with a
+    missing/unreadable ``votes.csv`` are skipped (the CLI already hard-requires
+    ``consensus.csv``; provenance for such batches is best-effort).
     """
-    offending: dict[str, set[str]] = {}
+    accepted = (
+        [frozenset(expected)] if expected is not None else list(STANDARD_PANEL_VOTERS.values())
+    )
+    offending: dict[str, set[tuple[str, str]]] = {}
     for bd in batch_dirs:
-        votes_path = Path(bd) / "votes.csv"
-        if not votes_path.exists():
+        voters = _batch_voters(bd)
+        if voters is None:
             continue
-        try:
-            providers = set(pd.read_csv(votes_path)["provider"].astype(str).unique())
-        except (pd.errors.EmptyDataError, pd.errors.ParserError, KeyError):
-            continue
-        if providers and providers != set(expected):
-            offending[Path(bd).name] = providers
+        if not any(voters == blessed for blessed in accepted):
+            offending[Path(bd).name] = voters
     return offending
 
 
@@ -204,6 +298,11 @@ class GroupExport:
     from_decomposition: bool = False
     n_subproblems: int = 0
     n_subproblems_resolved: int = 0
+    # Labeler era of the SOURCE BATCH ("v3"/"v4", from batch_panel_era), or ""
+    # when the batch matches no blessed composition (nonstandard panels exported
+    # under --allow-nonstandard-panel, or no readable votes.csv). write_exports
+    # stamps each era's own labeler tags; "" falls back to the current (v4) tags.
+    panel_era: str = ""
 
 
 @dataclass
@@ -604,6 +703,13 @@ def plan_exports(
             )
         )
 
+    # Stamp each outcome with its source batch's labeler era ("v3"/"v4"; "" for
+    # nonstandard/unattributable) so write_exports can tag v3-era batches with
+    # the v3 labelers instead of silently re-stamping committed history as v4.
+    era_by_name = {bd.name: (batch_panel_era(bd) or "") for bd in batch_groups}
+    for g in groups:
+        g.panel_era = era_by_name.get(g.source_batch, "")
+
     return ExportReport(
         dataset=dataset,
         n_total_groups=len(merged),
@@ -869,6 +975,18 @@ def _gate_recomposed_group(
     )
 
 
+#: Era -> (accept, reject-all, decomposed) labeler tags for write_exports.
+#: v3-era batches keep minting v3-tagged labels on (re-)export; the current
+#: (v4) tags apply to v4 batches AND to era-less exports ("" — nonstandard
+#: compositions force-exported via --allow-nonstandard-panel, or batches with
+#: no readable votes.csv), preserving the pre-v4 behavior of stamping the
+#: current labeler under that explicit override.
+_LABELERS_BY_ERA: dict[str, tuple[str, str, str]] = {
+    "v3": (PANEL_LABELER_V3, PANEL_NONE_LABELER_V3, PANEL_DECOMPOSED_LABELER_V3),
+    "v4": (PANEL_LABELER, PANEL_NONE_LABELER, PANEL_DECOMPOSED_LABELER),
+}
+
+
 def write_exports(
     report: ExportReport,
     dataset: str,
@@ -876,12 +994,15 @@ def write_exports(
 ) -> int:
     """Persist the report's exported groups as ``panel_*`` stitching labels.
 
-    Accept groups are stamped ``panel_unanimous_v3`` with their chosen edge set;
-    reject-all (empty-set) groups are stamped ``panel_unanimous_none_v3`` with
+    Accept groups are stamped ``panel_unanimous_v4`` with their chosen edge set;
+    reject-all (empty-set) groups are stamped ``panel_unanimous_none_v4`` with
     ``selected_edges == []`` (PAIR semantics, num_refs/num_targets == 0 — the same
     on-disk shape as a human reject-all); recomposed decomposed-group verdicts
-    (#367 Mode B) are stamped ``panel_unanimous_decomposed_v3`` with the union of
-    their sub-problem selections. Upserts by ``group_id`` (the store replaces an
+    (#367 Mode B) are stamped ``panel_unanimous_decomposed_v4`` with the union of
+    their sub-problem selections. Groups whose source batch is a v3-era panel
+    (``panel_era == "v3"``, see :func:`batch_panel_era`) are stamped with the v3
+    variants instead — re-exporting committed v3 history never rewrites its
+    provenance to v4. Upserts by ``group_id`` (the store replaces an
     existing row for the same group_id), so this is idempotent. The source batch
     name is recorded in the ``session_id`` field for provenance.
     Returns the number of rows written.
@@ -889,12 +1010,15 @@ def write_exports(
     store = StitchingLabelStore(dataset, labels_dir=labels_dir)
     written = 0
     for g in report.exported:
+        accept_tag, none_tag, decomposed_tag = _LABELERS_BY_ERA.get(
+            g.panel_era, _LABELERS_BY_ERA["v4"]
+        )
         if g.is_empty_set:
-            labeler = PANEL_NONE_LABELER
+            labeler = none_tag
         elif g.from_decomposition:
-            labeler = PANEL_DECOMPOSED_LABELER
+            labeler = decomposed_tag
         else:
-            labeler = PANEL_LABELER
+            labeler = accept_tag
         ref_ids = {e["ref_id"] for e in g.selected_edges}
         tgt_ids = {e["target_id"] for e in g.selected_edges}
         store.add(

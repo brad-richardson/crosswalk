@@ -1,6 +1,7 @@
 """Consensus-panel runner for agent stitching-group labeling.
 
-Runs a heterogeneous 3-provider panel (claude + codex + agy) on each group's
+Runs a heterogeneous 3-provider panel (claude + codex + opencode/Kimi since the
+2026-07-09 v4 bless; previously claude + codex + agy) on each group's
 evidence pack, in parallel. Each provider returns a JSON option pick; votes are
 validated (choice must be a real option letter or NONE), retried once on
 garbage, and recorded as audit data. A consensus rule routes each group.
@@ -53,6 +54,12 @@ _FATAL_ERRNOS = frozenset(
 # ---------------------------------------------------------------------------
 
 
+#: Global default per-provider vote timeout (seconds). A :class:`ProviderSpec`
+#: may carry its own ``timeout`` (e.g. Kimi's long thinking on large packs); an
+#: EXPLICIT caller/CLI ``--timeout`` overrides both. See :func:`resolve_timeout`.
+DEFAULT_VOTE_TIMEOUT_S = 240
+
+
 @dataclass
 class ProviderSpec:
     """A panel member: how to invoke a provider CLI on an evidence pack."""
@@ -60,55 +67,103 @@ class ProviderSpec:
     name: str  # short id used in votes.csv (e.g. "claude")
     model: str  # model string recorded in votes
     effort: str = ""  # reasoning/thinking effort where the CLI supports it
+    # Per-spec vote timeout (seconds). None -> DEFAULT_VOTE_TIMEOUT_S. An
+    # explicitly passed caller/CLI timeout beats this (resolve_timeout).
+    timeout: int | None = None
 
 
-# Panel v2 (composition change from v1 -> bump the export labeler; the labeler
-# was bumped again to panel_unanimous_v3 when the #302 pack enrichment changed
-# the panel's inputs). Effort is CLI-specific: claude takes --effort; codex takes
+def resolve_timeout(spec: ProviderSpec, timeout: int | None) -> int:
+    """Resolve one provider's effective vote timeout (seconds).
+
+    Precedence: an EXPLICITLY passed caller/CLI timeout (``--timeout``; not
+    ``None``) wins over the spec's own ``timeout``, which wins over the global
+    :data:`DEFAULT_VOTE_TIMEOUT_S`. Per-spec timeouts exist because voters
+    differ structurally in latency — Kimi K2.6's thinking ran past the 240s
+    default on 3/6 smoke votes (up to ~390s), which is a property of the model,
+    not of a particular wave — while the explicit flag stays the operator's
+    override for experiments.
+    """
+    if timeout is not None:
+        return timeout
+    if spec.timeout is not None:
+        return spec.timeout
+    return DEFAULT_VOTE_TIMEOUT_S
+
+
+# Panel v3 (the FORMER production default: v2 was the same composition — the
+# v2 -> v3 labeler bump tracked the #302 pack-input enrichment, not a voter
+# change). Kept as named fallback panels ("v3"/"v2") so historical batches can
+# be reproduced. Effort is CLI-specific: claude takes --effort; codex takes
 # model_reasoning_effort; agy encodes it in the model name ("... (Medium)").
-DEFAULT_PANEL = [
+PANEL_V3 = [
     ProviderSpec(name="claude", model="claude-opus-4-8", effort="medium"),
     ProviderSpec(name="codex", model="gpt-5.5", effort="low"),
     ProviderSpec(name="agy", model="Gemini 3.5 Flash (Medium)"),
 ]
 
 # A candidate FOURTH voter (default OFF): opencode driving an OpenRouter-hosted
-# Qwen3-VL model. Deliberately a distinct model family from the three incumbents
-# (Claude / GPT / Gemini) so its vote is decorrelated, adding real signal to the
-# quorum rather than echoing an existing voice. opencode carries all knobs
-# (reasoning etc.) in the model string, so ``effort`` is unused for it — like agy.
+# Qwen3-VL model. Deliberately a distinct model family from the three v3
+# incumbents (Claude / GPT / Gemini) so its vote is decorrelated, adding real
+# signal to the quorum rather than echoing an existing voice. opencode carries
+# all knobs (reasoning etc.) in the model string, so ``effort`` is unused for
+# it — like agy.
 OPENCODE_QWEN = ProviderSpec(name="opencode", model="openrouter/qwen/qwen3-vl-235b-a22b-instruct")
 
-# Candidate REPLACEMENT third voter (default OFF): opencode driving OpenRouter-
-# hosted Kimi K2.6 (Moonshot) — an open-weight native-multimodal flagship and a
-# FOURTH model family (vs the Claude/GPT/Gemini incumbents), so its errors are
-# decorrelated from the rest of the panel. Unlike agy (which must proactively
-# read the pack images itself), the opencode invoker force-attaches every PNG,
-# so this voter is guaranteed to see the full visual evidence. Kimi's thinking
-# runs long on large packs (observed up to ~390s/vote): run v4-candidate waves
-# with ``--timeout 480``.
-OPENCODE_KIMI = ProviderSpec(name="opencode", model="openrouter/moonshotai/kimi-k2.6")
+# The v4 third voter: opencode driving OpenRouter-hosted Kimi K2.6 (Moonshot) —
+# an open-weight native-multimodal flagship and a FOURTH model family (vs the
+# Claude/GPT/Gemini incumbents), so its errors are decorrelated from the rest
+# of the panel. Unlike agy (which must proactively read the pack images
+# itself), the opencode invoker force-attaches every PNG, so this voter is
+# guaranteed to see the full visual evidence. Kimi's thinking runs long on
+# large packs (observed 11-386s/vote; 3/6 smoke votes exceeded the 240s
+# default), so the spec carries its own 480s timeout — an explicit --timeout
+# still overrides it (see resolve_timeout).
+OPENCODE_KIMI = ProviderSpec(name="opencode", model="openrouter/moonshotai/kimi-k2.6", timeout=480)
 
-# Named panel configurations. DEFAULT_PANEL (the 3-voter production panel) is the
-# default; the 4th voter ships behind the opt-in ``v3-candidate`` panel only, so
-# production waves are unaffected until the export rule is validated and flipped.
+# Panel v4 — the production DEFAULT since the 2026-07-09 bless (#397 validated
+# the swap; this composition mints the ``*_v4`` export labelers):
 #
-# ``no-agy`` is a QUOTA-OUTAGE fallback (observed 2026-07-06: agy silently
-# returns exit 0 + empty output when its daily cap is hit): it swaps agy for the
-# opencode/Qwen voter so a wave can proceed 3-wide. NOTE: panel composition is
-# part of export-label provenance (v1->v2 bumped the export labeler) — labels
-# produced under this composition must NOT be exported as ``panel_unanimous_v3``
-# without an explicit decision to bump/mark the labeler.
+#   * agy/Gemini Flash is REPLACED by opencode/Kimi K2.6. agy position-anchored
+#     (11/12 votes "A" at constant 0.95 confidence in the w0707 waves) and only
+#     reads pack images when it chooses to; Kimi agreed 6/6 with settled panel
+#     verdicts across four different letters in the #397 smoke test, with
+#     varied confidence and evidence-citing reasoning, at ~$0.04/vote.
+#   * The codex voter bumps gpt-5.5 (low) -> gpt-5.6-sol (medium). Model id
+#     verified 2026-07-09 against the codex CLI's server-fetched model listing
+#     AND a live `codex exec -m gpt-5.6-sol` smoke test through the
+#     invoke_codex invocation shape.
+DEFAULT_PANEL = [
+    ProviderSpec(name="claude", model="claude-opus-4-8", effort="medium"),
+    ProviderSpec(name="codex", model="gpt-5.6-sol", effort="medium"),
+    OPENCODE_KIMI,
+]
+
+# Named panel configurations. DEFAULT_PANEL (v4) is the default; historical
+# compositions stay addressable so old batches can be reproduced exactly.
+#
+# ``no-agy`` is a QUOTA-OUTAGE fallback for v3-era reruns (observed 2026-07-06:
+# agy silently returns exit 0 + empty output when its daily cap is hit): it
+# swaps agy for the opencode/Qwen voter so a wave can proceed 3-wide. NOTE:
+# panel composition is part of export-label provenance — stitch-export keys its
+# gate on (provider, model) pairs, so labels from any non-blessed composition
+# (no-agy, v3-candidate, v4-candidate) are refused without
+# --allow-nonstandard-panel.
 PANELS: dict[str, list[ProviderSpec]] = {
     "default": DEFAULT_PANEL,
-    "v2": DEFAULT_PANEL,
-    "v3-candidate": [*DEFAULT_PANEL, OPENCODE_QWEN],
-    "no-agy": [*(p for p in DEFAULT_PANEL if p.name != "agy"), OPENCODE_QWEN],
-    # Third-voter replacement candidate (agy/Gemini -> opencode/Kimi K2.6).
-    # NOT the default: labels from this composition are refused by
-    # stitch-export without --allow-nonstandard-panel until validated and
-    # blessed as the v4 standard (which will bump the export labeler).
-    "v4-candidate": [*(p for p in DEFAULT_PANEL if p.name != "agy"), OPENCODE_KIMI],
+    "v4": DEFAULT_PANEL,
+    # v3-era compositions (v2 == v3 composition; the labeler bump was pack
+    # inputs). Kept so v3-era batches can be re-run/reproduced; their exports
+    # are stamped with the v3 labelers by stitch_export's era scoping.
+    "v3": PANEL_V3,
+    "v2": PANEL_V3,
+    "v3-candidate": [*PANEL_V3, OPENCODE_QWEN],
+    "no-agy": [*(p for p in PANEL_V3 if p.name != "agy"), OPENCODE_QWEN],
+    # The #397 validation composition: the v3 panel with agy swapped for Kimi
+    # (codex still gpt-5.5/low). SUPERSEDED by the blessed default above, which
+    # also bumps the codex model — so this remains NONSTANDARD to the
+    # stitch-export (provider, model) gate; kept only to reproduce the
+    # validation waves.
+    "v4-candidate": [*(p for p in PANEL_V3 if p.name != "agy"), OPENCODE_KIMI],
 }
 
 
@@ -742,12 +797,17 @@ def run_provider_on_group(
     prompt: str,
     letters: list[str],
     options_by_letter: dict[str, list[tuple[str, str]]],
-    timeout: int = 240,
+    timeout: int | None = None,
     retries: int = 1,
     collect_feedback: bool = False,
     invocation_budget_s: float = 300.0,
 ) -> Vote:
     """Run one provider on one group; abstain on bad output, hard-fail if down.
+
+    ``timeout=None`` (the default) resolves per provider: the spec's own
+    ``timeout`` if set (e.g. 480s for opencode/Kimi), else
+    :data:`DEFAULT_VOTE_TIMEOUT_S`. An explicit value overrides both — see
+    :func:`resolve_timeout`.
 
     Parse/validation failures retry ``retries`` times then abstain. Invocation/
     API failures (nonzero exit, quota, rate-limit, timeout) back off and retry
@@ -759,6 +819,7 @@ def run_provider_on_group(
     """
     invoker = _INVOKERS[provider.name]
     valid = set(letters)
+    timeout = resolve_timeout(provider, timeout)
 
     scratch_dir = group_dir
     run_prompt = prompt
@@ -953,11 +1014,14 @@ def run_panel_on_group(
     group_id: str,
     group_dir: Path,
     panel: list[ProviderSpec],
-    timeout: int = 240,
+    timeout: int | None = None,
     collect_feedback: bool = False,
     invocation_budget_s: float = 300.0,
 ) -> list[Vote]:
     """Run the full panel on one group in parallel (one thread per provider).
+
+    ``timeout=None`` resolves per provider (spec timeout, else the global
+    default); an explicit value applies to every provider (resolve_timeout).
 
     A provider that stays down past ``invocation_budget_s`` raises
     ProviderInvocationError, which propagates out to halt ``run_batch``. The halt
@@ -1327,7 +1391,7 @@ def run_batch(
     batch_dir: Path,
     panel: list[ProviderSpec] | None = None,
     group_ids: list[str] | None = None,
-    timeout: int = 240,
+    timeout: int | None = None,
     limit: int = 0,
     collect_feedback: bool = False,
     resume: bool = False,
@@ -1337,7 +1401,8 @@ def run_batch(
 
     Expects evidence packs under ``batch_dir/{group_id}/``. Writes
     ``batch_dir/votes.csv`` and ``batch_dir/consensus.csv``. Returns the two
-    DataFrames.
+    DataFrames. ``timeout=None`` resolves per provider (spec timeout, else
+    :data:`DEFAULT_VOTE_TIMEOUT_S`); an explicit value overrides both.
 
     Resumable per-group driver: rows are flushed to ``votes.partial.csv`` /
     ``consensus.partial.csv`` after EACH group so an interrupted run (timeout,
