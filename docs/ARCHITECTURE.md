@@ -378,23 +378,45 @@ BENCHMARKING.md "Stitch-level quality gate". The scoring core is shared between
 `matcher.agent_labeling.stitch_eval` and the matcher-free `mbench.eval.stitch_metrics`,
 parity-guarded by `tests/unit/test_mbench_set_metric_parity.py`.
 
-### Panel voter transports and the `meta-candidate` / `quad-candidate` (Muse) prototypes
+### Panel v5: the quad composition and the quorum consensus rule
 
 The consensus panel (`crosswalk agent stitch-run`, `agent_labeling/stitch_runner.py`)
-runs each voter through its own CLI. Three seats drive the **opencode** transport,
-each under its OWN provider name: the blessed v4 third voter Kimi (provider name
+runs each voter through its own CLI. The blessed **v5 default** (2026-07-10) is the
+four-seat quad: `claude`/claude-opus-4-8 (medium) + `codex`/gpt-5.6-terra (medium)
++ `kimi`/Kimi K2.6 + `muse`/Muse Spark 1.1. Three seats drive the **opencode**
+transport, each under its OWN provider name: Kimi (provider name
 `kimi`, `openrouter/moonshotai/kimi-k2.6`, via opencode's native OpenRouter auth
 stored by `opencode auth`); the residual v3-era Qwen voter (provider name
 `opencode`, `openrouter/qwen/qwen3-vl-235b-a22b-instruct`; only in the
-`v3-candidate`/`no-agy` panels); and the opt-in Muse voter (provider name `muse`,
+`v3-candidate`/`no-agy` panels); and the Muse voter (provider name `muse`,
 `meta/muse-spark-1.1`, Meta's OpenAI-compatible developer API).
+
+**Quorum consensus rule (v5).** `compute_consensus` auto-accepts when **all
+valid (non-abstaining) votes agree and at least 3 are valid**
+(`agree == n_valid >= 3`), replacing the pre-v5 `agree == len(votes)` rule under
+which a single abstention (e.g. a voter timeout) blocked an otherwise-clean
+3-of-4 agreement. The two accept tiers stay distinguishable end-to-end: a full
+4/4 accept is `unanimous` (labeler `panel_unanimous_v5`), a 3-of-4 accept over
+an abstention is `quorum` (route reason `quorum`; labeler `panel_quorum_v5`;
+reject-all analog `quorum_none` -> `panel_quorum_none_v5`; a recomposed
+decomposed group with ANY quorum-accepted sub-verdict mints
+`panel_quorum_decomposed_v5`). Quorum forgives **abstention only, never
+disagreement** — a dissenting valid vote still routes to human review — and the
+size / class-consistency / low-confidence gates all still apply on top,
+evaluated over the valid votes. For any 3-voter panel (v2/v3/v4 re-runs) the
+rule is routing-identical to the old one (all-valid agreement at quorum IS full
+unanimity with 3 voters; an abstention drops below quorum), proven by an
+exhaustive old-vs-new sweep in `tests/unit/test_stitch_agent.py`. The pre-v5
+`abstention` route reason is retired from live routing (its case now
+auto-accepts as `quorum`) but kept in `panel_routing` so historical
+consensus.csv rows keep deriving and rendering faithfully.
 
 **Each opencode-transport seat carries its own provider name (`kimi`, `muse`, and
 the residual `opencode`/Qwen), not the shared transport name.** The provider string
 is a keying field in several places (vote-provenance dedupe on
 `(source_batch, group_id, provider)`; the panel monitor's per-voter stats; the
 `provider=letter` minority strings; the resume-consistency provider-set check; the
-`--*-model` CLI overrides). The `quad-candidate` panel seats **both** Kimi and Muse,
+`--*-model` CLI overrides). The v5 quad seats **both** Kimi and Muse,
 so a shared name would put two indistinguishable voters in one wave (collapsed
 provenance rows = silent vote loss, pooled monitor stats, an ambiguous `--*-model`).
 Distinct names keep every voter addressable; each invoker is resolved via
@@ -403,23 +425,19 @@ threading keys on the resolved invoker (not the name) so Muse still gets its
 tool-less `vote` agent. `--kimi-model` / `--muse-model` pin Kimi / Muse; the kept
 `--opencode-model` now targets only the residual Qwen seat.
 
-`meta-candidate` (opt-in; `--panel meta-candidate`) is the v4 default with the
-kimi/Kimi seat **swapped** for `muse`/Muse Spark 1.1. `quad-candidate` (opt-in;
-`--panel quad-candidate`) is the full v4 default **plus** `muse` — a four-seat
-calibration panel that records all four ballots per group under the current
-consensus rules for offline consensus-rule replay. Both are intentionally
-**nonstandard** to the `stitch-export` gate (`PANEL_VOTERS_V4` in
-`stitch_export.py`) — `meta-candidate` swaps the blessed pair and `quad-candidate`
-has four voters — so their labels are refused without `--allow-nonstandard-panel`
-and they never mint a blessed labeler, exactly like `v4-candidate`.
-
-`compute_consensus` is n-agnostic (auto-accept requires unanimous agreement with
-`agree == len(votes)` and `>= 3` votes), so `quad-candidate` auto-accepts on 4/4
-unanimity; a 3-valid-unanimous group with one abstention routes to human review
-with route reason `abstention` (`panel_routing.REASON_ABSTENTION`, "only reachable
-with a 4-voter panel") — an abstention blocks unanimity by design, so the panel's
-resilience is that the wave survives an abstaining/timed-out voter (the group is
-adjudicated by a human, all ballots recorded), not that 3/3 auto-accepts.
+Historical panels stay addressable for reproduction: `v4` (the former 3-seat
+default: claude + codex/gpt-5.6-terra + kimi), `v3`/`v2` (claude + codex + agy),
+`v3-candidate`, `no-agy`, `v4-candidate` (the #397 validation composition), and
+`meta-candidate` (the v4 trio with kimi **swapped** for muse — superseded by v5,
+which seats both). `quad-candidate` is now an alias of the v5 default: it was
+the calibration composition that recorded the 2026-07-10 quad wave (53 groups /
+212 ballots) whose replay motivated the quorum rule — muse posted the top exact
+accuracy (~67% vs claude 65 / codex 63 / kimi 57) with 0/53 abstains at
+~$0.03/vote, with a monitored recall-leaning A-bias that the consensus rules
+structurally contain (a dissent only blocks auto-accept; it never mints).
+Non-blessed compositions are still refused by the `stitch-export`
+`(provider, model)` gate without `--allow-nonstandard-panel` and never mint a
+blessed labeler.
 
 Setup (no machine-level config required):
 
@@ -443,7 +461,7 @@ Setup (no machine-level config required):
   transport and identical packs had 0/30 timeouts (median 19s) under `vote`. The
   `--agent` threading keys on the resolved invoker, so this is invocation plumbing
   only: the export gate keys voter identity on `(provider, model)` pairs, leaving
-  the blessed v4 composition unchanged. The residual v3-era Qwen seat passes no
+  the blessed composition unchanged. The residual v3-era Qwen seat passes no
   agent and is byte-identical to before this knob existed.
 - **Output budget**: Muse emits hidden reasoning tokens; a low output budget
   truncates its JSON mid-object (`finish_reason: "length"`, `content: null`). The
