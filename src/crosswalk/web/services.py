@@ -1207,7 +1207,11 @@ def get_unreviewed_stitch_groups(dataset_id: str, groups: list[dict]) -> list[di
     Returns:
         List of unreviewed group dicts
     """
-    from ..labeling.stitch_coverage import PRIOR_LABEL_KEY, compute_prior_coverage
+    from ..labeling.stitch_coverage import (
+        PRIOR_LABEL_KEY,
+        PriorLabelCoverage,
+        compute_prior_coverage,
+    )
     from ..labeling.stitching_store import StitchingLabelStore
 
     # Group the queue entries by owning dataset (coverage is per-partition).
@@ -1215,7 +1219,7 @@ def get_unreviewed_stitch_groups(dataset_id: str, groups: list[dict]) -> list[di
     for g in groups:
         groups_by_ds.setdefault(g.get("dataset_id") or dataset_id, []).append(g)
 
-    coverage: dict[tuple[str, str], object] = {}
+    coverage: dict[tuple[str, str], PriorLabelCoverage] = {}
     for ds, ds_groups in groups_by_ds.items():
         labels_df = StitchingLabelStore(ds).load(ds)
         for gid, cov in compute_prior_coverage(ds_groups, labels_df).items():

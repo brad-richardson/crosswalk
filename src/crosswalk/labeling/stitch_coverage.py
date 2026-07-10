@@ -45,6 +45,13 @@ A label's KEPT membership:
   exact-id-only semantics: they never drift-map (nothing to overlap on), same
   as :func:`recover_empty_reject_all`.
 
+Deliberate pair-label endpoint fiat: coverage is membership-⊆, not edge-⊆, so
+a re-grouping can introduce a NEW cross edge between two kept members and the
+group still counts as fully covered — settled without re-review. This matches
+eval semantics: a pair label is complete edge truth over its members, so such
+an edge is simply a false positive in edge-F1 if the optimizer selects it; the
+human's existing label already adjudicates it.
+
 Conservative merge rule: when SEVERAL drifted labels map onto one current
 group (an optimizer merge), the group is only excluded if a SINGLE label fully
 covers it — the union of two partial reviews never auto-settles a merged group
@@ -108,15 +115,18 @@ def _group_membership(group: dict) -> tuple[frozenset[str], frozenset[str]]:
     """A current group's membership as ``(refs, targets)`` string-id sets.
 
     Prefers the sidecar's authoritative ``ref_ids``/``target_ids`` fields,
-    falling back to the edge endpoints for minimal group dicts.
+    falling back to the edge endpoints for minimal group dicts. An EMPTY id
+    list is treated like a missing one: a malformed group dict must fall back
+    to its edges rather than yield an empty side whose vacuous ``⊆`` would
+    count as covered.
     """
     refs = group.get("ref_ids")
     targets = group.get("target_ids")
-    if refs is None or targets is None:
+    if not refs or not targets:
         edges = group.get("edges", []) or []
-        if refs is None:
+        if not refs:
             refs = [e["ref_id"] for e in edges]
-        if targets is None:
+        if not targets:
             targets = [e["target_id"] for e in edges]
     return frozenset(str(r) for r in refs), frozenset(str(t) for t in targets)
 
