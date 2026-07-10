@@ -99,7 +99,7 @@ _V3_VOTERS = [
 _V4_VOTERS = [
     ("claude", "claude-opus-4-8"),
     ("codex", "gpt-5.6-sol"),
-    ("opencode", "openrouter/moonshotai/kimi-k2.6"),
+    ("kimi", "openrouter/moonshotai/kimi-k2.6"),
 ]
 # The 2026-07-07 transport-swap composition (commit 80dbe1f): Gemini via
 # opencode instead of agy. Committed v3 labels trace to it, so era resolution
@@ -786,10 +786,11 @@ def test_vote_provenance_quad_panel_keeps_four_rows_per_group(tmp_path):
     """A 4-voter (quad-candidate) batch archives FOUR ballots per group.
 
     The provenance dedupe keys on (source_batch, group_id, provider). Kimi and
-    Muse ride the same opencode transport, so if Muse reused the "opencode"
-    provider name its ballot would collapse into Kimi's (source_batch, group_id,
-    provider) key — silent vote loss. The distinct "muse" name keeps all four
-    ballots, which is exactly what a calibration wave needs archived intact.
+    Muse ride the same opencode transport but carry distinct provider names
+    ("kimi"/"muse"); if they shared one name their ballots would collapse into a
+    single (source_batch, group_id, provider) key — silent vote loss. The
+    distinct names keep all four ballots, which is exactly what a calibration
+    wave needs archived intact.
     """
     b = tmp_path / "quad"
     make_batch(
@@ -816,7 +817,7 @@ def test_vote_provenance_quad_panel_keeps_four_rows_per_group(tmp_path):
         for p, m in (
             ("claude", "claude-opus-4-8"),
             ("codex", "gpt-5.6-sol"),
-            ("opencode", "openrouter/moonshotai/kimi-k2.6"),
+            ("kimi", "openrouter/moonshotai/kimi-k2.6"),
             ("muse", "meta/muse-spark-1.1"),
         )
     ]
@@ -830,10 +831,10 @@ def test_vote_provenance_quad_panel_keeps_four_rows_per_group(tmp_path):
     votes = list(csv.DictReader((out / "votes.csv").open()))
     g1_rows = [v for v in votes if v["group_id"] == "g1"]
     assert len(g1_rows) == 4
-    assert {v["provider"] for v in g1_rows} == {"claude", "codex", "opencode", "muse"}
+    assert {v["provider"] for v in g1_rows} == {"claude", "codex", "kimi", "muse"}
     # Kimi and Muse carry their own model strings on their own rows.
     by_prov = {v["provider"]: v["model"] for v in g1_rows}
-    assert by_prov["opencode"] == "openrouter/moonshotai/kimi-k2.6"
+    assert by_prov["kimi"] == "openrouter/moonshotai/kimi-k2.6"
     assert by_prov["muse"] == "meta/muse-spark-1.1"
 
 
@@ -972,7 +973,7 @@ def test_vote_provenance_rearchive_replaces_batch_wholesale(tmp_path):
     _write_votes(other, _voter_rows("g9"))
     write_vote_provenance([wave, other], DATASET, votes_dir=votes_dir)
 
-    # Re-run wave1 with the v4 panel (agy replaced by opencode) and re-archive.
+    # Re-run wave1 with the v4 panel (agy replaced by kimi) and re-archive.
     v4_rows = [
         dict(r, provider=p, model=m)
         for r, (p, m) in zip(_voter_rows("g1"), _V4_VOTERS, strict=True)
@@ -1079,14 +1080,15 @@ def test_nonstandard_panel_batches_flags_swapped_voter(tmp_path):
 
 
 def test_nonstandard_panel_batches_flags_wrong_model_same_provider(tmp_path):
-    """The whole point of (provider, model) keying: same provider NAMES as the
-    blessed v4 panel, but opencode driving Gemini instead of Kimi -> flagged.
-    (Under the old provider-name-only gate this batch was indistinguishable
-    from a blessed one.)"""
+    """The whole point of (provider, model) keying: an opencode-transport voter
+    driving Gemini (the historical transport-swap model) is not the blessed v4
+    panel (which seats kimi/Kimi K2.6) -> flagged. The residual "opencode" seat
+    name is shared with the v3-era Qwen voter, so name alone cannot bless it;
+    the model pins it."""
     from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
 
     b = tmp_path / "batch_opencode_gemini"
-    voters = [v for v in _V4_VOTERS if v[0] != "opencode"] + [
+    voters = [v for v in _V4_VOTERS if v[0] != "kimi"] + [
         ("opencode", "openrouter/google/gemini-3.5-flash")
     ]
     _write_votes_csv(b, voters)
@@ -1100,7 +1102,7 @@ def test_nonstandard_panel_batches_flags_mixed_era_composition(tmp_path):
 
     b = tmp_path / "batch_v4_candidate"
     voters = [v for v in _V3_VOTERS if v[0] != "agy"] + [
-        ("opencode", "openrouter/moonshotai/kimi-k2.6")
+        ("kimi", "openrouter/moonshotai/kimi-k2.6")
     ]
     _write_votes_csv(b, voters)
     assert set(nonstandard_panel_batches([b])) == {"batch_v4_candidate"}
@@ -1112,11 +1114,11 @@ def test_nonstandard_panel_batches_flags_blank_model(tmp_path):
     from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
 
     b = tmp_path / "batch_blank_model"
-    voters = [v for v in _V4_VOTERS if v[0] != "opencode"] + [("opencode", "")]
+    voters = [v for v in _V4_VOTERS if v[0] != "kimi"] + [("kimi", "")]
     _write_votes_csv(b, voters)
     offending = nonstandard_panel_batches([b])
     assert set(offending) == {"batch_blank_model"}
-    assert ("opencode", "") in offending["batch_blank_model"]
+    assert ("kimi", "") in offending["batch_blank_model"]
 
 
 def test_nonstandard_panel_batches_flags_missing_model_column(tmp_path):

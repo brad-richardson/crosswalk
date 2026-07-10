@@ -358,7 +358,7 @@ def test_consensus_quad_4of4_unanimous_auto_accept():
     votes = [
         _vote("claude", "A", es),
         _vote("codex", "A", es),
-        _vote("opencode", "A", es),
+        _vote("kimi", "A", es),
         _vote("muse", "A", es),
     ]
     c = sr.compute_consensus(votes)
@@ -384,7 +384,7 @@ def test_consensus_quad_3valid_1abstain_blocks_unanimity():
     votes = [
         _vote("claude", "A", es),
         _vote("codex", "A", es),
-        _vote("opencode", "A", es),
+        _vote("kimi", "A", es),
         _vote("muse", "ABSTAIN"),
     ]
     c = sr.compute_consensus(votes)
@@ -401,7 +401,7 @@ def test_consensus_quad_3_1_live_split_majority_human_review():
     votes = [
         _vote("claude", "A", es),
         _vote("codex", "A", es),
-        _vote("opencode", "A", es),
+        _vote("kimi", "A", es),
         _vote("muse", "B"),
     ]
     c = sr.compute_consensus(votes)
@@ -418,7 +418,7 @@ def test_consensus_quad_2valid_2abstain_below_quorum():
     votes = [
         _vote("claude", "A", es),
         _vote("codex", "A", es),
-        _vote("opencode", "ABSTAIN"),
+        _vote("kimi", "ABSTAIN"),
         _vote("muse", "ABSTAIN"),
     ]
     c = sr.compute_consensus(votes)
@@ -434,7 +434,7 @@ def test_consensus_quad_low_conf_gate_min_over_4_valid():
     votes = [
         _vote_c("claude", "A", 0.9, es),
         _vote_c("codex", "A", 0.9, es),
-        _vote_c("opencode", "A", 0.9, es),
+        _vote_c("kimi", "A", 0.9, es),
         _vote_c("muse", "A", 0.3, es),
     ]
     c = sr.compute_consensus(votes, min_voter_confidence=0.5)
@@ -442,7 +442,7 @@ def test_consensus_quad_low_conf_gate_min_over_4_valid():
     assert c.routing == "human_review"
     assert c.route_reason == "low_confidence"
     # All 4 at/above the floor -> auto-accepts (the gate is a strict <).
-    votes_ok = [_vote_c(p, "A", 0.9, es) for p in ("claude", "codex", "opencode")]
+    votes_ok = [_vote_c(p, "A", 0.9, es) for p in ("claude", "codex", "kimi")]
     votes_ok.append(_vote_c("muse", "A", 0.5, es))
     c2 = sr.compute_consensus(votes_ok, min_voter_confidence=0.5)
     assert c2.routing == "auto_accept"
@@ -1928,8 +1928,8 @@ def test_parse_vote_ignores_pack_feedback_key():
 
 def test_default_panel_is_v4():
     """The blessed v4 panel IS the default: claude + codex/gpt-5.6-sol +
-    opencode/Kimi K2.6 (the 2026-07-09 bless; agy is out of the default)."""
-    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "opencode"]
+    kimi/Kimi K2.6 (the 2026-07-09 bless; agy is out of the default)."""
+    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "kimi"]
     claude, codex, kimi = sr.DEFAULT_PANEL
     assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
     assert codex.model == "gpt-5.6-sol" and codex.effort == "medium"
@@ -1987,14 +1987,14 @@ def test_v4_candidate_panel_is_the_397_validation_composition():
     nonstandard to the stitch-export (provider, model) gate; kept only so the
     validation waves can be reproduced."""
     v4c = sr.get_panel("v4-candidate")
-    assert [p.name for p in v4c] == ["claude", "codex", "opencode"]
+    assert [p.name for p in v4c] == ["claude", "codex", "kimi"]
     assert v4c[1].model == "gpt-5.5" and v4c[1].effort == "low"
     assert v4c[2].model == "openrouter/moonshotai/kimi-k2.6"
     assert v4c != sr.DEFAULT_PANEL
 
 
 def test_meta_candidate_panel_composition():
-    """meta-candidate swaps the v4 default's opencode/Kimi third voter for the
+    """meta-candidate swaps the v4 default's kimi/Kimi third voter for the
     'muse' voter — Muse Spark 1.1 on Meta's API (opt-in Brad-approved prototype).
 
     Like v4-candidate w.r.t. the export gate: a 3-voter REPLACEMENT whose
@@ -2002,8 +2002,9 @@ def test_meta_candidate_panel_composition():
     is not the blessed Kimi pair), so its labels are refused by stitch-export
     without --allow-nonstandard-panel and it never mints a blessed labeler. It
     carries v4 lineage (claude-opus-4-8 + codex/gpt-5.6-sol, both medium) and must
-    NOT touch DEFAULT_PANEL. Muse's provider NAME is the distinct "muse" (not
-    "opencode") so it stays individually addressable at every provider-keyed site.
+    NOT touch DEFAULT_PANEL. Muse's provider NAME is the distinct "muse" (not the
+    transport name "opencode", nor the Kimi seat's "kimi") so it stays individually
+    addressable at every provider-keyed site.
     """
     meta = sr.get_panel("meta-candidate")
     assert [p.name for p in meta] == ["claude", "codex", "muse"]
@@ -2017,7 +2018,7 @@ def test_meta_candidate_panel_composition():
     assert muse.model == "meta/muse-spark-1.1"
     assert muse.timeout == 480  # reasoning model runs long on large packs
     assert muse.opencode_agent == "vote"  # tool-less agent forces a pure-text vote
-    # NOT the blessed default; the default stays claude+codex+opencode/Kimi, and
+    # NOT the blessed default; the default stays claude+codex+kimi/Kimi, and
     # meta-candidate's third-voter (provider, model) differs -> nonstandard.
     assert meta != sr.DEFAULT_PANEL
     assert sr.DEFAULT_PANEL[2].model == "openrouter/moonshotai/kimi-k2.6"
@@ -2030,7 +2031,7 @@ def test_quad_candidate_panel_composition():
     """quad-candidate is the FOUR-SEAT calibration panel: the full v4 default
     PLUS the distinctly-named Muse voter.
 
-    Seats claude + codex/gpt-5.6-sol + opencode/Kimi K2.6 + muse/Muse Spark 1.1.
+    Seats claude + codex/gpt-5.6-sol + kimi/Kimi K2.6 + muse/Muse Spark 1.1.
     Kimi and Muse ride the same opencode transport but carry DISTINCT provider
     names so both stay individually addressable at every provider-keyed site. It
     is intentionally NONSTANDARD to the stitch-export (provider, model) gate (four
@@ -2039,7 +2040,7 @@ def test_quad_candidate_panel_composition():
     DEFAULT_PANEL (still the 3-seat v4 default).
     """
     quad = sr.get_panel("quad-candidate")
-    assert [p.name for p in quad] == ["claude", "codex", "opencode", "muse"]
+    assert [p.name for p in quad] == ["claude", "codex", "kimi", "muse"]
     claude, codex, kimi, muse = quad
     assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
     assert codex.model == "gpt-5.6-sol" and codex.effort == "medium"
@@ -2051,10 +2052,10 @@ def test_quad_candidate_panel_composition():
     assert len({p.name for p in quad}) == 4
     # The full v4 default is a prefix of quad (quad = default + muse), and adding
     # a fourth voter must NOT mutate DEFAULT_PANEL.
-    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "opencode"]
+    assert [p.name for p in sr.DEFAULT_PANEL] == ["claude", "codex", "kimi"]
     assert quad != sr.DEFAULT_PANEL
-    # Both opencode-transport voters resolve to invoke_opencode.
-    assert sr._INVOKERS["opencode"] is sr.invoke_opencode
+    # Both opencode-transport voters (kimi + muse) resolve to invoke_opencode.
+    assert sr._INVOKERS["kimi"] is sr.invoke_opencode
     assert sr._INVOKERS["muse"] is sr.invoke_opencode
 
 
@@ -2184,8 +2185,8 @@ def test_meta_candidate_cli_preserves_agent_and_muse_model_override(monkeypatch,
     assert p[2].model == "meta/muse-spark-1.2"
     assert p[2].opencode_agent == "vote"
 
-    # --opencode-model is now a NO-OP on meta-candidate (no "opencode" seat): the
-    # override is unambiguously the Kimi seat, which meta-candidate does not have.
+    # --opencode-model targets only the residual "opencode"/Qwen seat (v3-era),
+    # which meta-candidate does not have -> a NO-OP here (Muse untouched).
     r = runner.invoke(
         app,
         [
@@ -2205,9 +2206,10 @@ def test_meta_candidate_cli_preserves_agent_and_muse_model_override(monkeypatch,
 
 
 def test_quad_candidate_cli_model_overrides_target_distinct_seats(monkeypatch, tmp_path):
-    """On the 4-seat quad panel, --opencode-model hits ONLY the Kimi seat and
-    --muse-model hits ONLY the Muse seat — the whole reason Muse got a distinct
-    provider name. A single --opencode-model must not ambiguously rewrite both.
+    """On the 4-seat quad panel, --kimi-model hits ONLY the Kimi seat and
+    --muse-model hits ONLY the Muse seat — the whole reason Kimi and Muse carry
+    distinct provider names ("kimi"/"muse") on the shared opencode transport. A
+    single override must not ambiguously rewrite both.
     """
     from typer.testing import CliRunner
 
@@ -2234,7 +2236,7 @@ def test_quad_candidate_cli_model_overrides_target_distinct_seats(monkeypatch, t
             str(batch),
             "--panel",
             "quad-candidate",
-            "--opencode-model",
+            "--kimi-model",
             "openrouter/moonshotai/kimi-k2.7",
             "--muse-model",
             "meta/muse-spark-1.2",
@@ -2242,9 +2244,9 @@ def test_quad_candidate_cli_model_overrides_target_distinct_seats(monkeypatch, t
     )
     assert r.exit_code == 0, r.output
     p = captured["panel"]
-    assert [x.name for x in p] == ["claude", "codex", "opencode", "muse"]
-    # --opencode-model rewrote ONLY the Kimi seat; Muse kept its own model.
-    assert p[2].name == "opencode" and p[2].model == "openrouter/moonshotai/kimi-k2.7"
+    assert [x.name for x in p] == ["claude", "codex", "kimi", "muse"]
+    # --kimi-model rewrote ONLY the Kimi seat; Muse kept its own model.
+    assert p[2].name == "kimi" and p[2].model == "openrouter/moonshotai/kimi-k2.7"
     # --muse-model rewrote ONLY the Muse seat; its tool-less vote agent survives.
     assert p[3].name == "muse" and p[3].model == "meta/muse-spark-1.2"
     assert p[3].opencode_agent == "vote"
@@ -2252,7 +2254,7 @@ def test_quad_candidate_cli_model_overrides_target_distinct_seats(monkeypatch, t
 
 def test_resolve_timeout_precedence():
     """Explicit caller/CLI timeout > per-spec timeout > global default."""
-    kimi = sr.ProviderSpec(name="opencode", model="m", timeout=480)
+    kimi = sr.ProviderSpec(name="kimi", model="m", timeout=480)
     plain = sr.ProviderSpec(name="claude", model="m")
     # Per-spec beats the global default when nothing explicit is passed.
     assert sr.resolve_timeout(kimi, None) == 480

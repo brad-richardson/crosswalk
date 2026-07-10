@@ -1,6 +1,6 @@
 """Consensus-panel runner for agent stitching-group labeling.
 
-Runs a heterogeneous 3-provider panel (claude + codex + opencode/Kimi since the
+Runs a heterogeneous 3-provider panel (claude + codex + kimi/Kimi K2.6 since the
 2026-07-09 v4 bless; previously claude + codex + agy) on each group's
 evidence pack, in parallel. Each provider returns a JSON option pick; votes are
 validated (choice must be a real option letter or NONE), retried once on
@@ -127,7 +127,18 @@ OPENCODE_QWEN = ProviderSpec(name="opencode", model="openrouter/qwen/qwen3-vl-23
 # large packs (observed 11-386s/vote; 3/6 smoke votes exceeded the 240s
 # default), so the spec carries its own 480s timeout — an explicit --timeout
 # still overrides it (see resolve_timeout).
-OPENCODE_KIMI = ProviderSpec(name="opencode", model="openrouter/moonshotai/kimi-k2.6", timeout=480)
+#
+# Provider NAME is ``"kimi"``, NOT the transport name ``"opencode"`` — a KEYING
+# field (see the MUSE note below for the full list of provider-keyed sites). The
+# ``quad-candidate`` panel seats BOTH this voter and Muse on the SAME opencode
+# transport, so a transport-named ``"opencode"`` seat would be ambiguous when
+# Muse shares the wave; the distinct ``"kimi"`` name keeps it individually
+# addressable (provenance dedupe, monitor stats, ``--kimi-model``). Its invoker
+# is resolved via ``_INVOKERS["kimi"] -> invoke_opencode`` (same transport). No
+# committed votes reference the Kimi model — every on-disk ``provider="opencode"``
+# row is the historical Gemini/Qwen transport-swap era — so the ``opencode`` ->
+# ``kimi`` rename rewrites nothing on disk.
+OPENCODE_KIMI = ProviderSpec(name="kimi", model="openrouter/moonshotai/kimi-k2.6", timeout=480)
 
 # Candidate REPLACEMENT third voter (default OFF): opencode driving Meta's
 # "Muse Spark 1.1" via Meta's OpenAI-compatible developer API (api.meta.ai/v1),
@@ -146,28 +157,29 @@ OPENCODE_KIMI = ProviderSpec(name="opencode", model="openrouter/moonshotai/kimi-
 # labels from this composition are NONSTANDARD to the stitch-export
 # (provider, model) gate (like v4-candidate) and never mint a blessed labeler.
 #
-# Provider NAME is deliberately ``"muse"``, NOT ``"opencode"`` — even though Muse
-# rides the SAME opencode transport as Kimi. The provider string is a KEYING field
-# in several places: vote-provenance dedupe (``write_vote_provenance`` keys rows on
-# (source_batch, group_id, provider)); the panel monitor's per-voter stats
-# (``compute_voter_stats`` groups by provider); the ``provider=letter`` minority /
-# route_reason strings; the resume-consistency provider-set check; and the
-# ``--*-model`` CLI overrides. The ``quad-candidate`` panel seats BOTH Kimi and
-# Muse, so a shared ``"opencode"`` name would put two indistinguishable voters in
-# one wave — their provenance rows would collapse to one (silent vote loss), their
-# monitor stats would pool, and ``--opencode-model`` would ambiguously hit both. A
-# distinct name keeps every voter individually addressable. Its invoker is resolved
-# via ``_INVOKERS["muse"] -> invoke_opencode`` (same transport), and the ``--agent``
-# threading keys on the RESOLVED INVOKER (not the name), so Muse still gets its
-# tool-less ``vote`` agent. No committed votes carry the old
-# ``("opencode", "meta/muse-spark-1.1")`` pair (smoke votes were never committed),
-# so the rename rewrites nothing on disk.
+# Provider NAME is deliberately ``"muse"`` — distinct from the Kimi seat's
+# ``"kimi"`` — even though Muse rides the SAME opencode transport as Kimi. The
+# provider string is a KEYING field in several places: vote-provenance dedupe
+# (``write_vote_provenance`` keys rows on (source_batch, group_id, provider)); the
+# panel monitor's per-voter stats (``compute_voter_stats`` groups by provider); the
+# ``provider=letter`` minority / route_reason strings; the resume-consistency
+# provider-set check; and the ``--*-model`` CLI overrides. The ``quad-candidate``
+# panel seats BOTH Kimi and Muse on that shared transport, so giving them the same
+# name (e.g. both ``"opencode"``) would put two indistinguishable voters in one
+# wave — their provenance rows would collapse to one (silent vote loss), their
+# monitor stats would pool, and a single ``--*-model`` override would ambiguously
+# hit both. Distinct ``"kimi"``/``"muse"`` names keep every voter individually
+# addressable. Its invoker is resolved via ``_INVOKERS["muse"] -> invoke_opencode``
+# (same transport), and the ``--agent`` threading keys on the RESOLVED INVOKER (not
+# the name), so Muse still gets its tool-less ``vote`` agent. No committed votes
+# carry the old ``("opencode", "meta/muse-spark-1.1")`` pair (smoke votes were never
+# committed), so the rename rewrites nothing on disk.
 MUSE = ProviderSpec(name="muse", model="meta/muse-spark-1.1", timeout=480, opencode_agent="vote")
 
 # Panel v4 — the production DEFAULT since the 2026-07-09 bless (#397 validated
 # the swap; this composition mints the ``*_v4`` export labelers):
 #
-#   * agy/Gemini Flash is REPLACED by opencode/Kimi K2.6. agy position-anchored
+#   * agy/Gemini Flash is REPLACED by kimi/Kimi K2.6. agy position-anchored
 #     (11/12 votes "A" at constant 0.95 confidence in the w0707 waves) and only
 #     reads pack images when it chooses to; Kimi agreed 6/6 with settled panel
 #     verdicts across four different letters in the #397 smoke test, with
@@ -208,18 +220,18 @@ PANELS: dict[str, list[ProviderSpec]] = {
     # stitch-export (provider, model) gate; kept only to reproduce the
     # validation waves.
     "v4-candidate": [*(p for p in PANEL_V3 if p.name != "agy"), OPENCODE_KIMI],
-    # Third-voter REPLACEMENT candidate on the v4 default: opencode/Kimi ->
-    # opencode/Muse Spark 1.1 (Meta API). Same shape as v4-candidate w.r.t. the
+    # Third-voter REPLACEMENT candidate on the v4 default: kimi/Kimi ->
+    # muse/Muse Spark 1.1 (Meta API). Same shape as v4-candidate w.r.t. the
     # export gate: intentionally NONSTANDARD to the (provider, model) voter set
-    # (opencode's model is meta/muse-spark-1.1, not the blessed
+    # (the muse voter is meta/muse-spark-1.1, not the blessed
     # openrouter/moonshotai/kimi-k2.6), so its labels are refused by
     # stitch-export without --allow-nonstandard-panel and it never mints a
     # blessed labeler. Opt-in Brad-approved prototyping on the Meta developer
     # API; run its waves with the spec's 480s timeout (Muse is a reasoning
-    # model). Filter drops the single opencode voter from the v4 default (Kimi).
-    "meta-candidate": [*(p for p in DEFAULT_PANEL if p.name != "opencode"), MUSE],
+    # model). Filter drops the v4 default's Kimi seat (now provider-named "kimi").
+    "meta-candidate": [*(p for p in DEFAULT_PANEL if p.name != "kimi"), MUSE],
     # Opt-in FOUR-SEAT panel: the full v4 default (claude + codex/gpt-5.6-sol +
-    # opencode/Kimi K2.6) PLUS Muse Spark 1.1 as a distinct fourth voter. Exists
+    # kimi/Kimi K2.6) PLUS Muse Spark 1.1 as a distinct fourth voter. Exists
     # to run a CALIBRATION wave with all four voters RECORDED under the CURRENT
     # consensus rules, so the ballots can be replayed offline against candidate
     # v5 consensus rules before a bless decision. INTENTIONALLY NONSTANDARD to
@@ -227,7 +239,7 @@ PANELS: dict[str, list[ProviderSpec]] = {
     # meta/muse-spark-1.1) — like meta-candidate/v4-candidate, its labels are
     # refused without --allow-nonstandard-panel and it never mints a blessed
     # labeler. Kimi and Muse ride the same opencode transport but carry DISTINCT
-    # provider names ("opencode" vs "muse") so every keying site (provenance
+    # provider names ("kimi" vs "muse") so every keying site (provenance
     # dedupe, monitor stats, minority strings, resume check, --*-model overrides)
     # addresses them separately. compute_consensus is n-agnostic (unanimity among
     # >=3 valid votes), so 4/4 unanimity auto-accepts; run its waves with the
@@ -812,13 +824,17 @@ _INVOKERS = {
     "claude": invoke_claude,
     "codex": invoke_codex,
     "agy": invoke_agy,
-    "opencode": invoke_opencode,
-    # Muse rides the SAME transport as Kimi (opencode) but carries a DISTINCT
-    # provider name so it stays individually addressable at every provider-keyed
-    # site (provenance dedupe, monitor stats, CLI --*-model overrides). The
-    # ``--agent`` threading in ``_attempt_provider`` keys on this resolved invoker
+    # Three seats resolve to the opencode transport. "opencode" is the residual
+    # v3-era seat (the Qwen voter in v3-candidate/no-agy, which historical batches
+    # still reproduce). "kimi" and "muse" ride the SAME transport but carry
+    # DISTINCT provider names so every provider-keyed site (provenance dedupe,
+    # monitor stats, minority strings, resume check, CLI --*-model overrides)
+    # addresses them separately — the quad-candidate panel seats both. The
+    # ``--agent`` threading in ``_attempt_provider`` keys on the RESOLVED invoker
     # (``invoker is invoke_opencode``), not the name, so Muse's tool-less ``vote``
-    # agent is still forwarded.
+    # agent is still forwarded under its distinct name.
+    "opencode": invoke_opencode,
+    "kimi": invoke_opencode,
     "muse": invoke_opencode,
 }
 
@@ -903,7 +919,7 @@ def run_provider_on_group(
     """Run one provider on one group; abstain on bad output, hard-fail if down.
 
     ``timeout=None`` (the default) resolves per provider: the spec's own
-    ``timeout`` if set (e.g. 480s for opencode/Kimi), else
+    ``timeout`` if set (e.g. 480s for the kimi/Kimi voter), else
     :data:`DEFAULT_VOTE_TIMEOUT_S`. An explicit value overrides both — see
     :func:`resolve_timeout`.
 
@@ -1003,12 +1019,13 @@ def _attempt_provider(
     backoff = 5.0
     # invoke_opencode is the only invoker that accepts an ``agent`` (Muse's
     # tool-less ``vote`` agent); pass it only when set so the other invokers keep
-    # their 6-arg signature and the Kimi/opencode call stays byte-identical. Key
-    # on the RESOLVED INVOKER, not ``provider.name``: Muse dispatches through
-    # invoke_opencode under the distinct name "muse", so a name == "opencode"
-    # check would silently strip its ``vote`` agent and burn the turn on
-    # auto-rejected tool calls. Any spec whose invoker is invoke_opencode and that
-    # sets ``opencode_agent`` gets it threaded through.
+    # their 6-arg signature and the Kimi call stays byte-identical. Key on the
+    # RESOLVED INVOKER, not ``provider.name``: Kimi ("kimi") and Muse ("muse")
+    # both dispatch through invoke_opencode under distinct names, so a name-based
+    # check (e.g. ``name == "opencode"``) would miss them and silently strip
+    # Muse's ``vote`` agent, burning the turn on auto-rejected tool calls. Any
+    # spec whose invoker is invoke_opencode and that sets ``opencode_agent`` gets
+    # it threaded through.
     extra_kwargs = (
         {"agent": provider.opencode_agent}
         if invoker is invoke_opencode and provider.opencode_agent

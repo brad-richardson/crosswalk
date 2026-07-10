@@ -381,26 +381,30 @@ parity-guarded by `tests/unit/test_mbench_set_metric_parity.py`.
 ### Panel voter transports and the `meta-candidate` / `quad-candidate` (Muse) prototypes
 
 The consensus panel (`crosswalk agent stitch-run`, `agent_labeling/stitch_runner.py`)
-runs each voter through its own CLI. Two voters drive the **opencode** transport:
-the blessed v4 third voter Kimi (provider name `opencode`,
-`openrouter/moonshotai/kimi-k2.6`, via opencode's native OpenRouter auth stored by
-`opencode auth`) and the opt-in Muse voter (`meta/muse-spark-1.1`, Meta's
-OpenAI-compatible developer API).
+runs each voter through its own CLI. Three seats drive the **opencode** transport,
+each under its OWN provider name: the blessed v4 third voter Kimi (provider name
+`kimi`, `openrouter/moonshotai/kimi-k2.6`, via opencode's native OpenRouter auth
+stored by `opencode auth`); the residual v3-era Qwen voter (provider name
+`opencode`, `openrouter/qwen/qwen3-vl-235b-a22b-instruct`; only in the
+`v3-candidate`/`no-agy` panels); and the opt-in Muse voter (provider name `muse`,
+`meta/muse-spark-1.1`, Meta's OpenAI-compatible developer API).
 
-**Muse's provider name is the distinct `muse`, not `opencode`.** It rides the same
-opencode transport, but the provider string is a keying field in several places
-(vote-provenance dedupe on `(source_batch, group_id, provider)`; the panel
-monitor's per-voter stats; the `provider=letter` minority strings; the
-resume-consistency provider-set check; the `--*-model` CLI overrides). The
-`quad-candidate` panel seats **both** Kimi and Muse, so a shared `opencode` name
-would put two indistinguishable voters in one wave (collapsed provenance rows =
-silent vote loss, pooled monitor stats, an ambiguous `--opencode-model`). The
-distinct name keeps every voter addressable; the invoker is resolved via
-`_INVOKERS["muse"] -> invoke_opencode`, and the `--agent` threading keys on the
-resolved invoker (not the name) so Muse still gets its tool-less `vote` agent.
+**Each opencode-transport seat carries its own provider name (`kimi`, `muse`, and
+the residual `opencode`/Qwen), not the shared transport name.** The provider string
+is a keying field in several places (vote-provenance dedupe on
+`(source_batch, group_id, provider)`; the panel monitor's per-voter stats; the
+`provider=letter` minority strings; the resume-consistency provider-set check; the
+`--*-model` CLI overrides). The `quad-candidate` panel seats **both** Kimi and Muse,
+so a shared name would put two indistinguishable voters in one wave (collapsed
+provenance rows = silent vote loss, pooled monitor stats, an ambiguous `--*-model`).
+Distinct names keep every voter addressable; each invoker is resolved via
+`_INVOKERS["kimi" | "muse" | "opencode"] -> invoke_opencode`, and the `--agent`
+threading keys on the resolved invoker (not the name) so Muse still gets its
+tool-less `vote` agent. `--kimi-model` / `--muse-model` pin Kimi / Muse; the kept
+`--opencode-model` now targets only the residual Qwen seat.
 
-`meta-candidate` (opt-in; `--panel meta-candidate`) is the v4 default with
-opencode/Kimi **swapped** for `muse`/Muse Spark 1.1. `quad-candidate` (opt-in;
+`meta-candidate` (opt-in; `--panel meta-candidate`) is the v4 default with the
+kimi/Kimi seat **swapped** for `muse`/Muse Spark 1.1. `quad-candidate` (opt-in;
 `--panel quad-candidate`) is the full v4 default **plus** `muse` — a four-seat
 calibration panel that records all four ballots per group under the current
 consensus rules for offline consensus-rule replay. Both are intentionally

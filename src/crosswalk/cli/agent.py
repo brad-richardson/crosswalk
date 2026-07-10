@@ -1214,8 +1214,8 @@ def run_stitch_panel(
         None,
         "--timeout",
         help="Per-provider timeout (s). Default: each provider spec's own timeout "
-        "(480 for opencode/Kimi K2.6, whose thinking runs long on large packs), "
-        "else 240. An explicit value overrides both.",
+        "(480 for the kimi/Kimi K2.6 voter, whose thinking runs long on large "
+        "packs), else 240. An explicit value overrides both.",
     ),
     invocation_budget: float = typer.Option(
         300.0,
@@ -1263,15 +1263,15 @@ def run_stitch_panel(
         "default",
         "--panel",
         help="Named panel config: 'default'/'v4' (the blessed v4 panel: claude + "
-        "codex/gpt-5.6-sol + opencode/Kimi K2.6), 'v3'/'v2' (the former "
+        "codex/gpt-5.6-sol + kimi/Kimi K2.6), 'v3'/'v2' (the former "
         "claude+codex+agy default; its exports stamp the v3 labelers), "
         "'v3-candidate' (v3 + a 4th opencode/Qwen3-VL voter), 'no-agy' (v3 with "
         "agy swapped for opencode/Qwen — quota-outage fallback), "
         "'v4-candidate' (the #397 validation composition: v3 with agy swapped "
         "for Kimi, codex still gpt-5.5), 'meta-candidate' (the v4 default with "
-        "opencode/Kimi swapped for the muse voter — Muse Spark 1.1 on Meta's "
-        "API), or 'quad-candidate' (the FOUR-SEAT calibration panel: the full v4 "
-        "default PLUS the muse voter — claude + codex + opencode/Kimi + "
+        "the kimi/Kimi voter swapped for the muse voter — Muse Spark 1.1 on "
+        "Meta's API), or 'quad-candidate' (the FOUR-SEAT calibration panel: the "
+        "full v4 default PLUS the muse voter — claude + codex + kimi/Kimi + "
         "muse/Muse Spark 1.1). The muse/quad panels are opt-in reasoning-model "
         "prototypes; use --timeout 480. Non-blessed compositions are refused by "
         "stitch-export without --allow-nonstandard-panel.",
@@ -1279,20 +1279,32 @@ def run_stitch_panel(
     opencode_model: str = typer.Option(
         None,
         "--opencode-model",
-        help="Override the 'opencode'-named voter's model string (default: the named "
-        "panel's spec — Kimi K2.6 for default/v4/v4-candidate/quad-candidate, "
-        "Qwen3-VL for v3-candidate/no-agy). Targets ONLY the opencode seat — the "
-        "Muse voter has its own 'muse' provider name, so use --muse-model for it; "
-        "on meta-candidate (no opencode seat) this override is a no-op.",
+        help="Override the 'opencode'-named voter's model string. Post-rename this "
+        "seat is ONLY the residual v3-era Qwen3-VL voter (in v3-candidate and "
+        "no-agy; default: the named panel's spec — "
+        "openrouter/qwen/qwen3-vl-235b-a22b-instruct). NO-OP on "
+        "default/v4/v4-candidate/quad-candidate/meta-candidate, which have no "
+        "'opencode' seat — the Kimi seat is now named 'kimi' (use --kimi-model) "
+        "and Muse is 'muse' (use --muse-model).",
+    ),
+    kimi_model: str = typer.Option(
+        None,
+        "--kimi-model",
+        help="Override the 'kimi' voter's model string (default: the named panel's "
+        "spec — openrouter/moonshotai/kimi-k2.6 on "
+        "default/v4/v4-candidate/quad-candidate). The Kimi seat carries its own "
+        "'kimi' provider name (distinct from the opencode-transport 'opencode'/Qwen "
+        "seat and from 'muse'), so this targets ONLY Kimi; a no-op on panels "
+        "without a Kimi seat (v3/v2/v3-candidate/no-agy/meta-candidate).",
     ),
     muse_model: str = typer.Option(
         None,
         "--muse-model",
         help="Override the 'muse' voter's model string (default: the named panel's "
         "spec — meta/muse-spark-1.1 on meta-candidate/quad-candidate). Distinct "
-        "from --opencode-model: Muse rides the opencode transport but carries a "
-        "separate provider name so both can be seated (quad-candidate) and pinned "
-        "independently.",
+        "from --kimi-model: Muse and Kimi both ride the opencode transport but "
+        "carry separate provider names ('muse'/'kimi') so both can be seated "
+        "(quad-candidate) and pinned independently.",
     ),
     resume: bool = typer.Option(
         False,
@@ -1309,7 +1321,7 @@ def run_stitch_panel(
         "default production prompt is untouched.",
     ),
 ):
-    """Run the consensus panel (default v4: claude + codex + opencode/Kimi) on a batch.
+    """Run the consensus panel (default v4: claude + codex + kimi/Kimi) on a batch.
 
     Writes votes.csv (every raw vote — audit data) and consensus.csv (per-group
     routing) into the batch dir. Writes NOTHING into labels/.
@@ -1337,10 +1349,13 @@ def run_stitch_panel(
         "claude": {"model": claude_model, "effort": claude_effort},
         "codex": {"model": codex_model, "effort": codex_effort},
         "agy": {"model": agy_model},
-        # "opencode" is the Kimi seat; "muse" is the distinctly-named Muse voter
-        # (same transport, own name so both can be seated in quad-candidate and
-        # overridden independently). --opencode-model no longer touches Muse.
+        # Kimi and Muse ride the same opencode transport but carry DISTINCT
+        # provider names ("kimi"/"muse"), so --kimi-model and --muse-model pin
+        # them independently (both seated on quad-candidate). "opencode" is now
+        # only the residual v3-era Qwen seat (v3-candidate/no-agy), so
+        # --opencode-model is a no-op on the v4/quad/meta panels.
         "opencode": {"model": opencode_model},
+        "kimi": {"model": kimi_model},
         "muse": {"model": muse_model},
     }
 
@@ -1784,7 +1799,7 @@ def export_stitch_panel(
         help=(
             "Export even when a batch's votes.csv (provider, model) voter set "
             "matches no blessed panel composition (v4: claude+codex/gpt-5.6-sol"
-            "+opencode/Kimi; v3: claude+codex/gpt-5.5+agy). Labels are "
+            "+kimi/Kimi; v3: claude+codex/gpt-5.5+agy). Labels are "
             "still stamped with the panel_unanimous_* labelers, so only use this "
             "after an explicit provenance decision. A composition with no known "
             "era additionally needs --stamp-era to say WHICH labeler generation "
