@@ -377,3 +377,39 @@ pools and scored on membership exact-match / boundary precision / coverage — s
 BENCHMARKING.md "Stitch-level quality gate". The scoring core is shared between
 `matcher.agent_labeling.stitch_eval` and the matcher-free `mbench.eval.stitch_metrics`,
 parity-guarded by `tests/unit/test_mbench_set_metric_parity.py`.
+
+### Panel voter transports and the `meta-candidate` (Muse) prototype
+
+The consensus panel (`crosswalk agent stitch-run`, `agent_labeling/stitch_runner.py`)
+runs each voter through its own CLI. Two voters drive **opencode**: the blessed
+v4 third voter (`opencode/openrouter/moonshotai/kimi-k2.6`, via opencode's native
+OpenRouter auth stored by `opencode auth`) and the opt-in `meta-candidate` third
+voter (`opencode/meta/muse-spark-1.1`, Meta's OpenAI-compatible developer API).
+
+`meta-candidate` (opt-in only; `--panel meta-candidate`) is the v4 default with
+opencode/Kimi swapped for **Muse Spark 1.1**. Its `(provider, model)` triple is
+intentionally **nonstandard** to the `stitch-export` gate (`PANEL_VOTERS_V4` in
+`stitch_export.py`), so its labels are refused without `--allow-nonstandard-panel`
+and it never mints a blessed labeler — exactly like `v4-candidate`.
+
+Setup (no machine-level config required):
+
+- **Provider**: a project-level [`opencode.json`](../opencode.json) at the repo
+  root defines a custom `meta` provider (`@ai-sdk/openai-compatible`,
+  `baseURL: https://api.meta.ai/v1`). opencode resolves this config by walking up
+  from the working directory to the Git root, so it is picked up automatically
+  when `stitch-run` is invoked from the repo. The API key is referenced via
+  `{env:META_API_KEY}` — **never inlined**. `META_API_KEY` (in `.env`) is loaded
+  into the process environment by `crosswalk`'s `load_dotenv()` and inherited by
+  the opencode subprocess.
+- **Tool-less `vote` agent**: `opencode.json` also defines a `vote` agent with all
+  tools disabled. Muse is an agentic reasoning model — under opencode's default
+  `build` agent it burns its turn on (auto-rejected) `ls`/`cat`/`read` tool calls
+  instead of answering. `OPENCODE_MUSE` sets `opencode_agent="vote"`, threaded to
+  `invoke_opencode` as `--agent vote`; the Kimi invocation passes no agent and is
+  byte-identical to before this knob existed.
+- **Output budget**: Muse emits hidden reasoning tokens; a low output budget
+  truncates its JSON mid-object (`finish_reason: "length"`, `content: null`). The
+  `muse-spark-1.1` model entry sets a generous `limit.output` (32000), and the
+  spec carries a 480s timeout (reasoning runs long on large packs; `--timeout`
+  still overrides).

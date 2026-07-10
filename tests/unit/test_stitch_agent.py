@@ -1888,6 +1888,139 @@ def test_v4_candidate_panel_is_the_397_validation_composition():
     assert v4c != sr.DEFAULT_PANEL
 
 
+def test_meta_candidate_panel_composition():
+    """meta-candidate swaps the v4 default's opencode/Kimi third voter for
+    opencode/Muse Spark 1.1 on Meta's API (opt-in Brad-approved prototype).
+
+    Like v4-candidate w.r.t. the export gate: a 3-voter REPLACEMENT whose
+    (provider, model) triple is intentionally NONSTANDARD (opencode's model is
+    meta/muse-spark-1.1, not the blessed Kimi ref), so its labels are refused by
+    stitch-export without --allow-nonstandard-panel and it never mints a blessed
+    labeler. It carries v4 lineage (claude-opus-4-8 + codex/gpt-5.6-sol, both
+    medium) and must NOT touch DEFAULT_PANEL.
+    """
+    meta = sr.get_panel("meta-candidate")
+    assert [p.name for p in meta] == ["claude", "codex", "opencode"]
+    claude, codex, muse = meta
+    assert claude.model == "claude-opus-4-8" and claude.effort == "medium"
+    assert codex.model == "gpt-5.6-sol" and codex.effort == "medium"
+    # The Muse voter: Meta-API model ref, reasoning-model timeout, tool-less agent.
+    assert muse is sr.OPENCODE_MUSE
+    assert muse.model == "meta/muse-spark-1.1"
+    assert muse.timeout == 480  # reasoning model runs long on large packs
+    assert muse.opencode_agent == "vote"  # tool-less agent forces a pure-text vote
+    # NOT the blessed default; the default stays claude+codex+opencode/Kimi, and
+    # meta-candidate's opencode model differs -> nonstandard to the export gate.
+    assert meta != sr.DEFAULT_PANEL
+    assert sr.DEFAULT_PANEL[2].model == "openrouter/moonshotai/kimi-k2.6"
+    assert muse.model != sr.DEFAULT_PANEL[2].model
+
+
+def test_invoke_opencode_agent_flag(monkeypatch, tmp_path):
+    """The opencode invoker adds ``--agent`` only when an agent is passed.
+
+    The Kimi voter passes none, so its command stays byte-identical to before
+    this knob existed; Muse passes ``agent="vote"`` to run under the tool-less
+    agent (without which an agentic reasoning model burns its turn on
+    auto-rejected ls/cat/read tool calls instead of answering).
+    """
+    import subprocess as sp
+
+    gdir = tmp_path / "grp"
+    gdir.mkdir()
+    (gdir / "overview.png").write_bytes(b"\x89PNG")
+
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return sp.CompletedProcess(
+            cmd, 0, stdout='{"choice":"A","confidence":1,"reasoning":"x"}', stderr=""
+        )
+
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+
+    # No agent (Kimi path): no --agent token at all.
+    sr.invoke_opencode("P", gdir, [], "openrouter/moonshotai/kimi-k2.6", timeout=99)
+    assert "--agent" not in captured["cmd"]
+
+    # agent="vote" (Muse path): --agent vote is present.
+    sr.invoke_opencode("P", gdir, [], "meta/muse-spark-1.1", timeout=99, agent="vote")
+    cmd = captured["cmd"]
+    assert "--agent" in cmd and cmd[cmd.index("--agent") + 1] == "vote"
+
+
+def test_run_provider_on_group_threads_opencode_agent(monkeypatch):
+    """run_provider_on_group forwards a spec's ``opencode_agent`` to the invoker
+    as the ``agent`` kwarg (Muse), and forwards NOTHING extra when it is unset
+    (Kimi / every other voter keeps the plain 6-arg call)."""
+    seen: list[dict] = []
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort="", **kw):
+        seen.append({"model": model, "agent": kw.get("agent")})
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    monkeypatch.setitem(sr._INVOKERS, "opencode", fake_invoker)
+
+    v = sr.run_provider_on_group(sr.OPENCODE_MUSE, "g", None, "p", ["A"], {"A": []}, timeout=None)
+    assert v.choice == "A" and seen[-1]["agent"] == "vote"
+
+    # OPENCODE_KIMI has opencode_agent=None -> no agent kwarg is passed.
+    v = sr.run_provider_on_group(sr.OPENCODE_KIMI, "g", None, "p", ["A"], {"A": []}, timeout=None)
+    assert v.choice == "A" and seen[-1]["agent"] is None
+
+
+def test_meta_candidate_cli_preserves_agent_and_model_override(monkeypatch, tmp_path):
+    """The CLI's per-provider override rebuild must carry ``opencode_agent``.
+
+    ``--panel meta-candidate`` resolves to the tool-less Muse voter through the
+    CLI, and an explicit ``--opencode-model`` override changes the model WITHOUT
+    dropping the vote agent (a naive ProviderSpec rebuild would silently revert
+    Muse to the agentic ``build`` default).
+    """
+    from typer.testing import CliRunner
+
+    from crosswalk.cli import app
+
+    batch = tmp_path / "b"
+    batch.mkdir()
+    captured: dict = {}
+
+    def fake_run_batch(batch_dir, panel, **kwargs):
+        captured["panel"] = panel
+        cons = pd.DataFrame({"consensus": ["unanimous"], "routing": ["auto"]})
+        return pd.DataFrame({"x": [1]}), cons
+
+    monkeypatch.setattr(sr, "run_batch", fake_run_batch)
+    runner = CliRunner()
+
+    r = runner.invoke(app, ["agent", "stitch-run", "-b", str(batch), "--panel", "meta-candidate"])
+    assert r.exit_code == 0, r.output
+    p = captured["panel"]
+    assert [x.name for x in p] == ["claude", "codex", "opencode"]
+    assert p[2].model == "meta/muse-spark-1.1"
+    assert p[2].opencode_agent == "vote" and p[2].timeout == 480
+
+    r = runner.invoke(
+        app,
+        [
+            "agent",
+            "stitch-run",
+            "-b",
+            str(batch),
+            "--panel",
+            "meta-candidate",
+            "--opencode-model",
+            "meta/muse-spark-1.2",
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    p = captured["panel"]
+    # Model override applied; tool-less vote agent preserved.
+    assert p[2].model == "meta/muse-spark-1.2"
+    assert p[2].opencode_agent == "vote"
+
+
 def test_resolve_timeout_precedence():
     """Explicit caller/CLI timeout > per-spec timeout > global default."""
     kimi = sr.ProviderSpec(name="opencode", model="m", timeout=480)
