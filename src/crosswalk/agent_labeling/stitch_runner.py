@@ -70,6 +70,15 @@ class ProviderSpec:
     # Per-spec vote timeout (seconds). None -> DEFAULT_VOTE_TIMEOUT_S. An
     # explicitly passed caller/CLI timeout beats this (resolve_timeout).
     timeout: int | None = None
+    # opencode-only: name of an opencode agent to run under (``opencode run
+    # --agent <x>``). None -> opencode's default ``build`` agent (what Kimi
+    # uses — its invocation stays byte-identical). Muse Spark 1.1 sets this to a
+    # tool-less ``vote`` agent (defined in the repo-root ``opencode.json``):
+    # under the default ``build`` agent an agentic reasoning model burns its
+    # turn calling ls/cat/read tools (auto-rejected) instead of answering, so
+    # it must be given ZERO tools to force a pure-text vote from the attached
+    # pack. Ignored by every non-opencode invoker.
+    opencode_agent: str | None = None
 
 
 def resolve_timeout(spec: ProviderSpec, timeout: int | None) -> int:
@@ -120,6 +129,26 @@ OPENCODE_QWEN = ProviderSpec(name="opencode", model="openrouter/qwen/qwen3-vl-23
 # still overrides it (see resolve_timeout).
 OPENCODE_KIMI = ProviderSpec(name="opencode", model="openrouter/moonshotai/kimi-k2.6", timeout=480)
 
+# Candidate REPLACEMENT third voter (default OFF): opencode driving Meta's
+# "Muse Spark 1.1" via Meta's OpenAI-compatible developer API (api.meta.ai/v1),
+# wired as an opencode CUSTOM provider — see the repo-root ``opencode.json``
+# (baseURL + apiKey via ``{env:META_API_KEY}``, never inlined). A FIFTH model
+# family (Meta, vs the Anthropic/OpenAI/Google/Moonshot voices already in the
+# quorum), so its errors are decorrelated; vision is confirmed working and the
+# opencode invoker force-attaches every pack PNG, so it sees the full visual
+# evidence like Kimi. Muse is a REASONING model with hidden reasoning tokens:
+# with a low output budget its JSON answer truncates mid-object (observed
+# finish_reason "length" + null content when max_tokens starved the answer of
+# room after the reasoning trace), so ``opencode.json`` gives the model a
+# generous ``limit.output``; the spec carries the same 480s timeout as Kimi
+# (reasoning models run long on large packs). An explicit ``--timeout`` still
+# overrides it (see resolve_timeout). Brad-approved prototyping on the Meta API;
+# labels from this composition are NONSTANDARD to the stitch-export
+# (provider, model) gate (like v4-candidate) and never mint a blessed labeler.
+OPENCODE_MUSE = ProviderSpec(
+    name="opencode", model="meta/muse-spark-1.1", timeout=480, opencode_agent="vote"
+)
+
 # Panel v4 — the production DEFAULT since the 2026-07-09 bless (#397 validated
 # the swap; this composition mints the ``*_v4`` export labelers):
 #
@@ -164,6 +193,16 @@ PANELS: dict[str, list[ProviderSpec]] = {
     # stitch-export (provider, model) gate; kept only to reproduce the
     # validation waves.
     "v4-candidate": [*(p for p in PANEL_V3 if p.name != "agy"), OPENCODE_KIMI],
+    # Third-voter REPLACEMENT candidate on the v4 default: opencode/Kimi ->
+    # opencode/Muse Spark 1.1 (Meta API). Same shape as v4-candidate w.r.t. the
+    # export gate: intentionally NONSTANDARD to the (provider, model) voter set
+    # (opencode's model is meta/muse-spark-1.1, not the blessed
+    # openrouter/moonshotai/kimi-k2.6), so its labels are refused by
+    # stitch-export without --allow-nonstandard-panel and it never mints a
+    # blessed labeler. Opt-in Brad-approved prototyping on the Meta developer
+    # API; run its waves with the spec's 480s timeout (Muse is a reasoning
+    # model). Filter drops the single opencode voter from the v4 default (Kimi).
+    "meta-candidate": [*(p for p in DEFAULT_PANEL if p.name != "opencode"), OPENCODE_MUSE],
 }
 
 
@@ -696,6 +735,7 @@ def invoke_opencode(
     model: str,
     timeout: int = 240,
     effort: str = "",
+    agent: str = "",
 ) -> str:
     """Invoke the opencode CLI (OpenRouter-backed). Reads images by path via -f.
 
@@ -707,6 +747,14 @@ def invoke_opencode(
     so ``effort`` is accepted for a uniform invoker signature but unused. opencode
     prints the assistant's answer to stdout (TUI framing goes to stderr), so the
     raw stdout is returned for JSON extraction.
+
+    ``agent`` (empty by default) selects an opencode agent via ``--agent``. Left
+    empty for the Kimi voter, which runs under opencode's default ``build``
+    agent (this invocation stays byte-identical to before this knob existed).
+    Muse Spark 1.1 passes ``agent="vote"`` — a tool-less agent (defined in the
+    repo-root ``opencode.json``) that forces a pure-text answer instead of the
+    agentic ls/cat/read loop an agentic reasoning model otherwise falls into
+    under ``build``.
     """
     imgs = _image_paths(group_dir, letters)
     # Pipe the prompt via STDIN (no positional message) rather than as an argv
@@ -715,6 +763,8 @@ def invoke_opencode(
     # message from stdin when no positional message is given; -f still attaches
     # images by path.
     cmd = ["opencode", "run", "-m", model]
+    if agent:
+        cmd += ["--agent", agent]
     for img in imgs:
         cmd += ["-f", img]
     result = subprocess.run(
@@ -914,10 +964,20 @@ def _attempt_provider(
     parse_attempts = 0
     deadline = time.monotonic() + invocation_budget_s
     backoff = 5.0
+    # opencode is the only invoker that accepts an ``agent`` (Muse's tool-less
+    # ``vote`` agent); pass it only when set so the other invokers keep their
+    # 6-arg signature and the Kimi/opencode call stays byte-identical.
+    extra_kwargs = (
+        {"agent": provider.opencode_agent}
+        if provider.name == "opencode" and provider.opencode_agent
+        else {}
+    )
     while True:
         start = time.monotonic()
         try:
-            raw = invoker(prompt, group_dir, letters, provider.model, timeout, provider.effort)
+            raw = invoker(
+                prompt, group_dir, letters, provider.model, timeout, provider.effort, **extra_kwargs
+            )
         except GroupScopedProviderError as e:
             # Deterministic for this (group, provider): same prompt, same fate.
             # Abstain loudly and let the run continue. The exception's ``kind``

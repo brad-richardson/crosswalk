@@ -1,0 +1,43 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "meta": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Meta (Muse)",
+      "options": {
+        "baseURL": "https://api.meta.ai/v1",
+        "apiKey": "{env:META_API_KEY}"
+      },
+      "models": {
+        "muse-spark-1.1": {
+          "name": "Muse Spark 1.1",
+          "reasoning": true,
+          "limit": {
+            "context": 128000,
+            "output": 32000
+          }
+        }
+      }
+    }
+  },
+  "agent": {
+    "vote": {
+      "description": "Tool-less stitch-panel voter: answer ONLY from the attached evidence pack, never call tools.",
+      "mode": "primary",
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": false,
+        "read": false,
+        "glob": false,
+        "grep": false,
+        "list": false,
+        "webfetch": false,
+        "task": false,
+        "todowrite": false,
+        "todoread": false,
+        "patch": false
+      }
+    }
+  }
+}

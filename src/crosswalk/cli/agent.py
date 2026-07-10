@@ -1266,17 +1266,20 @@ def run_stitch_panel(
         "codex/gpt-5.6-sol + opencode/Kimi K2.6), 'v3'/'v2' (the former "
         "claude+codex+agy default; its exports stamp the v3 labelers), "
         "'v3-candidate' (v3 + a 4th opencode/Qwen3-VL voter), 'no-agy' (v3 with "
-        "agy swapped for opencode/Qwen — quota-outage fallback), or "
+        "agy swapped for opencode/Qwen — quota-outage fallback), "
         "'v4-candidate' (the #397 validation composition: v3 with agy swapped "
-        "for Kimi, codex still gpt-5.5). Non-blessed compositions are refused "
-        "by stitch-export without --allow-nonstandard-panel.",
+        "for Kimi, codex still gpt-5.5), or 'meta-candidate' (the v4 default "
+        "with opencode/Kimi swapped for opencode/Muse Spark 1.1 on Meta's API — "
+        "opt-in reasoning-model prototype; use --timeout 480). Non-blessed "
+        "compositions are refused by stitch-export without "
+        "--allow-nonstandard-panel.",
     ),
     opencode_model: str = typer.Option(
         None,
         "--opencode-model",
         help="Override the opencode voter's model string (default: the named panel's "
-        "spec — Kimi K2.6 for default/v4/v4-candidate, Qwen3-VL for "
-        "v3-candidate/no-agy).",
+        "spec — Kimi K2.6 for default/v4/v4-candidate, Muse Spark 1.1 for "
+        "meta-candidate, Qwen3-VL for v3-candidate/no-agy).",
     ),
     resume: bool = typer.Option(
         False,
@@ -1331,6 +1334,10 @@ def run_stitch_panel(
             model=ov.get("model", p.model),
             effort=ov.get("effort", p.effort),
             timeout=p.timeout,
+            # Carry the opencode agent through the rebuild — dropping it would
+            # strip Muse's tool-less ``vote`` agent on the CLI path (--panel
+            # meta-candidate), reverting it to the agentic ``build`` default.
+            opencode_agent=p.opencode_agent,
         )
 
     try:
