@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
+from loguru import logger
 
 from ..matching.group_decomposition import (
     STATUS_COMPLETE,
@@ -481,6 +482,22 @@ def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
         gid = str(row["group_id"])
         if gid in sub_to_parent:
             continue  # consumed by the recomposition pass below
+        if gid in voted_parents:
+            # Defensive: a parent with BOTH a direct whole-group consensus row and
+            # voted sub-problems (e.g. a size-gated whole-group vote in an early
+            # wave later decomposed) would otherwise be counted twice — once here,
+            # once in the recomposition pass. Evaluate it ONCE on the recomposed
+            # union. NOTE this is an eval-side choice, not exporter parity: when
+            # recomposition succeeds it supersedes the direct row at write time
+            # (upsert order), but a BLOCKED recomposition (>=1 failed sub) leaves
+            # a direct auto_accept row to mint the label — anomalous data worth a
+            # human look either way, so warn instead of swallowing it.
+            logger.warning(
+                f"group {gid}: direct consensus row AND voted sub-problems in "
+                f"{batch_dir} — double-count guard active, evaluating the "
+                f"recomposed union only"
+            )
+            continue
         if gid not in mapping:
             continue
         hgid = mapping[gid]
@@ -663,6 +680,7 @@ def summarize(results: list[GroupEval]) -> dict:
     n_opt = len(option_rows)
     covered = sum(r.option_covered for r in option_rows)
     summary["option_coverage"] = {
+        "n_opt": n_opt,
         "covered": covered,
         "gap": n_opt - covered,
         "gap_rate": round((n_opt - covered) / n_opt, 3) if n_opt else 0.0,
