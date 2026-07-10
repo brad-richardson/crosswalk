@@ -23,7 +23,10 @@ class ToolOutput:
     """Parsed output from a tool run.
 
     Attributes:
-        matches: DataFrame with columns [ref_id, target_id, confidence].
+        matches: DataFrame with columns [ref_id, target_id, confidence]. Adapters
+            may also provide ``match_decision`` (``match``, ``review``, or
+            ``no_match``); the runner then evaluates accepted matches as the
+            production headline and reports review/proposal views separately.
         metadata: Tool-specific metadata (version, params, etc.).
         groups: Optional M:N groups sidecar (list of group dicts with ``edges``
             and geometries) used for stitch-level evaluation. None when the tool
@@ -47,6 +50,10 @@ class ToolAdapter(Protocol):
 
     name: str
     eval_mode: EvalMode
+
+    # Adapters may declare ``decision_aware = True`` as an optional capability.
+    # The runner then requires and validates a match_decision column. It is not
+    # a Protocol member so existing third-party adapters remain compatible.
 
     def run(self, reference: Path, target: Path, output_dir: Path, **kwargs) -> Path:
         """Run the tool and return path to its raw output.

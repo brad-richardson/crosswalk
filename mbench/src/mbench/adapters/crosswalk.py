@@ -50,6 +50,48 @@ def _groups_sidecar_path(bridge_path: Path) -> Path:
     return bridge_path.parent / f"{stem}.json"
 
 
+def _validated_groups_sidecar(data: object) -> list[dict]:
+    """Validate the minimum sidecar schema required for stitch evaluation."""
+    if not isinstance(data, dict):
+        raise ValueError("groups sidecar root must be an object")
+    groups = data.get("groups")
+    if not isinstance(groups, list):
+        raise ValueError("groups sidecar 'groups' must be a list")
+    if not groups:
+        raise ValueError("groups sidecar must contain at least one group")
+
+    seen_group_ids: set[str] = set()
+    total_edges = 0
+    for group_index, group in enumerate(groups):
+        if not isinstance(group, dict):
+            raise ValueError(f"groups[{group_index}] must be an object")
+        raw_group_id = group.get("group_id")
+        group_id = "" if raw_group_id is None else str(raw_group_id).strip()
+        if not group_id:
+            raise ValueError(f"groups[{group_index}].group_id must be nonblank")
+        if group_id in seen_group_ids:
+            raise ValueError(f"duplicate group_id in groups sidecar: {group_id}")
+        seen_group_ids.add(group_id)
+
+        edges = group.get("edges")
+        if not isinstance(edges, list) or not edges:
+            raise ValueError(f"groups[{group_index}].edges must be a nonempty list")
+        for edge_index, edge in enumerate(edges):
+            if not isinstance(edge, dict):
+                raise ValueError(f"groups[{group_index}].edges[{edge_index}] must be an object")
+            for key in ("ref_id", "target_id"):
+                raw_id = edge.get(key)
+                if raw_id is None or not str(raw_id).strip():
+                    raise ValueError(
+                        f"groups[{group_index}].edges[{edge_index}].{key} must be nonblank"
+                    )
+        total_edges += len(edges)
+
+    if total_edges == 0:  # Defensive; nonempty per-group edges already imply this.
+        raise ValueError("groups sidecar candidate edge universe is empty")
+    return groups
+
+
 class CrosswalkAdapter:
     """Adapter for the crosswalk road conflation tool.
 
@@ -58,6 +100,10 @@ class CrosswalkAdapter:
 
     name: str = "crosswalk"
     eval_mode: EvalMode = EvalMode.STITCH
+    decision_aware: bool = True
+
+    def __init__(self) -> None:
+        self._last_run_metadata: dict = {}
 
     def run(self, reference: Path, target: Path, output_dir: Path, **kwargs) -> Path:
         """Run crosswalk stitch and return path to bridge parquet.
@@ -129,6 +175,15 @@ class CrosswalkAdapter:
 
         timeout = int(kwargs.get("timeout", 3600))
 
+        self._last_run_metadata = {
+            "effective_command": cmd,
+            "working_directory": str(repo_root),
+            "timeout_s": timeout,
+            "model": str(model),
+            "dataset": str(dataset) if dataset is not None else None,
+            "crosswalk_command_is_default": str(crosswalk_cmd) == DEFAULT_CROSSWALK_CMD,
+        }
+
         logger.info(f"Running (cwd={repo_root}): {' '.join(cmd)}")
         try:
             result = subprocess.run(
@@ -168,6 +223,20 @@ class CrosswalkAdapter:
                 "confidence": confidence,
             }
         )
+        if "match_decision" not in bridge.columns:
+            raise ValueError(
+                "Crosswalk bridge missing required match_decision column; refusing "
+                "to evaluate review rows as published matches"
+            )
+        if bridge["match_decision"].isna().any():
+            raise ValueError("Crosswalk bridge match_decision contains null values")
+        normalized_decisions = bridge["match_decision"].astype("string").str.lower().str.strip()
+        unknown = sorted(set(normalized_decisions) - {"match", "review", "no_match"})
+        if unknown:
+            raise ValueError(f"Crosswalk bridge match_decision has unknown values: {unknown}")
+        # Preserve the pipeline's publication decision. The runner performs the
+        # canonical non-null/allowed-value validation before evaluation.
+        matches["match_decision"] = normalized_decisions
 
         if "match_type" in bridge.columns:
             match_type_counts = bridge["match_type"].value_counts().to_dict()
@@ -179,7 +248,7 @@ class CrosswalkAdapter:
         sidecar_path = _groups_sidecar_path(output_path)
         if sidecar_path.exists():
             try:
-                groups = json.loads(sidecar_path.read_text()).get("groups")
+                groups = _validated_groups_sidecar(json.loads(sidecar_path.read_text()))
                 logger.info(f"Loaded groups sidecar with {len(groups or [])} groups")
             except (ValueError, OSError) as exc:
                 logger.warning(f"Failed to read groups sidecar {sidecar_path}: {exc}")
@@ -188,6 +257,7 @@ class CrosswalkAdapter:
             "match_type_counts": match_type_counts,
             "total_rows": len(bridge),
             "has_groups_sidecar": groups is not None,
+            **self._last_run_metadata,
         }
 
         return ToolOutput(matches=matches, metadata=metadata, groups=groups)

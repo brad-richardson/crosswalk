@@ -1,5 +1,6 @@
 """Tests for tool adapters."""
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -7,7 +8,12 @@ import pandas as pd
 import pytest
 
 from mbench.adapters.base import EvalMode, ToolOutput
-from mbench.adapters.crosswalk import DEFAULT_CROSSWALK_CMD, CrosswalkAdapter, _find_repo_root
+from mbench.adapters.crosswalk import (
+    DEFAULT_CROSSWALK_CMD,
+    CrosswalkAdapter,
+    _find_repo_root,
+    _validated_groups_sidecar,
+)
 
 
 class TestToolOutput:
@@ -164,6 +170,7 @@ class TestCrosswalkAdapter:
                 "local_id": ["t1", "t2"],
                 "confidence": [0.95, 0.80],
                 "match_type": ["1:1", "1:N"],
+                "match_decision": ["match", "review"],
             }
         ).to_parquet(bridge_path)
 
@@ -171,10 +178,101 @@ class TestCrosswalkAdapter:
         output = adapter.parse_output(bridge_path)
 
         assert len(output.matches) == 2
-        assert list(output.matches.columns) == ["ref_id", "target_id", "confidence"]
+        assert list(output.matches.columns) == [
+            "ref_id",
+            "target_id",
+            "confidence",
+            "match_decision",
+        ]
         assert output.matches["ref_id"].iloc[0] == "r1"
         assert output.matches["target_id"].iloc[0] == "t1"
         assert output.metadata["total_rows"] == 2
+
+    def test_parse_output_requires_match_decision(self, tmp_path):
+        bridge_path = tmp_path / "bridge.parquet"
+        pd.DataFrame({"gers_id": ["r1"], "local_id": ["t1"]}).to_parquet(bridge_path)
+        with pytest.raises(ValueError, match="missing required match_decision"):
+            CrosswalkAdapter().parse_output(bridge_path)
+
+    @pytest.mark.parametrize("decision", [None, "bogus"])
+    def test_parse_output_rejects_invalid_match_decision(self, tmp_path, decision):
+        bridge_path = tmp_path / "bridge.parquet"
+        pd.DataFrame(
+            {"gers_id": ["r1"], "local_id": ["t1"], "match_decision": [decision]}
+        ).to_parquet(bridge_path)
+        expected = "null" if decision is None else "unknown"
+        with pytest.raises(ValueError, match=expected):
+            CrosswalkAdapter().parse_output(bridge_path)
+
+    @pytest.mark.parametrize("sidecar_contents", [None, "not-json", '{"groups": []}'])
+    def test_missing_malformed_or_empty_sidecar_has_no_groups(self, tmp_path, sidecar_contents):
+        bridge_path = tmp_path / "bridge.parquet"
+        pd.DataFrame(
+            {
+                "gers_id": ["r1"],
+                "local_id": ["t1"],
+                "match_decision": ["match"],
+            }
+        ).to_parquet(bridge_path)
+        if sidecar_contents is not None:
+            (tmp_path / "bridge_groups.json").write_text(sidecar_contents)
+
+        output = CrosswalkAdapter().parse_output(bridge_path)
+        assert not output.groups
+        assert output.metadata["has_groups_sidecar"] is False
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            [],
+            {},
+            {"groups": "wrong"},
+            {"groups": []},
+            {"groups": ["wrong"]},
+            {"groups": [{"group_id": "", "edges": [{"ref_id": "r", "target_id": "t"}]}]},
+            {"groups": [{"group_id": "g", "edges": []}]},
+            {"groups": [{"group_id": "g", "edges": ["wrong"]}]},
+            {"groups": [{"group_id": "g", "edges": [{"ref_id": "", "target_id": "t"}]}]},
+            {
+                "groups": [
+                    {"group_id": "g", "edges": [{"ref_id": "r", "target_id": "t"}]},
+                    {"group_id": "g", "edges": [{"ref_id": "r2", "target_id": "t2"}]},
+                ]
+            },
+        ],
+    )
+    def test_groups_sidecar_schema_rejects_malformed_valid_json(self, data):
+        with pytest.raises(ValueError):
+            _validated_groups_sidecar(data)
+
+    def test_groups_sidecar_schema_accepts_committed_shape(self):
+        fixture = Path(__file__).parent / "fixtures" / "mini_groups.json"
+        groups = _validated_groups_sidecar(json.loads(fixture.read_text()))
+        assert groups
+        assert groups[0]["group_id"] == "3ac36248"
+        assert groups[0]["edges"][0]["ref_id"]
+        assert groups[0]["edges"][0]["target_id"]
+
+    def test_groups_sidecar_schema_accepts_minimum_exporter_shape(self):
+        groups = _validated_groups_sidecar(
+            {"groups": [{"group_id": "abc123", "edges": [{"ref_id": "r1", "target_id": "t1"}]}]}
+        )
+        assert groups[0]["group_id"] == "abc123"
+
+    def test_parse_output_preserves_match_decision(self, tmp_path):
+        bridge_path = tmp_path / "bridge.parquet"
+        pd.DataFrame(
+            {
+                "gers_id": ["r1", "r2"],
+                "local_id": ["t1", "t2"],
+                "confidence": [0.95, 0.60],
+                "match_decision": ["match", "review"],
+            }
+        ).to_parquet(bridge_path)
+
+        output = CrosswalkAdapter().parse_output(bridge_path)
+
+        assert output.matches["match_decision"].tolist() == ["match", "review"]
 
 
 try:

@@ -14,6 +14,7 @@ from mbench.adapters.base import ToolAdapter
 from mbench.eval.labels import load_labels, load_stitch_labels
 from mbench.eval.metrics import EvalResult, evaluate
 from mbench.eval.stitch_metrics import StitchEvalResult, evaluate_stitch_groups
+from mbench.provenance import collect_provenance
 from mbench.results.store import BenchmarkResult, create_result, save_result
 
 
@@ -63,7 +64,14 @@ def _maybe_evaluate_stitch(
     stitch_labels_dir: Path | None,
     labels_dir: Path,
 ) -> StitchEvalResult | None:
-    """Run stitch-level eval if labels exist. Never raises (non-blocking)."""
+    """Run stitch-level eval if labels exist. Never raises (non-blocking).
+
+    Stitch-level eval is decision-AGNOSTIC: it scores the optimizer's edge
+    selection within M:N groups, which happens upstream of the match/review
+    publication decision, and the armed gate floors were calibrated on the full
+    selection. Filtering to the accepted view here would silently consume a
+    large share of the calibrated floor margins with no matching-logic change.
+    """
     try:
         resolved = _resolve_stitch_dir(stitch_labels_dir, labels_dir)
         if resolved is None:
@@ -105,7 +113,42 @@ class RunResult:
     bench_result: BenchmarkResult
     resource_stats: ResourceStats | None = None
     stitch_result: StitchEvalResult | None = None
+    decision_results: dict[str, EvalResult] = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
+
+
+ALLOWED_MATCH_DECISIONS = frozenset({"match", "review", "no_match"})
+
+
+def _decision_views(matches, *, decision_aware: bool = False) -> tuple[object, dict[str, object]]:
+    """Return the headline predictions and optional decision-aware views.
+
+    Decision-aware evaluation is an adapter CAPABILITY, not a column sniff:
+    adapters that do not declare ``decision_aware`` keep their historical
+    combined behavior even when their output happens to carry a
+    ``match_decision`` column (base.py promises third-party adapters remain
+    compatible). For decision-aware adapters, only explicit ``match`` rows form
+    the production headline; ``review`` and the combined proposal queue remain
+    visible.
+    """
+    if not decision_aware:
+        return matches, {}
+    if "match_decision" not in matches.columns:
+        raise ValueError("decision-aware adapter output missing match_decision column")
+
+    raw_decisions = matches["match_decision"]
+    if raw_decisions.isna().any():
+        raise ValueError("match_decision contains null values")
+    decisions = raw_decisions.astype("string").str.lower().str.strip()
+    unknown = sorted(set(decisions) - ALLOWED_MATCH_DECISIONS)
+    if unknown:
+        raise ValueError(f"match_decision contains unknown values: {unknown}")
+    accepted = matches[decisions == "match"]
+    review = matches[decisions == "review"]
+    # Explicit no_match rows are intentionally excluded from every prediction
+    # view; they are decisions not to publish/propose an edge.
+    proposal = matches[decisions.isin(["match", "review"])]
+    return accepted, {"accepted": accepted, "review": review, "proposal": proposal}
 
 
 def run_single(
@@ -186,12 +229,44 @@ def run_single(
     tool_output = adapter.parse_output(output_path)
     logger.info(f"Found {len(tool_output.matches)} match predictions")
 
+    headline_predictions, decision_views = _decision_views(
+        tool_output.matches,
+        decision_aware=bool(getattr(adapter, "decision_aware", False)),
+    )
+    if decision_views:
+        logger.info(
+            "Decision-aware output: "
+            f"{len(decision_views['accepted'])} accepted, "
+            f"{len(decision_views['review'])} review, "
+            f"{len(decision_views['proposal'])} proposed"
+        )
+
     logger.info(f"Evaluating against ground truth (match_level={match_level})...")
     ground_truth = load_labels(labels_dir, dataset)
-    eval_result = evaluate(tool_output.matches, ground_truth, match_level=match_level)
+    eval_result = evaluate(headline_predictions, ground_truth, match_level=match_level)
 
     metrics = eval_result.to_dict()
     metrics.update(resource_stats.to_dict())
+    decision_results: dict[str, EvalResult] = {}
+    if decision_views:
+        decision_results = {
+            name: evaluate(view, ground_truth, match_level=match_level)
+            for name, view in decision_views.items()
+        }
+        # Counts derive from the already-validated views; no_match is whatever
+        # was excluded from the proposal (match + review) queue.
+        no_match_count = len(tool_output.matches) - len(decision_views["proposal"])
+        metrics["decision_metrics"] = {
+            "available": True,
+            "headline": "accepted",
+            "counts": {
+                "match": len(decision_views["accepted"]),
+                "review": len(decision_views["review"]),
+                "no_match": no_match_count,
+            },
+            "excluded_no_match_count": no_match_count,
+            **{name: result.to_dict() for name, result in decision_results.items()},
+        }
 
     # Stitch-level evaluation — NON-BLOCKING and default-on. If stitch labels
     # exist for this dataset they are computed and reported alongside the pair
@@ -206,11 +281,30 @@ def run_single(
     if stitch_result is not None:
         metrics.update(stitch_result.to_dict())
 
+    resolved_stitch_dir = _resolve_stitch_dir(stitch_labels_dir, labels_dir)
+    metadata = dict(tool_output.metadata)
+    try:
+        metadata["provenance"] = collect_provenance(
+            tool=adapter.name,
+            dataset=dataset,
+            reference=reference,
+            target=target,
+            labels_dir=labels_dir,
+            stitch_labels_dir=resolved_stitch_dir,
+            match_level=match_level,
+            run_options=run_kwargs,
+            adapter_metadata=tool_output.metadata,
+        )
+    except Exception as exc:  # best-effort: never discard a completed run
+        logger.warning(f"Provenance collection failed (non-blocking): {exc}")
+        metadata["provenance"] = {"schema_version": 1, "error": str(exc)}
+
     bench_result = create_result(
         tool=adapter.name,
         dataset=dataset,
         metrics=metrics,
-        metadata=tool_output.metadata,
+        metadata=metadata,
+        prediction_view="accepted" if decision_views else "combined",
     )
 
     if results_file is not None:
@@ -224,5 +318,6 @@ def run_single(
         bench_result=bench_result,
         resource_stats=resource_stats,
         stitch_result=stitch_result,
-        metadata=tool_output.metadata,
+        decision_results=decision_results,
+        metadata=metadata,
     )
