@@ -260,7 +260,7 @@ def test_quad_panel_kimi_and_muse_are_distinct_voter_rows():
     for i in range(6):
         for prov, model in [
             ("claude", "claude-opus-4-8"),
-            ("codex", "gpt-5.6-sol"),
+            ("codex", "gpt-5.6-terra"),
             ("kimi", "openrouter/moonshotai/kimi-k2.6"),
             ("muse", "meta/muse-spark-1.1"),
         ]:
@@ -283,7 +283,7 @@ def test_cli_panel_stats_shows_muse_as_its_own_row(tmp_path, monkeypatch):
     for i in range(6):
         for prov, model in [
             ("claude", "claude-opus-4-8"),
-            ("codex", "gpt-5.6-sol"),
+            ("codex", "gpt-5.6-terra"),
             ("kimi", "openrouter/moonshotai/kimi-k2.6"),
             ("muse", "meta/muse-spark-1.1"),
         ]:

@@ -7,7 +7,9 @@ subset of those verdicts that are safe to treat as durable labels into
 labeler so their provenance stays visible (v1 tagged the earlier
 sonnet/gpt-5.4/Gemini-Flash-Low panel; v2 the Opus 4.8/gpt-5.5/Gemini-3.5-Flash
 panel on pre-enrichment packs; v3 that composition on #302-enriched packs; v4
-the 2026-07-09 bless — Opus 4.8 / gpt-5.6-sol / Kimi K2.6. The tag is bumped
+the 2026-07-09 bless — Opus 4.8 / gpt-5.6-terra / Kimi K2.6 (the codex model was
+swapped gpt-5.6-sol -> gpt-5.6-terra in place on 2026-07-10, no era bump, as v4
+had minted no committed rows). The tag is bumped
 whenever the panel composition OR its pack inputs change, and each batch is
 stamped with ITS OWN era's tag — see :data:`STANDARD_PANEL_VOTERS`).
 
@@ -115,7 +117,9 @@ from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mod
 # crops -- votes are not comparable across pack versions, see
 # research/panel_enriched_ab.md); v3 -> v4 when the composition changed again
 # (2026-07-09 bless: agy/Gemini replaced by kimi/Kimi K2.6, codex bumped
-# gpt-5.5 -> gpt-5.6-sol; validated in #397). Existing v1/v2/v3 labels stay
+# gpt-5.5 -> gpt-5.6-sol; validated in #397). The v4 codex model was later
+# swapped gpt-5.6-sol -> gpt-5.6-terra IN PLACE (2026-07-10, no era bump: v4 had
+# minted no committed rows). Existing v1/v2/v3 labels stay
 # untouched — the v3 constants below remain the write-time tags for v3-era
 # batches (see :data:`STANDARD_PANEL_VOTERS` era scoping) — and new default-
 # panel waves are tagged v4. Any labeler with the PANEL_LABELER_PREFIX is a
@@ -163,7 +167,15 @@ PANEL_VOTERS_V3 = frozenset(
 PANEL_VOTERS_V4 = frozenset(
     {
         ("claude", "claude-opus-4-8"),
-        ("codex", "gpt-5.6-sol"),
+        # In-place codex swap gpt-5.6-sol -> gpt-5.6-terra (2026-07-10, Brad
+        # waived an era bump): v4 has minted ZERO committed rows (the only codex
+        # model in committed labels/votes is v3-era gpt-5.5), so editing the
+        # blessed pair rewrites nothing on disk — same argument as the #402 kimi
+        # rename. Both are the same gpt-5.6 family; terra is a lower quota class,
+        # more apples-to-apples with opus/medium (sol showed 8/8 choice-agreement
+        # with opus at >=0.86 conf in the 2026-07-10 sol-anchor wave — no
+        # decorrelated signal to justify the premium quota).
+        ("codex", "gpt-5.6-terra"),
         ("kimi", "openrouter/moonshotai/kimi-k2.6"),
     }
 )

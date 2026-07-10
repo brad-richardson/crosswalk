@@ -98,7 +98,7 @@ _V3_VOTERS = [
 ]
 _V4_VOTERS = [
     ("claude", "claude-opus-4-8"),
-    ("codex", "gpt-5.6-sol"),
+    ("codex", "gpt-5.6-terra"),
     ("kimi", "openrouter/moonshotai/kimi-k2.6"),
 ]
 # The 2026-07-07 transport-swap composition (commit 80dbe1f): Gemini via
@@ -816,7 +816,7 @@ def test_vote_provenance_quad_panel_keeps_four_rows_per_group(tmp_path):
         }
         for p, m in (
             ("claude", "claude-opus-4-8"),
-            ("codex", "gpt-5.6-sol"),
+            ("codex", "gpt-5.6-terra"),
             ("kimi", "openrouter/moonshotai/kimi-k2.6"),
             ("muse", "meta/muse-spark-1.1"),
         )

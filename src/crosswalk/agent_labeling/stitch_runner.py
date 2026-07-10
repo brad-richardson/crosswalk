@@ -16,7 +16,9 @@ from __future__ import annotations
 import errno
 import json
 import math
+import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -71,13 +73,15 @@ class ProviderSpec:
     # explicitly passed caller/CLI timeout beats this (resolve_timeout).
     timeout: int | None = None
     # opencode-only: name of an opencode agent to run under (``opencode run
-    # --agent <x>``). None -> opencode's default ``build`` agent (what Kimi
-    # uses — its invocation stays byte-identical). Muse Spark 1.1 sets this to a
-    # tool-less ``vote`` agent (defined in the repo-root ``opencode.json``):
-    # under the default ``build`` agent an agentic reasoning model burns its
-    # turn calling ls/cat/read tools (auto-rejected) instead of answering, so
-    # it must be given ZERO tools to force a pure-text vote from the attached
-    # pack. Ignored by every non-opencode invoker.
+    # --agent <x>``). None -> opencode's default ``build`` agent (the residual
+    # v3-era Qwen seat, whose invocation stays byte-identical). BOTH the Kimi and
+    # Muse voters set this to a tool-less ``vote`` agent (defined in the repo-root
+    # ``opencode.json``, model-agnostic): under the default ``build`` agent the
+    # model's tool loop (auto-rejected ls/cat/read calls) is the prime stall
+    # suspect — Muse burned its turn on it, and Kimi timed out on 7/30 groups
+    # under ``build`` vs 0/30 for Muse under ``vote`` on the same evidence packs.
+    # ZERO tools forces a pure-text vote from the already-attached pack. Ignored
+    # by every non-opencode invoker.
     opencode_agent: str | None = None
 
 
@@ -128,6 +132,22 @@ OPENCODE_QWEN = ProviderSpec(name="opencode", model="openrouter/qwen/qwen3-vl-23
 # default), so the spec carries its own 480s timeout — an explicit --timeout
 # still overrides it (see resolve_timeout).
 #
+# Runs under the tool-less ``vote`` agent (``opencode_agent="vote"``, the same
+# agent the Muse seat uses; defined in the repo-root ``opencode.json`` and
+# model-agnostic — the model comes from ``-m``). A voter with the evidence-pack
+# PNGs already force-attached needs no tools; under opencode's default ``build``
+# agent, Kimi's tool loop is the prime stall suspect. In the 2026-07-10
+# quad-candidate calibration wave Kimi timed out (480s) on 7/30 groups while its
+# SUCCESSFUL votes had median latency 37s / max 172s — bimodal
+# answer-fast-or-stall-forever, not slow thinking. Muse, on the SAME opencode
+# transport with identical evidence packs but under this tool-less ``vote``
+# agent, had 0/30 timeouts (median 19s), so we run Kimi tool-less too. The
+# ``--agent`` threading keys on the RESOLVED INVOKER (``invoke_opencode``), not
+# the name, so this is forwarded as ``--agent vote`` with no other change.
+# Era-gate safe: the stitch-export gate keys voter identity on (provider, model)
+# pairs only, so ``opencode_agent`` is invocation plumbing (like ``timeout``,
+# #398 precedent) and the blessed v4 composition is unchanged.
+#
 # Provider NAME is ``"kimi"``, NOT the transport name ``"opencode"`` — a KEYING
 # field (see the MUSE note below for the full list of provider-keyed sites). The
 # ``quad-candidate`` panel seats BOTH this voter and Muse on the SAME opencode
@@ -138,7 +158,9 @@ OPENCODE_QWEN = ProviderSpec(name="opencode", model="openrouter/qwen/qwen3-vl-23
 # committed votes reference the Kimi model — every on-disk ``provider="opencode"``
 # row is the historical Gemini/Qwen transport-swap era — so the ``opencode`` ->
 # ``kimi`` rename rewrites nothing on disk.
-OPENCODE_KIMI = ProviderSpec(name="kimi", model="openrouter/moonshotai/kimi-k2.6", timeout=480)
+OPENCODE_KIMI = ProviderSpec(
+    name="kimi", model="openrouter/moonshotai/kimi-k2.6", timeout=480, opencode_agent="vote"
+)
 
 # Candidate REPLACEMENT third voter (default OFF): opencode driving Meta's
 # "Muse Spark 1.1" via Meta's OpenAI-compatible developer API (api.meta.ai/v1),
@@ -188,9 +210,20 @@ MUSE = ProviderSpec(name="muse", model="meta/muse-spark-1.1", timeout=480, openc
 #     verified 2026-07-09 against the codex CLI's server-fetched model listing
 #     AND a live `codex exec -m gpt-5.6-sol` smoke test through the
 #     invoke_codex invocation shape.
+#
+# Amendment (2026-07-10, Brad waived an era bump): the codex model is swapped
+# gpt-5.6-sol -> gpt-5.6-terra IN PLACE (effort stays medium). In the 10-group
+# sol anchor of the 2026-07-10 quad wave, sol showed 8/8 choice-agreement with
+# claude/opus at >=0.86 confidence — no decorrelated signal to justify its
+# premium quota; terra is the same gpt-5.6 family at a lower quota class, more
+# apples-to-apples with opus/medium. Verified live via `codex exec -m
+# gpt-5.6-terra` through the invoke_codex invocation shape. Safe as an in-place
+# edit (no era bump): v4 has minted ZERO committed rows — the only codex model
+# in committed labels/votes is v3-era gpt-5.5 — so it rewrites nothing on disk,
+# same argument as the #402 kimi rename. PANEL_VOTERS_V4 moves in lockstep.
 DEFAULT_PANEL = [
     ProviderSpec(name="claude", model="claude-opus-4-8", effort="medium"),
-    ProviderSpec(name="codex", model="gpt-5.6-sol", effort="medium"),
+    ProviderSpec(name="codex", model="gpt-5.6-terra", effort="medium"),
     OPENCODE_KIMI,
 ]
 
@@ -230,7 +263,7 @@ PANELS: dict[str, list[ProviderSpec]] = {
     # API; run its waves with the spec's 480s timeout (Muse is a reasoning
     # model). Filter drops the v4 default's Kimi seat (now provider-named "kimi").
     "meta-candidate": [*(p for p in DEFAULT_PANEL if p.name != "kimi"), MUSE],
-    # Opt-in FOUR-SEAT panel: the full v4 default (claude + codex/gpt-5.6-sol +
+    # Opt-in FOUR-SEAT panel: the full v4 default (claude + codex/gpt-5.6-terra +
     # kimi/Kimi K2.6) PLUS Muse Spark 1.1 as a distinct fourth voter. Exists
     # to run a CALIBRATION wave with all four voters RECORDED under the CURRENT
     # consensus rules, so the ballots can be replayed offline against candidate
@@ -791,12 +824,12 @@ def invoke_opencode(
     raw stdout is returned for JSON extraction.
 
     ``agent`` (empty by default) selects an opencode agent via ``--agent``. Left
-    empty for the Kimi voter, which runs under opencode's default ``build``
-    agent (this invocation stays byte-identical to before this knob existed).
-    Muse Spark 1.1 passes ``agent="vote"`` — a tool-less agent (defined in the
-    repo-root ``opencode.json``) that forces a pure-text answer instead of the
-    agentic ls/cat/read loop an agentic reasoning model otherwise falls into
-    under ``build``.
+    empty for the residual v3-era Qwen voter, which runs under opencode's default
+    ``build`` agent (its invocation stays byte-identical to before this knob
+    existed). Both the Kimi and Muse voters pass ``agent="vote"`` — a tool-less
+    agent (defined in the repo-root ``opencode.json``) that forces a pure-text
+    answer instead of the agentic ls/cat/read loop that stalls a voter under
+    ``build`` (Muse burned its turn on it; Kimi timed out on it).
     """
     imgs = _image_paths(group_dir, letters)
     # Pipe the prompt via STDIN (no positional message) rather than as an argv
@@ -809,13 +842,32 @@ def invoke_opencode(
         cmd += ["--agent", agent]
     for img in imgs:
         cmd += ["-f", img]
-    result = subprocess.run(
-        cmd,
-        input=prompt,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    # Give each invocation its OWN opencode sqlite DB. opencode persists session
+    # history to ~/.opencode/opencode.db by default, so concurrent vote
+    # invocations (kimi + muse in one group, multiplied by the parallel wave
+    # lanes) contend on that single sqlite and log "database is locked" retries
+    # (observed in the 2026-07-10 wave). The opencode binary honors OPENCODE_DB:
+    # pointing it at a per-invocation temp path moves the DB (and its -shm/-wal
+    # siblings) off the shared file. Vote runs are one-shot, so their session
+    # history is disposable. Auth is untouched (it stays in ~/.opencode/auth.json).
+    # Copy os.environ and ADD the override — the subprocess still needs the rest of
+    # the environment (META_API_KEY, OpenRouter creds, PATH, ...).
+    db_dir = tempfile.mkdtemp(prefix="opencode_db_")
+    env = {**os.environ, "OPENCODE_DB": str(Path(db_dir) / "opencode.db")}
+    try:
+        result = subprocess.run(
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+    finally:
+        # rmtree clears opencode.db plus its -shm/-wal siblings in one shot; the
+        # finally guarantees cleanup even when subprocess.run raises (e.g. the
+        # TimeoutExpired that _attempt_provider turns into a CLI-timeout abstain).
+        shutil.rmtree(db_dir, ignore_errors=True)
     _check_exit("opencode", result)
     return result.stdout
 
@@ -852,8 +904,6 @@ def _scratch_pack(group_dir: Path, prompt: str) -> tuple[Path, str, tempfile.Tem
     pristine and bounds any provider scratch to an auto-cleaned temp dir. The
     prompt's absolute canonical paths are rewritten to the scratch dir.
     """
-    import shutil
-
     tmp = tempfile.TemporaryDirectory(prefix="stitch_pack_")
     scratch = Path(tmp.name)
     for img in group_dir.glob("*.png"):
@@ -1017,15 +1067,15 @@ def _attempt_provider(
     parse_attempts = 0
     deadline = time.monotonic() + invocation_budget_s
     backoff = 5.0
-    # invoke_opencode is the only invoker that accepts an ``agent`` (Muse's
-    # tool-less ``vote`` agent); pass it only when set so the other invokers keep
-    # their 6-arg signature and the Kimi call stays byte-identical. Key on the
-    # RESOLVED INVOKER, not ``provider.name``: Kimi ("kimi") and Muse ("muse")
-    # both dispatch through invoke_opencode under distinct names, so a name-based
-    # check (e.g. ``name == "opencode"``) would miss them and silently strip
-    # Muse's ``vote`` agent, burning the turn on auto-rejected tool calls. Any
-    # spec whose invoker is invoke_opencode and that sets ``opencode_agent`` gets
-    # it threaded through.
+    # invoke_opencode is the only invoker that accepts an ``agent`` (the tool-less
+    # ``vote`` agent both Kimi and Muse run under); pass it only when set so the
+    # other invokers keep their 6-arg signature and the residual Qwen call stays
+    # byte-identical. Key on the RESOLVED INVOKER, not ``provider.name``: Kimi
+    # ("kimi") and Muse ("muse") both dispatch through invoke_opencode under
+    # distinct names, so a name-based check (e.g. ``name == "opencode"``) would
+    # miss them and silently strip the ``vote`` agent, burning the turn on
+    # auto-rejected tool calls. Any spec whose invoker is invoke_opencode and that
+    # sets ``opencode_agent`` gets it threaded through.
     extra_kwargs = (
         {"agent": provider.opencode_agent}
         if invoker is invoke_opencode and provider.opencode_agent
