@@ -225,6 +225,11 @@ def test_label_lost_when_edges_absent(groups_sidecar):
     )
     result = evaluate_stitch_groups(bridge, labels, groups=groups_sidecar)
     assert result.groups_evaluated == 0
+    assert result.mapping_diagnostics_available is True
+    assert result.pair_labels_total == 1
+    assert result.pair_labels_mapped == 0
+    assert result.pair_labels_lost == 1
+    assert result.pair_label_mapping_rate == 0.0
 
 
 def test_reject_all_label_retained_on_group_id_match(groups_sidecar):
@@ -248,6 +253,26 @@ def test_reject_all_label_retained_on_group_id_match(groups_sidecar):
     # pred empty, curated empty -> perfect exact match.
     assert result.exact_match_rate == pytest.approx(1.0)
     assert result.f1 == pytest.approx(1.0)
+    assert result.reject_all_labels_total == 1
+    assert result.reject_all_labels_mapped == 1
+    assert result.reject_all_labels_unrecoverable == 0
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [None, "", "   ", "not-json", "null", "{}", '["bad"]', '[{"ref_id":"r1"}]'],
+)
+def test_invalid_selected_edges_never_becomes_reject_all(groups_sidecar, bad_value):
+    # With an empty prediction and a matching group_id, the old permissive
+    # parser converted each bad value to [] and awarded a perfect reject-all.
+    bridge = pd.DataFrame({"ref_id": ["rx"], "target_id": ["tx"], "confidence": [0.1]})
+    labels = pd.DataFrame(
+        {"group_id": ["g_current"], "selected_edges": [bad_value], "labeler": ["brad"]}
+    )
+    # The error must name the offending row so the label file can be fixed
+    # without bisecting it.
+    with pytest.raises(ValueError, match=r"group_id=g_current.*selected_edges"):
+        evaluate_stitch_groups(bridge, labels, groups=groups_sidecar)
 
 
 def test_reject_all_label_dropped_when_group_id_gone(groups_sidecar):
@@ -262,6 +287,47 @@ def test_reject_all_label_dropped_when_group_id_gone(groups_sidecar):
     )
     result = evaluate_stitch_groups(bridge, labels, groups=groups_sidecar)
     assert result.groups_evaluated == 0
+    assert result.reject_all_labels_total == 1
+    assert result.reject_all_labels_mapped == 0
+    assert result.reject_all_labels_unrecoverable == 1
+
+
+def test_mapping_health_reports_clean_partial_and_split(groups_sidecar):
+    second_group = {
+        "group_id": "g_second",
+        "edges": [{"ref_id": "r2", "target_id": "t2"}],
+        "ref_geometries": {},
+        "target_geometries": {},
+    }
+    labels = pd.DataFrame(
+        {
+            "group_id": ["old1", "old2", "old3"],
+            "selected_edges": [
+                json.dumps([{"ref_id": "r1", "target_id": "t1"}]),
+                json.dumps(
+                    [
+                        {"ref_id": "r1", "target_id": "t1"},
+                        {"ref_id": "missing", "target_id": "missing"},
+                    ]
+                ),
+                json.dumps(
+                    [
+                        {"ref_id": "r1", "target_id": "t1"},
+                        {"ref_id": "r2", "target_id": "t2"},
+                    ]
+                ),
+            ],
+        }
+    )
+    bridge = pd.DataFrame(
+        {"ref_id": ["r1", "r2"], "target_id": ["t1", "t2"], "confidence": [0.9, 0.9]}
+    )
+    result = evaluate_stitch_groups(bridge, labels, groups=[*groups_sidecar, second_group])
+    assert result.groups_evaluated == 3  # diagnostics do not change mapping/scoring
+    assert result.pair_labels_mapped_clean == 1
+    assert result.pair_labels_mapped_partial == 1
+    assert result.pair_labels_mapped_split == 1
+    assert result.pair_labels_lost == 0
 
 
 # ---------------------------------------------------------------------------

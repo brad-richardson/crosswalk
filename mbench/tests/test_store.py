@@ -15,6 +15,8 @@ def test_create_result():
     assert r.dataset == "boston"
     assert r.metrics["f1"] == 0.85
     assert r.timestamp
+    assert r.metric_schema_version == 2
+    assert r.prediction_view == "combined"
 
 
 def test_save_and_load(tmp_path):
@@ -50,6 +52,17 @@ def test_benchmark_result_roundtrip():
     assert loaded.tool == r.tool
     assert loaded.metrics["f1"] == 0.85
     assert loaded.metadata["model"] == "xgboost"
+    assert loaded.metric_schema_version == 1
+    assert loaded.prediction_view == "legacy_combined"
+
+
+def test_old_result_json_gets_legacy_view_defaults():
+    old = BenchmarkResult.from_json(
+        '{"tool":"crosswalk","dataset":"boston","timestamp":"2026-01-01",'
+        '"metrics":{"f1":0.9},"metadata":{}}'
+    )
+    assert old.metric_schema_version == 1
+    assert old.prediction_view == "legacy_combined"
 
 
 def test_compare_results_returns_table():
@@ -82,3 +95,4 @@ def test_compare_results_returns_table():
     table = compare_results(results)
     assert table.title == "Benchmark Comparison"
     assert table.row_count == 2
+    assert any(column.header == "View" for column in table.columns)

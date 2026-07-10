@@ -10,7 +10,7 @@ import pytest
 
 from mbench.adapters.base import EvalMode, ToolOutput
 from mbench.cli import load_datasets_config
-from mbench.runner import run_single
+from mbench.runner import _decision_views, run_single
 
 
 @dataclass
@@ -45,6 +45,23 @@ class _RecordingAdapter(_FakeAdapter):
     def run(self, reference, target, output_dir, **kwargs):
         self.last_kwargs = dict(kwargs)
         return super().run(reference, target, output_dir, **kwargs)
+
+
+@dataclass
+class _DecisionAdapter(_FakeAdapter):
+    name: str = "decision_fake"
+    decision_aware: bool = True
+
+    def parse_output(self, output_path):
+        matches = pd.DataFrame(
+            {
+                "ref_id": ["r1", "r2", "r3"],
+                "target_id": ["t1", "t2", "t3"],
+                "confidence": [0.95, 0.60, 0.05],
+                "match_decision": ["match", "review", "no_match"],
+            }
+        )
+        return ToolOutput(matches=matches)
 
 
 def _make_labeled_inputs(tmp_path: Path, dataset: str) -> tuple[Path, Path, Path]:
@@ -173,7 +190,147 @@ class TestRunSingle:
         assert result.eval_result.true_positives == 2
         assert result.eval_result.false_negatives == 0
         assert result.eval_result.f1 == pytest.approx(1.0)
-        assert result.metadata == {"test": True}
+        assert result.metadata["test"] is True
+        assert "provenance" in result.metadata
+
+    def test_decision_output_uses_accepted_as_headline(self, tmp_path: Path):
+        ref, tgt, labels_dir = _make_labeled_inputs(tmp_path, "test_ds")
+        dataset_dir = labels_dir / "dataset=test_ds"
+        pd.DataFrame(
+            {
+                "ref_id": ["r1", "r2"],
+                "target_id": ["t1", "t2"],
+                "label": ["match", "match"],
+            }
+        ).to_csv(dataset_dir / "data.csv", index=False)
+
+        result = run_single(
+            adapter=_DecisionAdapter(),
+            dataset="test_ds",
+            reference=ref,
+            target=tgt,
+            labels_dir=labels_dir,
+            output_dir=tmp_path / "output",
+        )
+
+        # Top-level metrics are the production/published accepted set.
+        assert result.eval_result.total_predictions == 1
+        assert result.eval_result.recall == pytest.approx(0.5)
+        assert result.decision_results["accepted"].recall == pytest.approx(0.5)
+        assert result.decision_results["review"].total_predictions == 1
+        assert result.decision_results["proposal"].recall == pytest.approx(1.0)
+        dm = result.bench_result.metrics["decision_metrics"]
+        assert dm["headline"] == "accepted"
+        assert dm["proposal"]["total_predictions"] == 2
+        assert dm["excluded_no_match_count"] == 1
+        assert result.bench_result.prediction_view == "accepted"
+        assert result.bench_result.metric_schema_version == 2
+
+    def test_adapter_without_decisions_keeps_combined_headline(self, tmp_path: Path):
+        ref, tgt, labels_dir = _make_labeled_inputs(tmp_path, "test_ds")
+        result = run_single(
+            adapter=_FakeAdapter(),
+            dataset="test_ds",
+            reference=ref,
+            target=tgt,
+            labels_dir=labels_dir,
+            output_dir=tmp_path / "output",
+        )
+        assert result.eval_result.total_predictions == 2
+        assert result.decision_results == {}
+        assert "decision_metrics" not in result.bench_result.metrics
+        assert result.bench_result.prediction_view == "combined"
+
+    @pytest.mark.parametrize(
+        ("values", "message"),
+        [(["match", None], "null"), (["match", "unknown"], "unknown values")],
+    )
+    def test_decision_validation_rejects_null_and_unknown(self, values, message):
+        matches = pd.DataFrame(
+            {
+                "ref_id": ["r1", "r2"],
+                "target_id": ["t1", "t2"],
+                "confidence": [0.9, 0.8],
+                "match_decision": values,
+            }
+        )
+        with pytest.raises(ValueError, match=message):
+            _decision_views(matches, decision_aware=True)
+
+    def test_decision_aware_output_requires_decision_column(self):
+        matches = pd.DataFrame({"ref_id": ["r1"], "target_id": ["t1"], "confidence": [0.9]})
+        with pytest.raises(ValueError, match="missing match_decision"):
+            _decision_views(matches, decision_aware=True)
+
+    def test_non_decision_aware_adapter_ignores_decision_column(self):
+        """Decision handling is an adapter capability, not a column sniff.
+
+        A third-party adapter that never declared decision_aware must keep its
+        historical combined behavior even when its output carries a
+        match_decision column with a foreign vocabulary.
+        """
+        matches = pd.DataFrame(
+            {
+                "ref_id": ["r1", "r2"],
+                "target_id": ["t1", "t2"],
+                "confidence": [0.9, 0.8],
+                "match_decision": ["accept", "reject"],
+            }
+        )
+        headline, views = _decision_views(matches, decision_aware=False)
+        assert headline is matches
+        assert views == {}
+
+    def test_stitch_eval_scores_full_selection_not_accepted_view(self, tmp_path: Path):
+        """Stitch-level eval is decision-agnostic.
+
+        The optimizer's edge selection includes edges that end up as `review`
+        decisions, and the armed gate floors were calibrated on that full
+        selection. Scoring accepted-only rows here would silently consume the
+        calibrated floor margins.
+        """
+        ref, tgt, labels_dir = _make_labeled_inputs(tmp_path, "test_ds")
+        stitch_dir = labels_dir.parent / "stitching" / "dataset=test_ds"
+        stitch_dir.mkdir(parents=True)
+        # Curate exactly the review-decision edge (r2, t2).
+        pd.DataFrame(
+            {
+                "group_id": ["g1"],
+                "selected_edges": ['[{"ref_id": "r2", "target_id": "t2"}]'],
+                "labeler": ["brad"],
+            }
+        ).to_csv(stitch_dir / "data.csv", index=False)
+
+        result = run_single(
+            adapter=_DecisionAdapter(),
+            dataset="test_ds",
+            reference=ref,
+            target=tgt,
+            labels_dir=labels_dir,
+            output_dir=tmp_path / "output",
+        )
+
+        assert result.stitch_result is not None
+        # The review edge counts as selected: accepted-only scoring would be 0.
+        assert result.stitch_result.f1 == pytest.approx(1.0)
+
+    def test_provenance_failure_does_not_discard_run(self, tmp_path: Path, monkeypatch):
+        ref, tgt, labels_dir = _make_labeled_inputs(tmp_path, "test_ds")
+
+        def explode(**_kwargs):
+            raise TypeError("mixed-type keys")
+
+        monkeypatch.setattr("mbench.runner.collect_provenance", explode)
+        result = run_single(
+            adapter=_FakeAdapter(),
+            dataset="test_ds",
+            reference=ref,
+            target=tgt,
+            labels_dir=labels_dir,
+            output_dir=tmp_path / "output",
+        )
+        assert result.eval_result.total_predictions == 2
+        assert "mixed-type keys" in result.metadata["provenance"]["error"]
 
     def test_saves_to_results_file(self, tmp_path: Path):
         ref = tmp_path / "ref.parquet"

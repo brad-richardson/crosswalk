@@ -118,6 +118,20 @@ truth) means the metrics are measured against a small labeled subset and
 should be read with caution. Labels marked `unsure` are skipped and reported
 as `skipped_unsure`.
 
+For adapters that expose a publication decision (currently Crosswalk's
+`match_decision`), the top-level P/R/F1 metrics use **accepted `match` rows
+only**. `review` rows are not treated as published matches. The result JSON also
+stores separate `decision_metrics.accepted`, `.review`, and `.proposal`
+(accepted + review) views. Decision handling is an adapter *capability*
+(`decision_aware = True`): adapters that don't declare it retain their existing
+all-predictions behavior even if their output carries a `match_decision`
+column. Crosswalk declares decisions as part of its output contract: a missing,
+null, or unknown decision fails the run. Explicit `no_match` rows are counted
+in decision diagnostics but excluded from all prediction views. Stitch-level
+evaluation is decision-**agnostic**: it scores the optimizer's full edge
+selection (the gate floors were calibrated on that basis), not the accepted
+view.
+
 ## Stitch-level quality gate
 
 Pair-level P/R/F1 measures the classifier. The **stitch-level** metric measures
@@ -136,6 +150,24 @@ With `--gate`, mbench compares each dataset's **sliver-filtered** edge-F1 and
 exact-match against the per-dataset floors in `mbench/datasets.toml`
 (`[gate.<dataset>]`) and **exits nonzero** if any *armed* dataset falls below.
 Without `--gate` the stitch metrics are still computed and printed (non-blocking).
+The requested gate fails closed when its gate table is missing or malformed.
+Results also report mapping-health counts (clean, partial, split, lost, and
+recoverable/unrecoverable reject-all labels) and the mapping rate. These are
+diagnostics only; scoring still uses the sidecar's existing `edges` universe.
+An armed gate requires those diagnostics, so a missing, malformed, or empty
+groups sidecar fails instead of falling back to legacy scoring. An unarmed
+configured gate without diagnostics can still **fail** its floors on legacy
+metrics (once `min_mapped_groups` labels score), but can never **pass** on
+them — meeting the floors reports `skip_unarmed`. Gate blocks are validated
+strictly under `--gate`: unknown keys (typos), booleans where numbers are
+expected, and non-integer counts are config errors, and the retention floors
+(`min_mapping_rate` / `min_labels_total`) require `armed = true` since they
+protect an established baseline. Sidecars are schema-checked before use: the
+root must contain a nonempty `groups` list with unique nonblank `group_id`
+values and nonempty, structurally valid `edges` lists. Stitch labels
+are also strict: only literal JSON `[]` means reject-all; null, blank,
+malformed, wrong-shape, or incomplete `selected_edges` values fail evaluation,
+with the offending row identified by index, `group_id`, and labeler.
 
 **Pair vs set labels.** Stitching labels carry a `label_semantics` column
 (`pair` or `set`; see ARCHITECTURE.md "Stitching labels"). Only **pair** labels
@@ -163,7 +195,17 @@ logic) is unit-tested in CI on a committed miniature fixture
 floor is enforced only once at least that many curated labels map to current
 pipeline groups (mapping is by edge-overlap, robust to group_id churn). Below
 that the dataset reports `skip_unarmed` (non-blocking). This means the gate goes
-live automatically as the label base grows — no code change or second PR. As of
+live automatically as the label base grows — no code change or second PR. Once
+a baseline is established, set `armed = true`; an armed dataset falling below
+`min_mapped_groups` then fails as a mapping regression instead of silently
+self-unarming. An optional `min_mapping_rate` protects the established label
+population even when enough easy groups survive to exceed `min_mapped_groups`.
+An optional `min_labels_total` independently protects against deleting the
+label population while maintaining a perfect mapping rate; it counts pair AND
+set labels so pair→set semantic conversions don't read as deletions. Boston
+uses mapping rate `0.90` against its current 111/113 (0.9823) mapped pair-label
+baseline and `min_labels_total = 106` (~90% retention of its 118 curated
+labels: 113 pair + 5 set). As of
 2026-07-05 (post-#295/#298 set-semantics reinterpretation), `us_boston_streets`
 is armed (111 mapped pair groups, floors F1 0.83 / exact 0.50, baseline
 F1 0.8858 / exact 0.5946; its 3 set labels are reported separately and not
@@ -181,6 +223,24 @@ silently measure an unpruned row set again (the #372 failure mode);
 `f1_filtered_floor` / `exact_filtered_floor` to baseline − margin (LOO-gate
 style: ~0.05 on F1, wider on the noisier exact-match) and `min_mapped_groups` to
 ~30. Update the block in `mbench/datasets.toml`.
+
+Every result record includes reproducibility metadata: exact adapter command
+when available, effective run options, Git SHA plus separate tracked/untracked
+working-tree state, SHA-256 input/model fingerprints, feature/data versions,
+and the Crosswalk optimizer/prune/export settings snapshot. Fingerprints are
+cached within a batch process and collection is best-effort, so a metadata I/O
+failure cannot discard an otherwise completed benchmark. `run-batch` exits
+nonzero if any dataset execution fails, independently of `--gate`.
+Git provenance is taken from the adapter's effective working directory. For a
+custom Crosswalk executable, a working directory from another checkout, or an
+mbench process whose cwd differs from that working directory (crosswalk
+resolves its model path and `.env` relative to cwd), model/feature/settings
+provenance is explicitly marked unverifiable instead of being inferred from
+mbench's own Python process. Result records carry
+`metric_schema_version` and `prediction_view`; `mbench compare` displays the
+view so legacy combined results cannot be mistaken for accepted-only results.
+If either Git worktree command fails, the revision SHA is retained when known
+but dirty/untracked state is marked unavailable rather than falsely clean.
 
 ## Hootenanny Setup
 
