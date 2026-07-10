@@ -600,7 +600,24 @@ def _none_verdict_kind(row: dict) -> str | None:
         stamp = str(row.get("route_reason") or "").strip()
         if stamp not in (REASON_UNANIMOUS_NONE, "unanimous_NONE", REASON_QUORUM_NONE):
             return None
-    return "quorum" if reason == REASON_QUORUM_NONE else "unanimous"
+    if reason == REASON_QUORUM_NONE or _counts_show_abstention(row):
+        return "quorum"
+    return "unanimous"
+
+
+def _counts_show_abstention(row: dict) -> bool:
+    """True when a row's vote counts prove >=1 abstention (``n_valid < n_votes``).
+
+    Count evidence must always be able to DOWNGRADE a verdict's tier to quorum,
+    even against a contradicting ``unanimous``/``unanimous_none`` stamp (which
+    ``derive_route_reason`` would otherwise return verbatim as an informative
+    existing reason) — the same contradicting-evidence-wins stance
+    :func:`_none_verdict_kind` takes on the quorum floor. Missing/unparseable
+    counts are no evidence (False).
+    """
+    n_votes = _int_or_none(row.get("n_votes"))
+    n_valid = _int_or_none(row.get("n_valid"))
+    return n_votes is not None and n_valid is not None and 0 < n_valid < n_votes
 
 
 def _is_quorum_accept(row: dict) -> bool:
@@ -610,15 +627,17 @@ def _is_quorum_accept(row: dict) -> bool:
     with one abstain) — a weaker evidentiary claim than full unanimity, so it
     must mint the distinct ``panel_quorum_*`` labelers. Detection is
     deliberately CONSERVATIVE toward the quorum tag: the shared derivation
-    (tier stamp, or ``n_valid < n_votes`` on the counts) decides, so any
-    abstention evidence on an accept row downgrades the claim to quorum —
-    mislabeling a unanimous accept as quorum is safe (a weaker claim);
-    the reverse would launder an abstention into full-unanimity provenance.
-    Pre-v5 auto_accept rows always have ``n_valid == n_votes`` -> False.
+    (tier/reason stamp, or ``n_valid < n_votes`` on stamp-less rows) decides,
+    and the raw count check ALSO runs independently so a stale ``unanimous``
+    stamp with contradicting counts still downgrades — any abstention evidence
+    on an accept row downgrades the claim to quorum. Mislabeling a unanimous
+    accept as quorum is safe (a weaker claim); the reverse would launder an
+    abstention into full-unanimity provenance. Pre-v5 auto_accept rows always
+    have ``n_valid == n_votes`` -> False.
     """
     if str(row.get("routing")) != "auto_accept":
         return False
-    return derive_route_reason(row) == REASON_QUORUM
+    return derive_route_reason(row) == REASON_QUORUM or _counts_show_abstention(row)
 
 
 def plan_exports(

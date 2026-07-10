@@ -1410,6 +1410,56 @@ def test_quorum_accept_detected_from_counts_without_stamp(tmp_path, labels_dir):
     assert list(df["labeler"]) == [PANEL_QUORUM_LABELER]
 
 
+def test_contradicting_unanimous_stamp_still_downgrades_to_quorum(tmp_path, labels_dir):
+    """Contradicting evidence wins: a row STAMPED unanimous (accept path) or
+    unanimous_none (reject path) whose counts prove an abstention
+    (n_valid < n_votes) still mints the QUORUM labeler variants — a stamp can
+    never launder an abstention into full-unanimity provenance."""
+    from crosswalk.agent_labeling.stitch_export import (
+        PANEL_QUORUM_LABELER,
+        PANEL_QUORUM_NONE_LABELER,
+    )
+
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "g_stamped_unan",
+                "routing": "auto_accept",
+                "consensus": "unanimous",
+                "edges": [("r1", "t1")],
+                "n_votes": 4,
+                "n_valid": 3,
+                "route_reason": "unanimous",  # stale stamp contradicted by counts
+            },
+            {
+                "group_id": "g_stamped_none",
+                "routing": "human_review",
+                "consensus": "unanimous",
+                "choice": "NONE",
+                "edges": [],
+                "candidate_edges": [("r2", "t2")],
+                "n_votes": 4,
+                "n_valid": 3,
+                "route_reason": "unanimous_none",  # stale stamp contradicted by counts
+            },
+        ],
+    )
+    report = plan_exports([b], DATASET, labels_dir)
+    assert {g.group_id: g.is_quorum for g in report.groups} == {
+        "g_stamped_unan": True,
+        "g_stamped_none": True,
+    }
+    assert write_exports(report, DATASET, labels_dir) == 2
+    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    labelers = dict(zip(df["group_id"], df["labeler"], strict=True))
+    assert labelers == {
+        "g_stamped_unan": PANEL_QUORUM_LABELER,
+        "g_stamped_none": PANEL_QUORUM_NONE_LABELER,
+    }
+
+
 def test_quorum_none_mints_quorum_none_labeler(tmp_path, labels_dir):
     """A quorum NONE (3 valid NONE + 1 abstain) exports as a reject-all
     empty-set label under panel_quorum_none_v5 — never the unanimous-NONE tag."""
