@@ -104,6 +104,22 @@ def test_duplicate_recovered_rows_receive_same_edge_decision():
     assert prediction.iloc[1] == prediction.iloc[3]
 
 
+def test_margin_ignores_higher_confidence_unselected_candidate():
+    table = _table()
+    rejected = table.iloc[[0]].copy()
+    rejected["ref_id"] = "rejected-ref"
+    rejected["target_id"] = "rejected-target"
+    rejected["confidence"] = 1.0
+    rejected["selected"] = False
+    rejected["pruned"] = False
+    rejected["keep"] = 0
+    combined = pd.concat([table, rejected], ignore_index=True)
+
+    prediction = apply_prune_policy(combined, PrunePolicy("margin", margin=0.05))
+
+    assert prediction.tolist() == [True, True, False, False]
+
+
 def test_evaluation_uses_dataset_and_human_group_for_exact_match():
     table = _table()
     other = table.copy()

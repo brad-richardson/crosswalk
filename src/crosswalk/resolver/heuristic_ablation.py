@@ -96,9 +96,13 @@ def apply_prune_policy(df: pd.DataFrame, policy: PrunePolicy) -> pd.Series:
         edges.loc[eligible & has_threshold & (edges["confidence"] < thresholds), "_drop"] = True
 
     if policy.margin is not None:
-        group_max = edges.groupby(["dataset_id", "group_id"], dropna=False)["confidence"].transform(
-            "max"
-        )
+        # Production pruning receives only the optimizer-selected assignment.
+        # A higher-confidence rejected candidate must not move the relative
+        # cutoff for edges that were actually selected.
+        selected_confidence = edges["confidence"].where(edges["_preselected"])
+        group_max = selected_confidence.groupby(
+            [edges["dataset_id"], edges["group_id"]], dropna=False
+        ).transform("max")
         edges.loc[eligible & (edges["confidence"] < group_max - policy.margin), "_drop"] = True
 
     if policy.preserve_bridge_backbone:
