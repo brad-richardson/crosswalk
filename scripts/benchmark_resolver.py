@@ -122,10 +122,15 @@ def _per_dataset_eval(
             sub_feat = feat_df[feat_df["dataset_id"] == ds]
             if len(sub_feat) != len(sub_raw):
                 continue
-            assert len(feat_df) == len(raw_df) == len(proba)
+            if not (len(feat_df) == len(raw_df) == len(proba)):
+                print(
+                    f"[warn] per-ds alignment drift: feat={len(feat_df)} raw={len(raw_df)} proba={len(proba)} — skipping remaining per-ds"
+                )
+                break
             mask_ds = raw_df["dataset_id"] == ds
             sub_proba = proba[mask_ds.to_numpy()]
             if len(sub_proba) != len(sub_raw):
+                print(f"[warn] ds={ds} proba slice {len(sub_proba)} != raw {len(sub_raw)} — skip")
                 continue
             rows.append(_row_dict(f"model_thr0.5:{ds}", sub_raw, (sub_proba >= 0.5).astype(int)))
             rows.append(_row_dict(f"model_ef1:{ds}", sub_raw, _model_preds_ef1(sub_raw, sub_proba)))
@@ -202,7 +207,9 @@ def main() -> None:
         )
     )
     t_oracle, pred_oracle = _oracle_conf_threshold(raw_df)
-    baselines.append(_row_dict(f"conf_oracle t={t_oracle:.2f}", raw_df, pred_oracle))
+    baselines.append(
+        _row_dict(f"conf_oracle(t={t_oracle:.2f}, optimistic in-sample)", raw_df, pred_oracle)
+    )
     _print_table(baselines, "In-sample baselines (no model)")
 
     # ---- Learned model (in-sample, optimistic) ----

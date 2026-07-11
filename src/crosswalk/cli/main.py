@@ -2150,7 +2150,7 @@ def register_commands(app: typer.Typer) -> None:
         selector: str = typer.Option(
             "ef1",
             "--selector",
-            help="Per-group selection used in CV eval: threshold or ef1 (expected-F1 set objective)",
+            help="Per-group selection used in CV eval: threshold | ef1 | ef1_per_type",
         ),
         threshold: float = typer.Option(
             0.5,
@@ -2165,7 +2165,22 @@ def register_commands(app: typer.Typer) -> None:
         include_split: bool = typer.Option(
             True,
             "--include-split/--no-split",
-            help="Include split-provenance labels",
+            help="Include split-provenance labels (noisy per gap analysis — try --no-split)",
+        ),
+        clean_only: bool = typer.Option(
+            False,
+            "--clean-only/--no-clean-only",
+            help="Train+eval on provenance=clean only (robust to split-label noise)",
+        ),
+        float_soft: bool = typer.Option(
+            False,
+            "--float-soft/--binary-soft",
+            help="Train soft votes as float BCE not binarized >=0.5",
+        ),
+        label_smoothing: float = typer.Option(
+            0.0,
+            "--label-smoothing",
+            help="Label smoothing for hard labels: y_smooth = (1-a)*y + a*0.5",
         ),
         report_out: Path | None = typer.Option(
             None,
@@ -2175,7 +2190,7 @@ def register_commands(app: typer.Typer) -> None:
         seed: int = typer.Option(
             0,
             "--seed",
-            help="Random seed for determinism",
+            help="Random seed for determinism (propagated to model)",
         ),
         verbose: bool = typer.Option(
             False,
@@ -2190,16 +2205,16 @@ def register_commands(app: typer.Typer) -> None:
         data/models/resolver_model.joblib and writes
         research/learned_stitcher_round3.md.
 
-        Default behaviour: all datasets with curated stitching labels, extended
-        34-col features, eF1 expected-F1 per-group selector, and panel soft votes
-        as extra training groups.
+        Default: all datasets, extended 34-col feats, eF1, panel soft votes.
 
-        Limitations (honest): factory sidecars (release=2026-06-17.0) have no
-        candidate_edges so under-selection is partially capped; empty reject-all
-        labels only emit keep=0 rows on candidate-graph groups.
+        Noisy-label aware (gap analysis 2026-07-11): confidence is 95% of signal;
+        split-provenance labels hurt clean; try --no-split or --clean-only.
         """
-        if selector not in ("threshold", "ef1"):
-            console.print(f"[red]Unknown --selector {selector!r}; expected threshold|ef1[/red]")
+        VALID_SELECTORS = ("threshold", "ef1", "ef1_per_type")
+        if selector not in VALID_SELECTORS:
+            console.print(
+                f"[red]Unknown --selector {selector!r}; expected {'|'.join(VALID_SELECTORS)}[/red]"
+            )
             raise typer.Exit(1)
 
         import importlib
@@ -2266,6 +2281,7 @@ def register_commands(app: typer.Typer) -> None:
                     existing_gids,
                     feature_cols,
                     extended=with_extended,
+                    use_float_label=float_soft,
                 )
                 if soft_extra is None:
                     console.print("[yellow]Soft extra featurized to empty — not used[/yellow]")
@@ -2277,6 +2293,19 @@ def register_commands(app: typer.Typer) -> None:
             else:
                 console.print("[yellow]No soft votes found[/yellow]")
 
+        if label_smoothing > 0:
+            y_raw = df["keep"].to_numpy(dtype=float)
+            df["keep"] = (1.0 - float(label_smoothing)) * y_raw + float(label_smoothing) * 0.5
+            console.print(f"[blue]Applied label smoothing a={label_smoothing}[/blue]")
+
+        if clean_only:
+            n_before = len(df)
+            df = df[df["provenance"] == "clean"].copy() if "provenance" in df.columns else df
+            console.print(f"[blue]clean-only filter: {n_before} -> {len(df)} rows[/blue]")
+            if df.empty:
+                console.print("[red]clean-only filter emptied dataset[/red]")
+                raise typer.Exit(1)
+
         if verbose:
             console.print("[blue]Per-dataset build stats[/blue]")
             for s in per_ds_stats:
@@ -2284,21 +2313,26 @@ def register_commands(app: typer.Typer) -> None:
 
         console.print(
             f"[blue]Training set: {len(df)} hard rows "
-            f"({int(df['keep'].sum())} pos / {int((df['keep'] == 0).sum())} neg) "
+            f"({float(df['keep'].sum()):.1f} pos / {int((df['keep'] < 0.5).sum())} neg) "
             f"over {df['group_id'].nunique()} groups / {df['dataset_id'].nunique()} datasets; "
             f"features={len(feature_cols)}; selector={selector}"
             f"{f'; soft_extra={len(soft_extra)}' if soft_extra is not None else ''}"
+            f" float_soft={float_soft} smoothing={label_smoothing}"
             f"[/blue]"
         )
 
+        per_type = selector == "ef1_per_type"
+        sel_for_cv = "ef1" if per_type else selector
         eval_result = resolver_train.evaluate_all(
             df,
             feature_cols=feature_cols,
-            selector=selector,
+            selector=sel_for_cv,
             n_splits=n_splits,
             threshold=threshold,
             soft_extra=soft_extra,
             seed=seed,
+            use_float_soft=float_soft,
+            per_type_ef1=per_type,
         )
 
         for k in ("model", "baseline_production", "baseline_conf_oracle"):

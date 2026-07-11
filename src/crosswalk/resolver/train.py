@@ -15,9 +15,11 @@ Data sources:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from crosswalk.config import FEATURE_VERSION
@@ -28,6 +30,12 @@ from crosswalk.resolver.round2 import (
     run_cv2,
 )
 from crosswalk.resolver.votes import default_votes_paths, edge_soft_labels, load_votes
+
+
+def _sanitize_ds(ds: str, max_len: int = 80) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", ds)
+    safe = safe.strip("_") or "dataset"
+    return safe[:max_len]
 
 
 def _discover_specs(
@@ -50,15 +58,13 @@ def _discover_specs(
         if p.stat().st_size > 0:
             datasets[ds] = p
 
-    factory_roots = [
+    factory_roots: list[Path] = [
         data_root / "data" / "factory" / "release=2026-06-17.0",
         data_root / "factory" / "release=2026-06-17.0",
-        Path("data/factory/release=2026-06-17.0"),
         data_root / "data" / "factory" / "release=2026-01-21.0",
         data_root / "factory" / "release=2026-01-21.0",
-        Path("data/factory/release=2026-01-21.0"),
     ]
-    output_roots = [data_root / "data" / "output", data_root / "output", Path("data/output")]
+    output_roots: list[Path] = [data_root / "data" / "output", data_root / "output"]
 
     specs: list[tuple[str, Path, Path]] = []
     for ds, lpath in sorted(datasets.items()):
@@ -74,7 +80,7 @@ def _discover_specs(
                 groups_path = cand
                 break
         if groups_path is None:
-            groups_path = Path(f"__missing_groups_{ds}.json")
+            groups_path = Path(f"__missing_groups_{_sanitize_ds(ds)}.json")
         specs.append((ds, groups_path, lpath))
     return specs
 
@@ -157,11 +163,7 @@ def _build_soft_extra(
 ) -> pd.DataFrame | None:
     batches_root = Path(batches_root)
     if not batches_root.exists():
-        alt = Path("data/agents/stitching/batches")
-        if alt.exists():
-            batches_root = alt
-        else:
-            return None
+        return None
     vote_paths = default_votes_paths(batches_root)
     if not vote_paths:
         return None
@@ -213,6 +215,8 @@ def _prepare_soft_for_train(
     existing_group_ids: set[str],
     feature_cols: list[str],
     extended: bool,
+    *,
+    use_float_label: bool = False,
 ) -> pd.DataFrame | None:
     if soft_df.empty:
         return None
@@ -239,6 +243,9 @@ def _prepare_soft_for_train(
         if edge is None:
             continue
 
+        sk = float(r["soft_keep"])
+        keep_v = sk if use_float_label else float(sk >= 0.5)
+
         rows.append(
             {
                 "dataset_id": "soft_vote",
@@ -249,8 +256,8 @@ def _prepare_soft_for_train(
                 "match_type": g.get("match_type", ""),
                 "ref_id": key[0],
                 "target_id": key[1],
-                "keep": int(float(r["soft_keep"]) >= 0.5),
-                "soft_keep": float(r["soft_keep"]),
+                "keep": keep_v,
+                "soft_keep": sk,
                 "selected": bool(edge.get("selected", True)),
                 "pruned": bool(edge.get("pruned", False)),
                 "confidence": float(edge.get("confidence", float("nan"))),
@@ -306,14 +313,35 @@ def train_model(
     train_df = pd.concat(frames, ignore_index=True) if len(frames) > 1 else df
 
     X = train_df[feature_cols].to_numpy(dtype=float)
-    y = train_df["keep"].to_numpy()
-    n_pos = int(y.sum())
-    n_neg = int((y == 0).sum())
+    y = train_df["keep"].to_numpy(dtype=float)
+    is_float = bool(np.any((y != 0) & (y != 1)))
+    y_bin = (y >= 0.5).astype(int) if is_float else y.astype(int)
+    n_pos = int(y_bin.sum())
+    n_neg = int((y_bin == 0).sum())
     if len(train_df) == 0 or n_pos == 0 or n_neg == 0:
         raise ValueError(f"Cannot train: rows={len(train_df)} pos={n_pos} neg={n_neg}")
-    model = _make_model(n_pos, n_neg)
-    model.set_params(random_state=seed)
-    model.fit(X, y)
+    dtrain_label = y if is_float else y_bin
+    if is_float:
+        try:
+            import xgboost as xgb  # type: ignore
+
+            model = xgb.XGBRegressor(
+                n_estimators=120,
+                max_depth=3,
+                learning_rate=0.08,
+                subsample=0.9,
+                colsample_bytree=0.9,
+                min_child_weight=2,
+                reg_lambda=1.5,
+                n_jobs=1,
+                random_state=seed,
+            )
+        except Exception:
+            model = _make_model(n_pos, n_neg, seed=seed)
+            dtrain_label = y_bin
+    else:
+        model = _make_model(n_pos, n_neg, seed=seed)
+    model.fit(X, dtrain_label)
     return model
 
 
@@ -325,6 +353,8 @@ def evaluate_all(
     threshold: float = 0.5,
     soft_extra: pd.DataFrame | None = None,
     seed: int = 0,
+    use_float_soft: bool = False,
+    per_type_ef1: bool = False,
 ) -> dict[str, Any]:
     return run_cv2(
         df,
@@ -333,6 +363,9 @@ def evaluate_all(
         threshold=threshold,
         n_splits=n_splits,
         soft_extra=soft_extra,
+        seed=seed,
+        use_float_soft=use_float_soft,
+        per_type_ef1=per_type_ef1,
     )
 
 

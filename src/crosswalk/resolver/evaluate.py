@@ -74,7 +74,7 @@ class EvalResult:
         }
 
 
-def _make_model(n_pos: int, n_neg: int):
+def _make_model(n_pos: int, n_neg: int, seed: int = 0):
     import xgboost as xgb
 
     spw = (n_neg / n_pos) if n_pos else 1.0
@@ -88,8 +88,8 @@ def _make_model(n_pos: int, n_neg: int):
         reg_lambda=1.5,
         scale_pos_weight=spw,
         eval_metric="logloss",
-        n_jobs=1,  # single-threaded for reproducible results on this tiny dataset
-        random_state=0,
+        n_jobs=1,
+        random_state=seed,
     )
 
 
@@ -169,11 +169,9 @@ def run_cv(
         n_pos = int(ytr.sum())
         n_neg = int((ytr == 0).sum())
         if n_pos == 0 or n_neg == 0:
-            # single-class training fold: fall back to majority (keep-all is the
-            # production default and the majority class here).
             oof_pred[te] = 1
         else:
-            model = _make_model(n_pos, n_neg)
+            model = _make_model(n_pos, n_neg, seed=seed)
             model.fit(Xtr, ytr)
             proba = model.predict_proba(X[te])[:, 1]
             oof_pred[te] = (proba >= threshold).astype(int)

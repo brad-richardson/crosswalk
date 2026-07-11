@@ -64,14 +64,24 @@ def load_votes(paths: list[str | Path]) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def _gather_group_edges(g: dict) -> list[dict]:
+    if g.get("candidate_edges"):
+        return list(g["candidate_edges"])
+    out = list(g.get("edges", []) or [])
+    out.extend(g.get("rejected_edges", []) or [])
+    return out
+
+
 def _map_vote_groups_to_sidecar(groups: list[dict], votes_df: pd.DataFrame) -> dict[str, str]:
     """Map each vote group_id -> best sidecar group_id by edge overlap.
 
     A vote group's candidate proxy is the union of all providers' chosen edges.
+    Uses candidate_edges when available (full universe) else
+    edges+rejected_edges — otherwise we under-expand soft vote coverage.
     """
     edge_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
     for g in groups:
-        for e in g.get("edges", []):
+        for e in _gather_group_edges(g):
             edge_groups[(str(e["ref_id"]), str(e["target_id"]))].add(g["group_id"])
 
     mapping: dict[str, str] = {}
@@ -114,7 +124,7 @@ def edge_soft_labels(
         if sgid is None:
             continue
         sidecar_edges = {
-            (str(e["ref_id"]), str(e["target_id"])) for e in gmap[sgid].get("edges", [])
+            (str(e["ref_id"]), str(e["target_id"])) for e in _gather_group_edges(gmap[sgid])
         }
         num = defaultdict(float)
         chosen_by = defaultdict(int)
