@@ -2,6 +2,13 @@
 
 > _Historical document. The project was renamed `matcher` → `crosswalk` (PyPI `crosswalk-py`) on 2026-07-05; the original name is preserved below unchanged._
 
+> **2026-07-11 methodology update:** The category delta quoted below came from a
+> single holdout split. The paired grouped-CV harness now reports graphlet removal
+> at **+0.0017 CV F1** (fold-delta std 0.0011) while the same run's holdout says
+> **-0.0058**—a sign reversal. This strengthens the original “keep for now”
+> decision: neither view alone supports removal. See
+> `feature_ablation_strategy_2026-07-11.md` for the multi-view removal gate.
+
 **Backlog item:** *"drop graphlet features (train-serve skew + Spark speed twofer)."*
 
 **Verdict: KEEP in the local model; they are ALREADY excluded from the Spark-portable
