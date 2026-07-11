@@ -59,6 +59,15 @@ _SCHEMA_DEFAULTS = {
     "notes": "",
 }
 
+# Read the CSV with NA-token coercion OFF. The free-text ``notes`` column can
+# legitimately hold text that pandas otherwise reads as NaN ("N/A", "None",
+# "null", "NA", ...); default parsing would silently blank such a note on
+# reload (_ensure_schema fills NaN with ""). Every cell is written non-null by
+# ``add()``/``save()``, so treating blanks as empty strings is lossless for the
+# other columns (numeric columns still infer int dtype from their populated
+# values).
+_READ_CSV_KW = {"keep_default_na": False}
+
 
 def _ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
     """Project a loaded frame onto the current schema, filling new columns.
@@ -120,7 +129,7 @@ class StitchingLabelStore:
 
         if self.csv_path.exists():
             try:
-                df = pd.read_csv(self.csv_path, dtype={"group_id": str})
+                df = pd.read_csv(self.csv_path, dtype={"group_id": str}, **_READ_CSV_KW)
                 # Drop any columns not in the current schema (e.g. removed fields)
                 return _ensure_schema(df)
             except Exception as primary_error:
@@ -130,7 +139,7 @@ class StitchingLabelStore:
                 if backup_path.exists():
                     try:
                         logger.info(f"Recovering from backup: {backup_path}")
-                        df = pd.read_csv(backup_path, dtype={"group_id": str})
+                        df = pd.read_csv(backup_path, dtype={"group_id": str}, **_READ_CSV_KW)
                         return _ensure_schema(df)
                     except Exception as backup_error:
                         raise OSError(
@@ -145,7 +154,7 @@ class StitchingLabelStore:
 
         if backup_path.exists():
             try:
-                df = pd.read_csv(backup_path, dtype={"group_id": str})
+                df = pd.read_csv(backup_path, dtype={"group_id": str}, **_READ_CSV_KW)
                 return _ensure_schema(df)
             except Exception as e:
                 raise OSError(

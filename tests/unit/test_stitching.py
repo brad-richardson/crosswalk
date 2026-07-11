@@ -2291,6 +2291,34 @@ class TestStitchingLabelStore:
         assert by_gid.loc["gnote", "notes"] == "same feature but merge points don't line up"
         assert by_gid.loc["gplain", "notes"] == ""
 
+    def test_notes_na_token_text_survives_reload(self, store):
+        """A note whose text collides with a pandas NA token must not be blanked.
+
+        Free-text like "N/A"/"None"/"null"/"NA" would be coerced to NaN by
+        default CSV parsing and then emptied by _ensure_schema — silent loss.
+        """
+        na_tokens = ["N/A", "None", "null", "NA", "NaN"]
+        for i, note in enumerate(na_tokens):
+            store.add(
+                group_id=f"gna{i}",
+                selected_edges=[],
+                match_type="M:N",
+                num_refs=1,
+                num_targets=1,
+                labeler="brad",
+                session_id="s",
+                label_semantics="set",
+                ref_ids=["r"],
+                target_ids=["t"],
+                notes=note,
+            )
+        from crosswalk.labeling.stitching_store import StitchingLabelStore
+
+        reloaded = StitchingLabelStore("test_dataset", labels_dir=store.labels_dir)
+        by_gid = reloaded.df.set_index("group_id")
+        for i, note in enumerate(na_tokens):
+            assert by_gid.loc[f"gna{i}", "notes"] == note, f"lost note {note!r}"
+
     def test_legacy_csv_missing_notes_defaults_empty(self, store):
         """A CSV with the set columns but no notes column loads with empty notes."""
         store.partition_path.mkdir(parents=True, exist_ok=True)

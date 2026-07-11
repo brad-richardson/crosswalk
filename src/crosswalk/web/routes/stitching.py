@@ -663,8 +663,9 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
         ctx["preseed_inactive_ids"] = new_ids
         ctx["prior_new_ids"] = new_ids
         # Prefill the note textarea from the earlier review of this geometry, so a
-        # re-review edits the prior note instead of starting blank. Inert (empty)
-        # until the coverage layer carries a note through.
+        # re-review edits the prior note instead of starting blank. The coverage
+        # layer carries the note through PriorLabelCoverage.to_batch_dict(); falls
+        # back to empty for a prior label that had no note.
         ctx["prior_note"] = prior.get("notes", "")
     return geojson, ctx
 
