@@ -287,10 +287,20 @@ def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
     edge_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
     seg_groups: dict[str, set[str]] = defaultdict(set)
     for g in groups:
-        for e in g.get("edges", []):
-            edge_groups[(str(e["ref_id"]), str(e["target_id"]))].add(g["group_id"])
-            seg_groups[str(e["ref_id"])].add(g["group_id"])
-            seg_groups[str(e["target_id"])].add(g["group_id"])
+        gid = g["group_id"]
+        for rid in g.get("ref_ids", []) or []:
+            seg_groups[str(rid)].add(gid)
+        for tid in g.get("target_ids", []) or []:
+            seg_groups[str(tid)].add(gid)
+        for source in ("edges", "candidate_edges", "rejected_edges"):
+            for edge in g.get(source, []) or []:
+                try:
+                    key = (str(edge["ref_id"]), str(edge["target_id"]))
+                except (KeyError, TypeError):
+                    continue
+                edge_groups[key].add(gid)
+                seg_groups[key[0]].add(gid)
+                seg_groups[key[1]].add(gid)
 
     clean, split, empty, lost = [], [], [], []
     set_recovered: list[tuple[str, str]] = []
