@@ -39,7 +39,11 @@ from crosswalk.resolver.round2 import (
     featurize_extended,
     select_expected_f1,
 )
-from crosswalk.resolver.train import _build_combined_table, _discover_specs
+from crosswalk.resolver.train import (
+    _build_combined_table,
+    _discover_specs,
+    predict_keep_probability,
+)
 
 
 def _featurize_for_cols(df: pd.DataFrame, feature_cols: list[str]) -> tuple[pd.DataFrame, bool]:
@@ -238,7 +242,7 @@ def main() -> None:
             else:
                 X = feat_df[feat_cols].to_numpy(dtype=float)
                 try:
-                    proba = payload["model"].predict_proba(X)[:, 1]
+                    proba = predict_keep_probability(payload["model"], X)
                 except Exception as e:
                     print(f"[warn] model predict failed: {e}")
                     proba = None
@@ -375,6 +379,12 @@ def main() -> None:
         "  model needs P1 `<ds>_candidates.parquet` (78 feats + signed lateral offset) + fresh stitch"
     )
     lines.append("  + cross-mode empty testset ≥20 to have a fair shot.")
+    lines.append(
+        "- Draft PR #411 evaluates optimizer prune/margin hypotheses on a fixed universe; #412 covers"
+    )
+    lines.append(
+        "  pair-feature ablation and dataset dead zones. Neither supports a production flip."
+    )
     lines.append("")
 
     out_path.write_text("\n".join(lines))

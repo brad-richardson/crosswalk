@@ -2145,7 +2145,7 @@ def register_commands(app: typer.Typer) -> None:
         with_extended: bool = typer.Option(
             True,
             "--with-extended/--no-extended",
-            help="Use extended 34-col feature set (default: on).",
+            help="Use the extended resolver feature set (default: on).",
         ),
         selector: str = typer.Option(
             "ef1",
@@ -2205,7 +2205,7 @@ def register_commands(app: typer.Typer) -> None:
         data/models/resolver_model.joblib and writes
         research/learned_stitcher_round3.md.
 
-        Default: all datasets, extended 34-col feats, eF1, panel soft votes.
+        Default: all datasets, extended features, eF1, panel soft votes.
 
         Noisy-label aware (gap analysis 2026-07-11): confidence is 95% of signal;
         split-provenance labels hurt clean; try --no-split or --clean-only.
@@ -2215,6 +2215,9 @@ def register_commands(app: typer.Typer) -> None:
             console.print(
                 f"[red]Unknown --selector {selector!r}; expected {'|'.join(VALID_SELECTORS)}[/red]"
             )
+            raise typer.Exit(1)
+        if not 0.0 <= label_smoothing < 1.0:
+            console.print("[red]--label-smoothing must be in [0, 1)[/red]")
             raise typer.Exit(1)
 
         import importlib
@@ -2295,7 +2298,10 @@ def register_commands(app: typer.Typer) -> None:
 
         if label_smoothing > 0:
             y_raw = df["keep"].to_numpy(dtype=float)
-            df["keep"] = (1.0 - float(label_smoothing)) * y_raw + float(label_smoothing) * 0.5
+            train_label_column = resolver_round2.TRAIN_LABEL_COLUMN
+            df[train_label_column] = (1.0 - float(label_smoothing)) * y_raw + float(
+                label_smoothing
+            ) * 0.5
             console.print(f"[blue]Applied label smoothing a={label_smoothing}[/blue]")
 
         if clean_only:
@@ -2354,6 +2360,11 @@ def register_commands(app: typer.Typer) -> None:
             "selector": selector,
             "with_extended": with_extended,
             "with_votes": with_votes,
+            "include_split": include_split,
+            "clean_only": clean_only,
+            "float_soft": float_soft,
+            "label_smoothing": label_smoothing,
+            "n_splits": n_splits,
             "per_ds_stats": per_ds_stats,
             "seed": seed,
         }

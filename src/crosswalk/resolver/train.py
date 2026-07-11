@@ -26,6 +26,7 @@ from crosswalk.config import FEATURE_VERSION
 from crosswalk.resolver.extract import build_edge_table, load_sidecar_groups, load_stitching_labels
 from crosswalk.resolver.features import featurize
 from crosswalk.resolver.round2 import (
+    TRAIN_LABEL_COLUMN,
     featurize_extended,
     run_cv2,
 )
@@ -307,13 +308,19 @@ def train_model(
 ):
     from crosswalk.resolver.evaluate import _make_model
 
-    frames = [df]
+    hard_df = df.copy()
+    if TRAIN_LABEL_COLUMN not in hard_df.columns:
+        hard_df[TRAIN_LABEL_COLUMN] = hard_df["keep"]
+    frames = [hard_df]
     if soft_extra is not None and len(soft_extra):
-        frames.append(soft_extra)
-    train_df = pd.concat(frames, ignore_index=True) if len(frames) > 1 else df
+        soft_df = soft_extra.copy()
+        if TRAIN_LABEL_COLUMN not in soft_df.columns:
+            soft_df[TRAIN_LABEL_COLUMN] = soft_df["keep"]
+        frames.append(soft_df)
+    train_df = pd.concat(frames, ignore_index=True) if len(frames) > 1 else hard_df
 
     X = train_df[feature_cols].to_numpy(dtype=float)
-    y = train_df["keep"].to_numpy(dtype=float)
+    y = train_df[TRAIN_LABEL_COLUMN].to_numpy(dtype=float)
     is_float = bool(np.any((y != 0) & (y != 1)))
     y_bin = (y >= 0.5).astype(int) if is_float else y.astype(int)
     n_pos = int(y_bin.sum())
@@ -326,6 +333,8 @@ def train_model(
             import xgboost as xgb  # type: ignore
 
             model = xgb.XGBRegressor(
+                objective="reg:logistic",
+                eval_metric="logloss",
                 n_estimators=120,
                 max_depth=3,
                 learning_rate=0.08,
@@ -343,6 +352,13 @@ def train_model(
         model = _make_model(n_pos, n_neg, seed=seed)
     model.fit(X, dtrain_label)
     return model
+
+
+def predict_keep_probability(model, X: np.ndarray) -> np.ndarray:
+    """Return keep probabilities for classifier or soft-label regressor artifacts."""
+    if hasattr(model, "predict_proba"):
+        return np.asarray(model.predict_proba(X)[:, 1], dtype=float)
+    return np.clip(np.asarray(model.predict(X), dtype=float), 0.0, 1.0)
 
 
 def evaluate_all(
@@ -391,6 +407,10 @@ def build_report_text(
     lines.append(
         "> `data/output/*.json` is absent, so under-selection is partially capped (64/group)."
     )
+    lines.append(
+        "> Decision: NO-GO for production; draft PR #411 invalidated the proposed heuristic defaults"
+    )
+    lines.append("> on a fixed label universe. Keep this track experimental and guard-isolated.")
     lines.append("")
     lines.append("## Inventory")
     lines.append("")
@@ -472,7 +492,7 @@ def build_report_text(
         "- P1 parquet `<ds>_candidates.parquet` with 78 typed pair features + signed lateral offset + class/length"
     )
     lines.append(
-        "  is NOT yet persisted — model uses only 26 sidecar + 8 competition/coverage features."
+        "  is NOT yet persisted — model uses only 25 sidecar + 8 competition/coverage features."
     )
     lines.append(
         "- Factory sidecars old → no `candidate_edges`, so under-selection positives under-counted (legacy path uses edges+rejected_edges capped 64)."

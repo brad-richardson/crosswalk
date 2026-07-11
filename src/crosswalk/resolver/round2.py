@@ -116,6 +116,10 @@ PER_TYPE_EF1_PENALTY: dict[str, float] = {
     "M:N": 0.04,
 }
 
+# Optional training-only target. ``keep`` remains the hard evaluation truth so
+# smoothing cannot silently turn every non-zero negative into a positive metric.
+TRAIN_LABEL_COLUMN = "_train_keep"
+
 
 def select_expected_f1(
     probs: np.ndarray,
@@ -183,7 +187,15 @@ def run_cv2(
 
     df = df.reset_index(drop=True)
     X = df[feature_cols].to_numpy(dtype=float)
-    y = df["keep"].to_numpy()
+    raw_truth = df["keep"].to_numpy(dtype=float)
+    if not np.isin(raw_truth, [0.0, 1.0]).all():
+        raise ValueError("keep must remain binary evaluation truth")
+    y_truth = raw_truth.astype(int)
+    y_train = (
+        df[TRAIN_LABEL_COLUMN].to_numpy(dtype=float)
+        if TRAIN_LABEL_COLUMN in df.columns
+        else y_truth.astype(float)
+    )
     groups = df["group_id"].to_numpy()
     n_groups = df["group_id"].nunique()
     if n_groups < 2:
@@ -215,8 +227,8 @@ def run_cv2(
                 m.set_params(random_state=s)
             return m
 
-    for tr, te in gkf.split(X, y, groups):
-        Xtr, ytr = X[tr], y[tr]
+    for tr, te in gkf.split(X, y_truth, groups):
+        Xtr, ytr = X[tr], y_train[tr]
         if extra_X is not None:
             Xtr = np.vstack([Xtr, extra_X])
             ytr = np.concatenate([ytr, extra_y])
@@ -232,6 +244,8 @@ def run_cv2(
                 import xgboost as xgb  # type: ignore
 
                 fold_model = xgb.XGBRegressor(
+                    objective="reg:logistic",
+                    eval_metric="logloss",
                     n_estimators=120,
                     max_depth=3,
                     learning_rate=0.08,
@@ -280,7 +294,7 @@ def run_cv2(
     best_t, best_f1 = 0.5, -1.0
     conf = df["confidence"].to_numpy()
     for t in np.arange(0.3, 1.0, 0.01):
-        _, _, f1t = _prf((conf >= t).astype(int), y)
+        _, _, f1t = _prf((conf >= t).astype(int), y_truth)
         if f1t > best_f1:
             best_f1, best_t = f1t, t
     res["baseline_conf_oracle"] = _eval_from_predictions(

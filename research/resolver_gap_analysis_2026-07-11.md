@@ -1,5 +1,13 @@
 # Resolver Gap Analysis — why learned ties but not beats prod (2026-07-11)
 
+> **Validation update:** The optimizer values proposed below were hypotheses from
+> the initial Boston error analysis, not measured wins. A subsequent fixed-universe
+> ablation in draft PR #411 found the proposed per-type prune + 0.05 margin + bridge
+> guard regressed pooled F1 from 0.9049 to 0.8969 and clean F1 from 0.9546 to
+> 0.9437; on Boston they are identical to the current scalar 0.96 behavior. Glue
+> sweeps also changed label retention and were not comparable. Keep production
+> defaults until fresh sidecars and more clean M:N ground truth validate a policy.
+
 ## Exec summary
 - Scope: Boston only, 679 edges / 108 groups (356 clean / 323 split). Prod = keep-all+prune `selected` flag.
 - Prod: F1 0.883 P0.822 R0.953 exact 0.731. Best conf oracle t=0.98 F1 0.886 (+0.003). Model OOF eF1 F1 0.878-0.885 (tie ±0.001). In-sample ceiling 0.914 / 0.796 exact → headroom exists but OOF can't use it.
@@ -46,14 +54,15 @@
 
 Risk: adding features at 108 groups overfits; need >=200 groups first.
 
-## Optimizer heuristic wins (no ML, ship today)
+## Optimizer heuristic hypotheses (not validated; do not ship yet)
 
-Ranked by impact / risk:
+Ranked as experiment candidates from the initial error analysis. The concrete
+values are retained for reproducibility, not as recommendations:
 
-1. **Per-match_type glue_min_confidence** (S, low risk): `1:N` needs higher glue (1.0?) to avoid monsters, `N:1` lower. Currently single `settings.optimizer_glue_min_confidence`. Tune on Boston split: try `1:N:0.95, N:1:0.9, M:N:0.92`.
-2. **Per-match_type confidence_drop_prune** (S): prod uses absolute `min_confidence` in `apply_confidence_drop_prune`. Let `1:N` top-keep = 0.92, `M:N` = 0.96, N:1 = 0.94. Directly beats conf_oracle 0.98 which is compromise.
+1. **Per-match_type glue_min_confidence**: `1:N` may need higher glue to avoid monsters, while `N:1` may tolerate lower. The initial sweep candidates were `1:N:0.95, N:1:0.9, M:N:0.92`. Match type is only known after grouping at the current seam, so this also needs a non-circular algorithm definition.
+2. **Per-match_type confidence_drop_prune**: the initial candidates were `1:N:0.92, N:1:0.94, M:N:0.96`. Fixed-universe evaluation did not beat the existing dataset-calibrated production selection.
 3. **Relative margin prune** (S, medium): drop if `conf < max_group_conf - delta` (e.g. 0.05) instead of absolute; handles calibration drift. Already partially in `conf_rel_max`.
-4. **Bridge-aware keep**: if `is_bridge` and `degree_ref=1` and `degree_tgt=1` → never prune (backbone). Currently pruned by absolute threshold.
+4. **Bridge-aware keep**: if `is_bridge` and `degree_ref=1` and `degree_tgt=1` → never prune (backbone). This changed zero decisions in the available labels and would require moving structural computation before prune.
 5. **Sliver already correct**: `is_sliver` all keep=0 (0.0 mean) and `is_sliver=True` never selected; no change needed. Keep `SLIVER_SPAN_THRESHOLD=0.10` + 5m hybrid.
 6. **Contested stub demote**: `MN_CONTESTED_EDGE_MAX_SPAN 0.3 + 75m` already catches 7/7 mode-A stubs. Could lower to 0.25 for more precision, but watch cascade: rescue logic keeps at least one per node.
 
@@ -62,7 +71,7 @@ Ranked by impact / risk:
 1. `crosswalk stitch --all-datasets` with `stitch_persist_candidate_graph=True` → rebuild `data/output/*_groups.json` (unblocks multi-dataset).
 2. Re-run `scripts/benchmark_resolver.py` + `uv run crosswalk train-resolver --clean-only` → measure clean exact.
 3. Ablation: `ef1` vs `thr0.5` vs per-type thr vs `conf>=t` oracle on clean.
-4. If clean still < prod, ship optimizer wins #1, #2 above (PR: config `optimizer_glue_min_confidence_by_type`, `optimizer_prune_min_confidence_by_type`).
+4. If clean still < prod, keep production defaults and use the fixed-universe harness from draft PR #411 to test paired prune/margin candidates without label-retention bias.
 5. Then stage-2 parquet + XGBoost with lateral/name.
 
 ## Metrics to track (beyond pair F1)
@@ -76,4 +85,3 @@ Ranked by impact / risk:
 - Don't let `conf_is_group_min` dominate on size=1 groups.
 - Don't threshold oof 0.5 — use eF1 per group.
 - Don't add 78 feats without full candidate persistence (train/test skew per CLAUDE.md Backfill Architecture).
-

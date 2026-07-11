@@ -3,6 +3,8 @@
 > Experimental only — not wired into production. Produces `data/models/resolver_model.joblib`
 > and a prototype eval. Uses legacy sidecars from `data/factory/release=2026-06-17.0` when
 > `data/output/*.json` is absent, so under-selection is partially capped (64/group).
+> Decision: **NO-GO for production**; draft PR #411 invalidated the proposed heuristic defaults
+> on a fixed label universe. Keep this track experimental and guard-isolated.
 
 ## Inventory
 
@@ -49,7 +51,7 @@
 ## Limitations / next steps
 
 - P1 parquet `<ds>_candidates.parquet` with 78 typed pair features + signed lateral offset + class/length
-  is NOT yet persisted — model uses only 26 sidecar + 8 competition/coverage features.
+  is NOT yet persisted — model uses only 25 sidecar + 8 competition/coverage features.
 - Factory sidecars old → no `candidate_edges`, so under-selection positives under-counted (legacy path uses edges+rejected_edges capped 64).
 - Fresh `crosswalk stitch` with `stitch_persist_candidate_graph=True` needed for full-candidate training.
 - Cross-mode testset (Bogotá bike + SG footpaths NONE) needs ≥20 empty labels held out; currently partial.

@@ -7,7 +7,6 @@ and the import-guard invariant that train.py stays out of production code.
 from __future__ import annotations
 
 import json
-import pathlib
 
 import pandas as pd
 import pytest
@@ -123,6 +122,31 @@ def test_train_model_deterministic_with_seed():
     p1 = m1.predict_proba(X)[:, 1]
     p2 = m2.predict_proba(X)[:, 1]
     assert np.allclose(p1, p2)
+
+
+def test_smoothed_training_target_keeps_hard_truth_and_predicts_probability():
+    import numpy as np
+
+    from crosswalk.resolver.extract import build_edge_table
+    from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
+    from crosswalk.resolver.round2 import TRAIN_LABEL_COLUMN
+    from crosswalk.resolver.train import predict_keep_probability, train_model
+
+    groups = [
+        _group(f"g{i}", [_edge(f"R{i}", f"T{i}", 0.95), _edge(f"S{i}", f"T{i}", 0.3)])
+        for i in range(4)
+    ]
+    labels = [_label_row(f"h{i}", [(f"R{i}", f"T{i}")]) for i in range(4)]
+    df = featurize(build_edge_table(groups, _labels(labels), "ds"))
+    hard_truth = df["keep"].copy()
+    df[TRAIN_LABEL_COLUMN] = np.where(df["keep"] == 1, 0.95, 0.05)
+
+    model = train_model(df, FEATURE_COLUMNS, seed=0)
+    probability = predict_keep_probability(model, df[FEATURE_COLUMNS].to_numpy(dtype=float))
+
+    assert df["keep"].equals(hard_truth)
+    assert model.get_xgb_params()["objective"] == "reg:logistic"
+    assert ((probability >= 0.0) & (probability <= 1.0)).all()
 
 
 def test_discover_specs_filters_by_dataset(tmp_path):
@@ -251,6 +275,35 @@ def test_evaluate_all_runs_on_small_table():
     assert "model" in res
     assert "baseline_production" in res
     assert res["model"].f1 >= 0.0
+
+
+def test_evaluate_all_scores_against_hard_truth_when_training_is_smoothed():
+    import numpy as np
+
+    from crosswalk.resolver.extract import build_edge_table
+    from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
+    from crosswalk.resolver.round2 import TRAIN_LABEL_COLUMN
+    from crosswalk.resolver.train import evaluate_all
+
+    groups = [
+        _group(f"g{i}", [_edge(f"R{i}", f"T{i}", 0.95), _edge(f"S{i}", f"T{i}", 0.3)])
+        for i in range(6)
+    ]
+    labels = [_label_row(f"h{i}", [(f"R{i}", f"T{i}")]) for i in range(6)]
+    df = featurize(build_edge_table(groups, _labels(labels), "ds"))
+    smoothed = df.copy()
+    smoothed[TRAIN_LABEL_COLUMN] = np.where(smoothed["keep"] == 1, 0.95, 0.05)
+
+    hard = evaluate_all(df, FEATURE_COLUMNS, selector="ef1", n_splits=3, seed=0)
+    smooth = evaluate_all(smoothed, FEATURE_COLUMNS, selector="ef1", n_splits=3, seed=0)
+
+    assert smooth["baseline_production"].row() == hard["baseline_production"].row()
+    assert smooth["baseline_conf_oracle"].row() == hard["baseline_conf_oracle"].row()
+
+    corrupted_truth = df.copy()
+    corrupted_truth["keep"] = np.where(corrupted_truth["keep"] == 1, 0.95, 0.05)
+    with pytest.raises(ValueError, match="binary evaluation truth"):
+        evaluate_all(corrupted_truth, FEATURE_COLUMNS, selector="ef1", n_splits=3, seed=0)
 
 
 def test_save_model_payload_structure(tmp_path):

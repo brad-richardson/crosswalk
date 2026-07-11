@@ -107,3 +107,5 @@
 - Production currently beats learned on clean slices at small label scale (see round2/round3 reports);
   model needs P1 `<ds>_candidates.parquet` (78 feats + signed lateral offset) + fresh stitch
   + cross-mode empty testset ≥20 to have a fair shot.
+- Draft PR #411 evaluates optimizer prune/margin hypotheses on a fixed universe; #412 covers
+  pair-feature ablation and dataset dead zones. Neither supports a production flip.
