@@ -42,11 +42,11 @@ from crosswalk.resolver.round2 import (
 from crosswalk.resolver.train import _build_combined_table, _discover_specs
 
 
-def _featurize_for_cols(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
+def _featurize_for_cols(df: pd.DataFrame, feature_cols: list[str]) -> tuple[pd.DataFrame, bool]:
     needs_ext = any(c not in FEATURE_COLUMNS for c in feature_cols)
     if needs_ext:
-        return featurize_extended(df)
-    return featurize(df)
+        return featurize_extended(df), True
+    return featurize(df), False
 
 
 def _conf_threshold_preds(conf: np.ndarray, thresh: float) -> np.ndarray:
@@ -117,22 +117,18 @@ def _per_dataset_eval(
         t_oracle, pred_oracle = _oracle_conf_threshold(sub_raw)
         rows.append(_row_dict(f"conf_oracle(t={t_oracle:.2f}):{ds}", sub_raw, pred_oracle))
         if include_model and feat_df is not None and proba is not None:
+            if len(feat_df) != len(raw_df):
+                continue
             sub_feat = feat_df[feat_df["dataset_id"] == ds]
-            if len(sub_feat) == len(sub_raw):
-                # align via index: raw_df and feat_df share order from _build_combined_table before featurize
-                idx = sub_raw.index
-                sub_proba = proba[idx] if len(proba) == len(raw_df) else None
-                if sub_proba is None:
-                    # fallback: re-filter by group_id membership
-                    mask = feat_df["dataset_id"] == ds
-                    sub_proba = proba[mask.to_numpy()] if len(proba) == len(feat_df) else None
-                if sub_proba is not None and len(sub_proba) == len(sub_raw):
-                    rows.append(
-                        _row_dict(f"model_thr0.5:{ds}", sub_raw, (sub_proba >= 0.5).astype(int))
-                    )
-                    rows.append(
-                        _row_dict(f"model_ef1:{ds}", sub_raw, _model_preds_ef1(sub_raw, sub_proba))
-                    )
+            if len(sub_feat) != len(sub_raw):
+                continue
+            assert len(feat_df) == len(raw_df) == len(proba)
+            mask_ds = raw_df["dataset_id"] == ds
+            sub_proba = proba[mask_ds.to_numpy()]
+            if len(sub_proba) != len(sub_raw):
+                continue
+            rows.append(_row_dict(f"model_thr0.5:{ds}", sub_raw, (sub_proba >= 0.5).astype(int)))
+            rows.append(_row_dict(f"model_ef1:{ds}", sub_raw, _model_preds_ef1(sub_raw, sub_proba)))
     return rows
 
 
@@ -223,7 +219,7 @@ def main() -> None:
         print(f"  training_stats: {payload.get('training_stats', {})}")
         print(f"  cv_summary: {payload.get('cv_summary', {})}")
         try:
-            feat_df = _featurize_for_cols(raw_df, feat_cols)
+            feat_df, _is_extended = _featurize_for_cols(raw_df, feat_cols)
         except Exception as e:
             print(f"[warn] featurize failed: {e}")
             feat_df = None

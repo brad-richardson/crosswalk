@@ -51,12 +51,14 @@ def _discover_specs(
             datasets[ds] = p
 
     factory_roots = [
+        data_root / "data" / "factory" / "release=2026-06-17.0",
         data_root / "factory" / "release=2026-06-17.0",
         Path("data/factory/release=2026-06-17.0"),
+        data_root / "data" / "factory" / "release=2026-01-21.0",
         data_root / "factory" / "release=2026-01-21.0",
         Path("data/factory/release=2026-01-21.0"),
     ]
-    output_roots = [data_root / "output", Path("data/output")]
+    output_roots = [data_root / "data" / "output", data_root / "output", Path("data/output")]
 
     specs: list[tuple[str, Path, Path]] = []
     for ds, lpath in sorted(datasets.items()):
@@ -72,7 +74,7 @@ def _discover_specs(
                 groups_path = cand
                 break
         if groups_path is None:
-            groups_path = Path(f"<missing groups.json for {ds}>")
+            groups_path = Path(f"__missing_groups_{ds}.json")
         specs.append((ds, groups_path, lpath))
     return specs
 
@@ -174,6 +176,18 @@ def _build_soft_extra(
     soft = edge_soft_labels(all_groups, votes_df)
     if soft.empty:
         return None
+    if "group_id" in soft.columns and "ref_id" in soft.columns:
+        soft = (
+            soft.groupby(["group_id", "ref_id", "target_id"], as_index=False).agg(
+                {
+                    "soft_keep": "mean",
+                    "n_providers": "max",
+                    "unanimous": "min",
+                }
+            )
+            if "n_providers" in soft.columns
+            else soft.drop_duplicates(subset=["group_id", "ref_id", "target_id"])
+        )
     return soft
 
 
