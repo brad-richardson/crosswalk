@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Feature ablation study script for identifying noise or redundant features.
 
-This script systematically tests the impact of removing features on model performance
-to identify features that may be noise or no longer needed.
+This script tests feature value through paired grouped-CV removal ablations,
+category-only models, permutation importance, and per-dataset availability. The
+paired grouped-CV delta is the decision metric; the single holdout delta is retained
+as a diagnostic but is not used to recommend feature removal.
 
 Usage:
     # Full study (baseline + single features + categories)
@@ -13,6 +15,12 @@ Usage:
 
     # Category ablations only
     python scripts/ablation_study.py --mode category
+
+    # Each category by itself (standalone signal / redundancy check)
+    python scripts/ablation_study.py --mode category-only
+
+    # Missing/constant feature families by dataset (no model training)
+    python scripts/ablation_study.py --mode coverage
 
     # Custom output
     python scripts/ablation_study.py --output benchmarks/ablation_2026_02_01
@@ -117,6 +125,71 @@ def classify_feature(f1_delta: float) -> str:
         return "useful"
     else:
         return "important"
+
+
+def paired_cv_delta(
+    candidate_scores: list[float], baseline_scores: list[float]
+) -> tuple[float, float]:
+    """Return mean/std of fold-paired candidate-minus-baseline F1 deltas."""
+    candidate = np.asarray(candidate_scores, dtype=float)
+    baseline = np.asarray(baseline_scores, dtype=float)
+    if candidate.shape != baseline.shape or candidate.size == 0:
+        raise ValueError(
+            "paired CV requires non-empty score arrays with identical shapes; "
+            f"got candidate={candidate.shape}, baseline={baseline.shape}"
+        )
+    deltas = candidate - baseline
+    return float(deltas.mean()), float(deltas.std())
+
+
+def build_feature_coverage(
+    df, feature_categories: dict[str, list[str]] | None = None
+) -> list[dict]:
+    """Summarize missing and constant feature families for each dataset.
+
+    A feature is usable only when it has at least two distinct non-null values
+    in the slice. This is stricter than non-null coverage: an always-unknown
+    class signal or always-empty name signal is stored but carries no
+    within-dataset information.
+    """
+    categories = feature_categories or FEATURE_CATEGORIES
+    valid = df[df["label"].isin({"match", "no_match"})].copy()
+    slices = [("__all__", valid)]
+    if "dataset" in valid:
+        slices.extend((str(dataset), sub) for dataset, sub in valid.groupby("dataset"))
+
+    rows = []
+    for dataset, sub in slices:
+        for category, features in categories.items():
+            available = [feature for feature in features if feature in sub]
+            missing_columns = sorted(set(features) - set(available))
+            if available:
+                values = sub[available].replace([np.inf, -np.inf], np.nan)
+                observed_fraction = float(values.notna().to_numpy().mean())
+                unique_counts = values.nunique(dropna=True)
+                all_missing = sorted(unique_counts[unique_counts == 0].index.tolist())
+                constant = sorted(unique_counts[unique_counts == 1].index.tolist())
+                usable = sorted(unique_counts[unique_counts >= 2].index.tolist())
+            else:
+                observed_fraction = 0.0
+                all_missing = []
+                constant = []
+                usable = []
+            rows.append(
+                {
+                    "dataset": dataset,
+                    "category": category,
+                    "rows": len(sub),
+                    "positive_rows": int((sub["label"] == "match").sum()),
+                    "features": len(features),
+                    "observed_fraction": observed_fraction,
+                    "usable_features": len(usable),
+                    "usable_fraction": len(usable) / len(features) if features else 0.0,
+                    "all_missing_features": ",".join(all_missing + missing_columns),
+                    "constant_features": ",".join(constant),
+                }
+            )
+    return rows
 
 
 def _get_xgb_params(seed: int, scale_pos_weight: float) -> dict:
@@ -244,6 +317,7 @@ def train_and_evaluate(
         cv_f1_std = np.std(cv_scores)
     else:
         logger.warning(f"Not enough groups ({n_groups}) for {n_cv_folds}-fold CV")
+        cv_scores = [float(f1)]
         cv_f1_mean = f1
         cv_f1_std = 0.0
 
@@ -252,6 +326,7 @@ def train_and_evaluate(
         "f1": f1,
         "cv_f1_mean": cv_f1_mean,
         "cv_f1_std": cv_f1_std,
+        "cv_f1_scores": [float(score) for score in cv_scores],
         "n_features_used": len(feature_names),
     }
 
@@ -394,7 +469,7 @@ def run_ablation_study(
     Args:
         labels_dir: Path to labels directory
         output_dir: Output directory for results
-        mode: "full", "single", or "category"
+        mode: "full", "single", "category", or "category-only"
         seed: Random seed
 
     Returns:
@@ -422,6 +497,8 @@ def run_ablation_study(
         "cv_f1_std": baseline_metrics["cv_f1_std"],
         "accuracy_delta": 0.0,
         "f1_delta": 0.0,
+        "cv_f1_delta": 0.0,
+        "cv_f1_delta_std": 0.0,
         "classification": "baseline",
     }
     results.append(baseline_result)
@@ -444,7 +521,10 @@ def run_ablation_study(
 
                 accuracy_delta = metrics["accuracy"] - baseline_metrics["accuracy"]
                 f1_delta = metrics["f1"] - baseline_metrics["f1"]
-                classification = classify_feature(f1_delta)
+                cv_f1_delta, cv_f1_delta_std = paired_cv_delta(
+                    metrics["cv_f1_scores"], baseline_metrics["cv_f1_scores"]
+                )
+                classification = classify_feature(cv_f1_delta)
 
                 result = {
                     "experiment_type": "single_feature",
@@ -457,11 +537,17 @@ def run_ablation_study(
                     "cv_f1_std": metrics["cv_f1_std"],
                     "accuracy_delta": accuracy_delta,
                     "f1_delta": f1_delta,
+                    "cv_f1_delta": cv_f1_delta,
+                    "cv_f1_delta_std": cv_f1_delta_std,
                     "classification": classification,
                 }
                 results.append(result)
 
-                logger.info(f"    -> f1_delta={f1_delta:+.4f} ({classification})")
+                logger.info(
+                    f"    -> paired cv_f1_delta={cv_f1_delta:+.4f} "
+                    f"± {cv_f1_delta_std:.4f} ({classification}); "
+                    f"holdout={f1_delta:+.4f}"
+                )
 
             except Exception as e:
                 logger.error(f"    -> Failed: {e}")
@@ -477,6 +563,8 @@ def run_ablation_study(
                         "cv_f1_std": 0.0,
                         "accuracy_delta": 0.0,
                         "f1_delta": 0.0,
+                        "cv_f1_delta": 0.0,
+                        "cv_f1_delta_std": 0.0,
                         "classification": "error",
                     }
                 )
@@ -493,7 +581,10 @@ def run_ablation_study(
 
                 accuracy_delta = metrics["accuracy"] - baseline_metrics["accuracy"]
                 f1_delta = metrics["f1"] - baseline_metrics["f1"]
-                classification = classify_feature(f1_delta)
+                cv_f1_delta, cv_f1_delta_std = paired_cv_delta(
+                    metrics["cv_f1_scores"], baseline_metrics["cv_f1_scores"]
+                )
+                classification = classify_feature(cv_f1_delta)
 
                 result = {
                     "experiment_type": "category",
@@ -506,11 +597,17 @@ def run_ablation_study(
                     "cv_f1_std": metrics["cv_f1_std"],
                     "accuracy_delta": accuracy_delta,
                     "f1_delta": f1_delta,
+                    "cv_f1_delta": cv_f1_delta,
+                    "cv_f1_delta_std": cv_f1_delta_std,
                     "classification": classification,
                 }
                 results.append(result)
 
-                logger.info(f"    -> f1_delta={f1_delta:+.4f} ({classification})")
+                logger.info(
+                    f"    -> paired cv_f1_delta={cv_f1_delta:+.4f} "
+                    f"± {cv_f1_delta_std:.4f} ({classification}); "
+                    f"holdout={f1_delta:+.4f}"
+                )
 
             except Exception as e:
                 logger.error(f"    -> Failed: {e}")
@@ -526,6 +623,61 @@ def run_ablation_study(
                         "cv_f1_std": 0.0,
                         "accuracy_delta": 0.0,
                         "f1_delta": 0.0,
+                        "cv_f1_delta": 0.0,
+                        "cv_f1_delta_std": 0.0,
+                        "classification": "error",
+                    }
+                )
+
+    # Step 4: category-only models measure standalone predictive signal,
+    # complementing removal ablation when correlated families mask one another.
+    if mode == "category-only":
+        logger.info(f"\nRunning category-only models ({len(FEATURE_CATEGORIES)} categories)...")
+        for category_name, features in FEATURE_CATEGORIES.items():
+            logger.info(f"  Including only: {category_name} ({len(features)} features)")
+            excluded = [feature for feature in FEATURE_COLUMNS if feature not in features]
+            try:
+                metrics = train_and_evaluate(labels_dir, exclude_features=excluded, seed=seed)
+                accuracy_delta = metrics["accuracy"] - baseline_metrics["accuracy"]
+                f1_delta = metrics["f1"] - baseline_metrics["f1"]
+                cv_f1_delta, cv_f1_delta_std = paired_cv_delta(
+                    metrics["cv_f1_scores"], baseline_metrics["cv_f1_scores"]
+                )
+                results.append(
+                    {
+                        "experiment_type": "category_only",
+                        "excluded_features": ",".join(excluded),
+                        "excluded_category": "",
+                        "included_category": category_name,
+                        "n_features_used": metrics["n_features_used"],
+                        "accuracy": metrics["accuracy"],
+                        "f1": metrics["f1"],
+                        "cv_f1_mean": metrics["cv_f1_mean"],
+                        "cv_f1_std": metrics["cv_f1_std"],
+                        "accuracy_delta": accuracy_delta,
+                        "f1_delta": f1_delta,
+                        "cv_f1_delta": cv_f1_delta,
+                        "cv_f1_delta_std": cv_f1_delta_std,
+                        "classification": "standalone",
+                    }
+                )
+            except Exception as e:
+                logger.error(f"    -> Failed: {e}")
+                results.append(
+                    {
+                        "experiment_type": "category_only",
+                        "excluded_features": ",".join(excluded),
+                        "excluded_category": "",
+                        "included_category": category_name,
+                        "n_features_used": 0,
+                        "accuracy": 0.0,
+                        "f1": 0.0,
+                        "cv_f1_mean": 0.0,
+                        "cv_f1_std": 0.0,
+                        "accuracy_delta": 0.0,
+                        "f1_delta": 0.0,
+                        "cv_f1_delta": 0.0,
+                        "cv_f1_delta_std": 0.0,
                         "classification": "error",
                     }
                 )
@@ -549,14 +701,16 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
     # Filter to single-feature results for ranking
     single_feature_results = [r for r in results if r["experiment_type"] == "single_feature"]
 
-    # Sort by F1 delta (most negative = most important)
-    ranked_by_importance = sorted(single_feature_results, key=lambda x: x["f1_delta"])
+    # Sort by fold-paired grouped-CV delta (most negative = most important).
+    ranked_by_importance = sorted(single_feature_results, key=lambda x: x["cv_f1_delta"])
 
-    # Identify noise candidates (F1 delta >= 0)
+    # Identify investigation candidates. A single run is never sufficient to
+    # call a feature safe to remove; permutation, category-only, multi-seed,
+    # and per-dataset evidence still need to agree.
     noise_candidates = [
         r["excluded_features"]
         for r in single_feature_results
-        if r["f1_delta"] >= NOISE_THRESHOLD and r["classification"] != "error"
+        if r["cv_f1_delta"] >= NOISE_THRESHOLD and r["classification"] != "error"
     ]
 
     # Identify redundant features
@@ -574,7 +728,18 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
     # Category impact ranking
     category_results = [r for r in results if r["experiment_type"] == "category"]
     category_ranking = sorted(
-        [(r["excluded_category"], r["f1_delta"]) for r in category_results], key=lambda x: x[1]
+        [(r["excluded_category"], r["cv_f1_delta"]) for r in category_results],
+        key=lambda x: x[1],
+    )
+    category_only_results = [r for r in results if r["experiment_type"] == "category_only"]
+    category_only_ranking = sorted(
+        [
+            (r["included_category"], r["cv_f1_mean"])
+            for r in category_only_results
+            if r["classification"] != "error"
+        ],
+        key=lambda x: x[1],
+        reverse=True,
     )
 
     # Classification counts
@@ -598,6 +763,7 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
             "cv_f1_threshold": CV_F1_THRESHOLD,
         },
         "classification_thresholds": {
+            "metric": "fold-paired grouped-CV F1 delta",
             "noise": f">= {NOISE_THRESHOLD}",
             "redundant": f"> {REDUNDANT_THRESHOLD}",
             "useful": f"> {USEFUL_THRESHOLD}",
@@ -607,21 +773,30 @@ def generate_summary(results: list[dict], baseline_metrics: dict) -> dict:
         "feature_ranking_by_importance": [
             {
                 "feature": r["excluded_features"],
-                "f1_delta": r["f1_delta"],
+                "cv_f1_delta": r["cv_f1_delta"],
+                "cv_f1_delta_std": r["cv_f1_delta_std"],
+                "holdout_f1_delta": r["f1_delta"],
                 "classification": r["classification"],
             }
             for r in ranked_by_importance
         ],
         "category_ranking_by_importance": [
-            {"category": cat, "f1_delta": delta} for cat, delta in category_ranking
+            {"category": cat, "cv_f1_delta": delta} for cat, delta in category_ranking
+        ],
+        "category_only_ranking": [
+            {"category": cat, "cv_f1_mean": score} for cat, score in category_only_ranking
         ],
         "noise_candidates": noise_candidates,
         "redundant_candidates": redundant_candidates,
         "important_features": important_features,
         "recommendations": {
-            "safe_to_remove": noise_candidates,
-            "consider_removing": redundant_candidates,
+            "safe_to_remove": [],
+            "investigate_removal": noise_candidates + redundant_candidates,
             "keep": important_features,
+            "removal_gate": (
+                "Require agreement across paired grouped-CV ablation, permutation importance, "
+                "multi-seed stability, and per-dataset coverage before removing a feature."
+            ),
         },
     }
 
@@ -648,6 +823,7 @@ def save_results(
         "experiment_type",
         "excluded_features",
         "excluded_category",
+        "included_category",
         "n_features_used",
         "accuracy",
         "f1",
@@ -655,6 +831,8 @@ def save_results(
         "cv_f1_std",
         "accuracy_delta",
         "f1_delta",
+        "cv_f1_delta",
+        "cv_f1_delta_std",
         "classification",
     ]
 
@@ -702,7 +880,7 @@ def print_summary(summary: dict):
     print(f"  Important:  {counts.get('important', 0)}")
 
     if summary["noise_candidates"]:
-        print("\nNoise Candidates (safe to remove):")
+        print("\nNoise Candidates (investigate; not automatically safe to remove):")
         for feat in summary["noise_candidates"]:
             print(f"  - {feat}")
 
@@ -719,11 +897,41 @@ def print_summary(summary: dict):
             print(f"  - {feat}")
 
     if summary["category_ranking_by_importance"]:
-        print("\nCategory Importance Ranking:")
+        print("\nCategory Importance Ranking (paired grouped-CV):")
         for item in summary["category_ranking_by_importance"]:
-            print(f"  {item['category']}: F1 delta = {item['f1_delta']:+.4f}")
+            print(f"  {item['category']}: CV F1 delta = {item['cv_f1_delta']:+.4f}")
+
+    if summary["category_only_ranking"]:
+        print("\nCategory-only Standalone Ranking (grouped-CV):")
+        for item in summary["category_only_ranking"]:
+            print(f"  {item['category']}: CV F1 = {item['cv_f1_mean']:.4f}")
 
     print("\n" + "=" * 70)
+
+
+def save_feature_coverage(labels_dir: Path, output_dir: Path) -> list[dict]:
+    """Write per-dataset category availability and dead-zone diagnostics."""
+    rows = build_feature_coverage(LabelStore.load_all(labels_dir))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "feature_coverage.csv"
+    fieldnames = [
+        "dataset",
+        "category",
+        "rows",
+        "positive_rows",
+        "features",
+        "observed_fraction",
+        "usable_features",
+        "usable_fraction",
+        "all_missing_features",
+        "constant_features",
+    ]
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    logger.info(f"Saved per-dataset feature coverage to {path}")
+    return rows
 
 
 def main():
@@ -744,9 +952,12 @@ def main():
     )
     parser.add_argument(
         "--mode",
-        choices=["full", "single", "category", "permutation"],
+        choices=["full", "single", "category", "category-only", "permutation", "coverage"],
         default="full",
-        help="Ablation mode: full (all), single (features only), category (categories only), permutation (permutation importance)",
+        help=(
+            "Ablation mode: full (removal ablations), single, category, "
+            "category-only (standalone family signal), permutation, or coverage"
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -769,7 +980,13 @@ def main():
     logger.info(f"  Total features: {len(FEATURE_COLUMNS)}")
     logger.info(f"  Total categories: {len(FEATURE_CATEGORIES)}")
 
-    if args.mode == "permutation":
+    # Availability is cheap and is required context for every model-based run:
+    # a globally useful feature family can still be dead for one dataset.
+    save_feature_coverage(args.labels, args.output)
+
+    if args.mode == "coverage":
+        logger.info("Feature coverage analysis complete!")
+    elif args.mode == "permutation":
         # Permutation importance mode
         run_permutation_importance(
             labels_dir=args.labels,
@@ -778,7 +995,7 @@ def main():
         )
         logger.info("Permutation importance analysis complete!")
     else:
-        # Ablation study modes (full, single, category)
+        # Model-based ablation modes.
         results, summary = run_ablation_study(
             labels_dir=args.labels,
             output_dir=args.output,
@@ -797,6 +1014,8 @@ def main():
         if args.mode in ("full", "single"):
             expected_rows += len(FEATURE_COLUMNS)
         if args.mode in ("full", "category"):
+            expected_rows += len(FEATURE_CATEGORIES)
+        if args.mode == "category-only":
             expected_rows += len(FEATURE_CATEGORIES)
 
         actual_rows = len(results)
