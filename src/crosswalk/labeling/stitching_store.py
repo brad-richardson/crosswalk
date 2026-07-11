@@ -43,6 +43,11 @@ STITCHING_LABEL_COLUMNS = [
     "label_semantics",
     "ref_ids",
     "target_ids",
+    # Free-text reviewer note (optional). Captures edge-level / geometric intent
+    # that the flattened set/pair label cannot express (e.g. "same feature but
+    # split/merges don't line up at the merge point", "missing a couple ref
+    # edges"). Kept last for backwards-compatible column order.
+    "notes",
 ]
 
 # Columns added after the original schema; older CSVs lack them. Loaders fill
@@ -51,7 +56,17 @@ _SCHEMA_DEFAULTS = {
     "label_semantics": LABEL_SEMANTICS_PAIR,
     "ref_ids": "",
     "target_ids": "",
+    "notes": "",
 }
+
+# Read the CSV with NA-token coercion OFF. The free-text ``notes`` column can
+# legitimately hold text that pandas otherwise reads as NaN ("N/A", "None",
+# "null", "NA", ...); default parsing would silently blank such a note on
+# reload (_ensure_schema fills NaN with ""). Every cell is written non-null by
+# ``add()``/``save()``, so treating blanks as empty strings is lossless for the
+# other columns (numeric columns still infer int dtype from their populated
+# values).
+_READ_CSV_KW = {"keep_default_na": False}
 
 
 def _ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
@@ -74,7 +89,7 @@ def _ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
     df["label_semantics"] = sem.where(
         sem.isin([LABEL_SEMANTICS_PAIR, LABEL_SEMANTICS_SET]), LABEL_SEMANTICS_PAIR
     ).astype(str)
-    for col in ("ref_ids", "target_ids"):
+    for col in ("ref_ids", "target_ids", "notes"):
         df[col] = df[col].astype("string").fillna("").astype(str)
     # Preserve column order.
     return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
@@ -114,7 +129,7 @@ class StitchingLabelStore:
 
         if self.csv_path.exists():
             try:
-                df = pd.read_csv(self.csv_path, dtype={"group_id": str})
+                df = pd.read_csv(self.csv_path, dtype={"group_id": str}, **_READ_CSV_KW)
                 # Drop any columns not in the current schema (e.g. removed fields)
                 return _ensure_schema(df)
             except Exception as primary_error:
@@ -124,7 +139,7 @@ class StitchingLabelStore:
                 if backup_path.exists():
                     try:
                         logger.info(f"Recovering from backup: {backup_path}")
-                        df = pd.read_csv(backup_path, dtype={"group_id": str})
+                        df = pd.read_csv(backup_path, dtype={"group_id": str}, **_READ_CSV_KW)
                         return _ensure_schema(df)
                     except Exception as backup_error:
                         raise OSError(
@@ -139,7 +154,7 @@ class StitchingLabelStore:
 
         if backup_path.exists():
             try:
-                df = pd.read_csv(backup_path, dtype={"group_id": str})
+                df = pd.read_csv(backup_path, dtype={"group_id": str}, **_READ_CSV_KW)
                 return _ensure_schema(df)
             except Exception as e:
                 raise OSError(
@@ -174,6 +189,7 @@ class StitchingLabelStore:
         label_semantics: str = LABEL_SEMANTICS_PAIR,
         ref_ids: list[str] | None = None,
         target_ids: list[str] | None = None,
+        notes: str = "",
     ) -> None:
         """Add a stitching review label.
 
@@ -195,6 +211,8 @@ class StitchingLabelStore:
                 matches (see module docstring).
             ref_ids: Set-label reference membership (ignored for pair rows).
             target_ids: Set-label target membership (ignored for pair rows).
+            notes: Optional free-text reviewer note (edge-level / geometric
+                intent the flattened label can't express). Empty by default.
         """
         new_row = {
             "group_id": str(group_id),
@@ -209,6 +227,7 @@ class StitchingLabelStore:
             "label_semantics": label_semantics,
             "ref_ids": json.dumps(sorted(ref_ids)) if ref_ids else "",
             "target_ids": json.dumps(sorted(target_ids)) if target_ids else "",
+            "notes": str(notes or ""),
         }
 
         # Remove existing label for this group (re-review replaces)

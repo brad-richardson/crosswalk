@@ -223,6 +223,7 @@ class ReviewDiff:
     removed: set[tuple[str, str]] = field(default_factory=set)
     from_sidecar: bool = False
     crossproduct_artifact: bool = False
+    notes: str = ""
 
     @property
     def is_reject_all(self) -> bool:
@@ -248,6 +249,7 @@ def build_review(row: dict, cache_group: dict | None, sidecar_group: dict | None
         removed=removed,
         from_sidecar=from_sidecar,
         crossproduct_artifact=is_crossproduct_artifact(label_pairs, opt_pairs, universe),
+        notes=(row.get("notes") or "").strip(),
     )
 
 
@@ -460,6 +462,10 @@ def render_zoom(
 # ---------------------------------------------------------------------------
 def format_summary(reviews: list[ReviewDiff]) -> str:
     headers = ["group", "match_type", "label", "opt", "added", "removed", "session", "artifact"]
+    # Only widen the table with a notes column when at least one label carries one.
+    any_notes = any(rv.notes for rv in reviews)
+    if any_notes:
+        headers.append("notes")
     rows = []
     n_flagged = 0
     for rv in reviews:
@@ -470,18 +476,20 @@ def format_summary(reviews: list[ReviewDiff]) -> str:
         if rv.crossproduct_artifact:
             n_flagged += 1
             artifact = f"xprod? +{len(rv.added)}"
-        rows.append(
-            [
-                rv.gid,
-                rv.match_type or "-",
-                str(len(rv.label_pairs)),
-                str(len(rv.opt_pairs)),
-                str(len(rv.added)),
-                str(len(rv.removed)),
-                session,
-                artifact,
-            ]
-        )
+        row = [
+            rv.gid,
+            rv.match_type or "-",
+            str(len(rv.label_pairs)),
+            str(len(rv.opt_pairs)),
+            str(len(rv.added)),
+            str(len(rv.removed)),
+            session,
+            artifact,
+        ]
+        if any_notes:
+            note = rv.notes.replace("\n", " ")
+            row.append((note[:57] + "…") if len(note) > 58 else (note or "-"))
+        rows.append(row)
     if not rows:
         return "(no matching label rows)"
     widths = [len(h) for h in headers]

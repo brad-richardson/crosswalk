@@ -388,6 +388,19 @@
         </div>
     </div>
 
+    <!-- Optional reviewer note. Associated with #select-form via form= so HTMX
+         serializes it on submit even though it sits outside the form subtree.
+         Captures edge-level / geometric intent the flattened label can't hold
+         (e.g. "same feature but split/merges don't line up at the merge point").
+         Re-rendered empty on each group swap; prefilled on re-review. -->
+    <div class="card-note" style="margin-top: 8px;">
+        <textarea name="notes" id="review-notes" form="select-form" rows="2"
+                  maxlength="2000"
+                  placeholder="Optional note (e.g. same feature but merge points don't line up; missing a couple ref edges)…"
+                  style="width: 100%; box-sizing: border-box; resize: vertical; font: inherit;"
+        >{% if prior_note is defined and prior_note %}{{ prior_note }}{% endif %}</textarea>
+    </div>
+
     <!-- Action buttons: shared across tabs, always visible below the panels. -->
     <div class="card-actions" id="card-actions" style="display: flex; gap: 8px; margin-top: 8px;">
         <form style="flex: 1;" id="select-form"
