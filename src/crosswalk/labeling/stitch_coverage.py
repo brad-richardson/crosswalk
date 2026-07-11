@@ -145,6 +145,7 @@ class PriorLabelCoverage:
     new_ref_ids: tuple[str, ...]  # current refs outside the kept universe
     covered_target_ids: tuple[str, ...]
     new_target_ids: tuple[str, ...]
+    notes: str = ""  # free-text note from the prior label row (empty if none)
 
     @property
     def n_total_refs(self) -> int:
@@ -180,6 +181,7 @@ class PriorLabelCoverage:
             "new_ref_ids": list(self.new_ref_ids),
             "covered_target_ids": list(self.covered_target_ids),
             "new_target_ids": list(self.new_target_ids),
+            "notes": self.notes,
         }
 
 
@@ -205,6 +207,7 @@ def _coverage_for(group: dict, gid: str, row, prior_gid: str, exact: bool) -> Pr
         new_ref_ids=tuple(sorted(new_refs)),
         covered_target_ids=tuple(sorted(covered_targets)),
         new_target_ids=tuple(sorted(new_targets)),
+        notes=str(row.get("notes") or ""),
     )
 
 

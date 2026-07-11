@@ -662,6 +662,10 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
         ]
         ctx["preseed_inactive_ids"] = new_ids
         ctx["prior_new_ids"] = new_ids
+        # Prefill the note textarea from the earlier review of this geometry, so a
+        # re-review edits the prior note instead of starting blank. Inert (empty)
+        # until the coverage layer carries a note through.
+        ctx["prior_note"] = prior.get("notes", "")
     return geojson, ctx
 
 
@@ -953,6 +957,7 @@ async def stitching_select(
     exclude_slivers: str = Form(""),
     deanchored: bool = Form(False),
     confirm_reject_all: str = Form(""),
+    notes: str = Form(""),
 ):
     """Records selection, returns next group via HTMX swap.
 
@@ -1106,6 +1111,9 @@ async def stitching_select(
             label_semantics=label_semantics,
             ref_ids=ref_members,
             target_ids=target_members,
+            # Free-text reviewer note; trimmed and length-capped so a stray paste
+            # can't bloat the CSV row.
+            notes=notes.strip()[:2000],
             # Stamp de-anchored reviews so the eval can slice an unbiased set of
             # labels elicited without the optimizer's pre-seeded proposal. No new
             # CSV column — reuses the existing session_id provenance field.

@@ -1252,6 +1252,7 @@ def record_stitching_label(
     label_semantics: str = "pair",
     ref_ids: list[str] | None = None,
     target_ids: list[str] | None = None,
+    notes: str = "",
 ) -> None:
     """Record a stitching review label.
 
@@ -1270,6 +1271,7 @@ def record_stitching_label(
             group membership (ref_ids/target_ids) with empty selected_edges.
         ref_ids: Set-label reference membership (ignored for pair rows).
         target_ids: Set-label target membership (ignored for pair rows).
+        notes: Optional free-text reviewer note (empty by default).
     """
     from ..labeling.stitching_store import StitchingLabelStore
 
@@ -1289,4 +1291,5 @@ def record_stitching_label(
         label_semantics=label_semantics,
         ref_ids=ref_ids,
         target_ids=target_ids,
+        notes=notes,
     )

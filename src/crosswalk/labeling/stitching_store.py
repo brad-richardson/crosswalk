@@ -43,6 +43,11 @@ STITCHING_LABEL_COLUMNS = [
     "label_semantics",
     "ref_ids",
     "target_ids",
+    # Free-text reviewer note (optional). Captures edge-level / geometric intent
+    # that the flattened set/pair label cannot express (e.g. "same feature but
+    # split/merges don't line up at the merge point", "missing a couple ref
+    # edges"). Kept last for backwards-compatible column order.
+    "notes",
 ]
 
 # Columns added after the original schema; older CSVs lack them. Loaders fill
@@ -51,6 +56,7 @@ _SCHEMA_DEFAULTS = {
     "label_semantics": LABEL_SEMANTICS_PAIR,
     "ref_ids": "",
     "target_ids": "",
+    "notes": "",
 }
 
 
@@ -74,7 +80,7 @@ def _ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
     df["label_semantics"] = sem.where(
         sem.isin([LABEL_SEMANTICS_PAIR, LABEL_SEMANTICS_SET]), LABEL_SEMANTICS_PAIR
     ).astype(str)
-    for col in ("ref_ids", "target_ids"):
+    for col in ("ref_ids", "target_ids", "notes"):
         df[col] = df[col].astype("string").fillna("").astype(str)
     # Preserve column order.
     return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
@@ -174,6 +180,7 @@ class StitchingLabelStore:
         label_semantics: str = LABEL_SEMANTICS_PAIR,
         ref_ids: list[str] | None = None,
         target_ids: list[str] | None = None,
+        notes: str = "",
     ) -> None:
         """Add a stitching review label.
 
@@ -195,6 +202,8 @@ class StitchingLabelStore:
                 matches (see module docstring).
             ref_ids: Set-label reference membership (ignored for pair rows).
             target_ids: Set-label target membership (ignored for pair rows).
+            notes: Optional free-text reviewer note (edge-level / geometric
+                intent the flattened label can't express). Empty by default.
         """
         new_row = {
             "group_id": str(group_id),
@@ -209,6 +218,7 @@ class StitchingLabelStore:
             "label_semantics": label_semantics,
             "ref_ids": json.dumps(sorted(ref_ids)) if ref_ids else "",
             "target_ids": json.dumps(sorted(target_ids)) if target_ids else "",
+            "notes": str(notes or ""),
         }
 
         # Remove existing label for this group (re-review replaces)

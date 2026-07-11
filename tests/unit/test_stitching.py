@@ -2256,6 +2256,64 @@ class TestStitchingLabelStore:
         row = store.df.iloc[0]
         assert row["label_semantics"] == "pair"
         assert row["ref_ids"] == ""
+        # A CSV predating the notes column loads with an empty note, not NaN.
+        assert row["notes"] == ""
+
+    def test_notes_round_trip(self, store):
+        """A free-text note persists and reloads intact; default is empty."""
+        store.add(
+            group_id="gnote",
+            selected_edges=[],
+            match_type="M:N",
+            num_refs=2,
+            num_targets=2,
+            labeler="brad",
+            session_id="sess3",
+            label_semantics="set",
+            ref_ids=["rA", "rB"],
+            target_ids=["t1", "t2"],
+            notes="same feature but merge points don't line up",
+        )
+        # A plain add() (no notes kwarg) must default to an empty string.
+        store.add(
+            group_id="gplain",
+            selected_edges=[{"ref_id": "r1", "target_id": "t1"}],
+            match_type="1:N",
+            num_refs=1,
+            num_targets=1,
+            labeler="brad",
+            session_id="sess4",
+        )
+        from crosswalk.labeling.stitching_store import StitchingLabelStore
+
+        reloaded = StitchingLabelStore("test_dataset", labels_dir=store.labels_dir)
+        by_gid = reloaded.df.set_index("group_id")
+        assert by_gid.loc["gnote", "notes"] == "same feature but merge points don't line up"
+        assert by_gid.loc["gplain", "notes"] == ""
+
+    def test_legacy_csv_missing_notes_defaults_empty(self, store):
+        """A CSV with the set columns but no notes column loads with empty notes."""
+        store.partition_path.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(
+            [
+                {
+                    "group_id": "gold",
+                    "dataset_id": "test_dataset",
+                    "selected_edges": "[]",
+                    "match_type": "M:N",
+                    "num_refs": 2,
+                    "num_targets": 2,
+                    "labeler": "brad",
+                    "labeled_at": "2026-01-01T00:00:00+00:00",
+                    "session_id": "s",
+                    "label_semantics": "set",
+                    "ref_ids": '["rA", "rB"]',
+                    "target_ids": '["t1", "t2"]',
+                }
+            ]
+        ).to_csv(store.csv_path, index=False)
+        row = store.df.iloc[0]
+        assert row["notes"] == ""
 
     def test_dedup_replaces_on_same_group_id(self, store):
         for i in range(3):
