@@ -6,7 +6,7 @@ Data reality (verified 2026-07, see the prototype writeup + the round-3 design
 * Since PR #344 the ``*_groups.json`` sidecar carries, per group, a
   **``candidate_edges``** list: every floor-passing candidate pair in the
   group's connected component, **uncapped**, each as
-  ``{ref_id, target_id, confidence, selected[, selected_elsewhere]}``
+  ``{ref_id, target_id, confidence, selected[, selected_elsewhere][, pruned]}``
   (``pipeline/runner.py::_compute_candidate_graph_by_group``). This is the
   canonical candidate universe the design's stage-1 persistence contract
   defines, and it is what makes UNDER-selection learnable at the pair level:
@@ -418,7 +418,9 @@ def _rows_from_candidate_graph(
     component edge to a group containing NEITHER endpoint. Such an edge is not a
     within-group decision for this group, so — following the design's
     endpoint-membership recommendation — it is dropped when neither ``ref_id``
-    is in the group's ``ref_ids`` nor ``target_id`` in its ``target_ids``.
+    is in the group's ``ref_ids`` nor ``target_id`` in its ``target_ids``. An
+    explicitly owned ``pruned: true`` edge is exempt: its endpoints may both
+    have left the post-prune group, but its pre-prune ownership is authoritative.
 
     Recall accounting: a human-selected edge known to the group's legacy view
     (``edges``/``rejected_edges``) but NOT emitted here — below the candidate
@@ -447,7 +449,8 @@ def _rows_from_candidate_graph(
     for cand in candidate_edges:
         key = _edge_key(cand)
         stats["candidate_seen"] += 1
-        if filter_rule5 and key[0] not in grp_refs and key[1] not in grp_tgts:
+        owned_pruned = cand.get("pruned") is True
+        if filter_rule5 and not owned_pruned and key[0] not in grp_refs and key[1] not in grp_tgts:
             stats["rule5_filtered"] += 1
             continue
         if not cand.get("selected", False) and cand.get("selected_elsewhere", False):
@@ -462,9 +465,10 @@ def _rows_from_candidate_graph(
         rows.append(_edge_row(merged, group, n_edges, dataset_id, hgid, hrow, provenance, human_es))
 
     # Lost positives vs the legacy universe (see docstring "Recall accounting").
-    stats["human_selected_outside_candidate_graph"] += sum(
-        1 for key in human_es if key in struct_lookup and key not in emitted
-    )
+    outside = sum(1 for key in human_es if key in struct_lookup and key not in emitted)
+    stats["human_selected_outside_candidate_graph"] += outside
+    if provenance in {"clean", "split"}:
+        stats[f"human_selected_outside_candidate_graph_{provenance}"] += outside
     return rows
 
 
@@ -555,7 +559,8 @@ def build_edge_table(
             when a group carries a non-empty one; set False to force the legacy
             path (e.g. for A/B comparison against the pre-#344 behavior).
         filter_rule5: candidate-graph path only — drop rule-5 attribution noise
-            (candidate edges with neither endpoint in the group). Default True.
+            (candidate edges with neither endpoint in the group), except an
+            explicitly owner-attributed ``pruned`` edge. Default True.
         include_empty: if True (default), emit all-``keep=0`` rows for
             reject-all labels whose group_id still exists (candidate-graph
             groups only; see above).
@@ -600,6 +605,8 @@ def build_edge_table(
         "selected_elsewhere_excluded": 0,
         "new_negatives": 0,
         "human_selected_outside_candidate_graph": 0,
+        "human_selected_outside_candidate_graph_clean": 0,
+        "human_selected_outside_candidate_graph_split": 0,
         "empty_rows": 0,
         "empty_legacy_skipped": 0,
         "empty_unrecovered": n_empty_unrecovered,

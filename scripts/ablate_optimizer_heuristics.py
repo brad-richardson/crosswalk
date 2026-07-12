@@ -92,6 +92,12 @@ def _load_inputs(data_root: Path, datasets: list[str] | None) -> tuple[pd.DataFr
                 "human_selected_outside_candidate_graph": stats.get(
                     "human_selected_outside_candidate_graph", 0
                 ),
+                "human_selected_outside_candidate_graph_clean": stats.get(
+                    "human_selected_outside_candidate_graph_clean", 0
+                ),
+                "human_selected_outside_candidate_graph_split": stats.get(
+                    "human_selected_outside_candidate_graph_split", 0
+                ),
                 "empty_unrecovered": stats.get("empty_unrecovered", 0),
                 "empty_legacy_skipped": stats.get("empty_legacy_skipped", 0),
             }

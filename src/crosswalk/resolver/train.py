@@ -654,13 +654,13 @@ def build_report_text(
     lines.append("### Per-dataset build stats")
     lines.append("")
     lines.append(
-        "| dataset | sidecar groups | labels | rows | candidate_groups | legacy_groups | parquet rows | enriched | missing keys | outside candidate | pos | neg | empty_rows | empty_legacy_skipped |"
+        "| dataset | sidecar groups | labels | rows | candidate_groups | legacy_groups | parquet rows | enriched | missing keys | outside total | outside clean | outside split | pos | neg | empty_rows | empty_legacy_skipped |"
     )
-    lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for s in per_ds_stats:
         if not s.get("exists", True):
             lines.append(
-                f"| {s['dataset_id']} | MISSING | - | - | - | - | - | - | - | - | - | - | - | - |"
+                f"| {s['dataset_id']} | MISSING | - | - | - | - | - | - | - | - | - | - | - | - | - | - |"
             )
             continue
         lines.append(
@@ -669,6 +669,8 @@ def build_report_text(
             f"| {s.get('build_candidate_parquet_rows', 0)} | {s.get('build_candidate_parquet_enriched', 0)} "
             f"| {s.get('build_candidate_parquet_missing_keys', 0)} "
             f"| {s.get('build_human_selected_outside_candidate_graph', 0)} "
+            f"| {s.get('build_human_selected_outside_candidate_graph_clean', 0)} "
+            f"| {s.get('build_human_selected_outside_candidate_graph_split', 0)} "
             f"| {s.get('build_positives', 0)} | {s.get('build_negatives', 0)} "
             f"| {s.get('build_empty_rows', 0)} | {s.get('build_empty_legacy_skipped', 0)} |"
         )

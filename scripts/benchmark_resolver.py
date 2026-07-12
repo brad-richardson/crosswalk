@@ -423,6 +423,8 @@ def main() -> None:
             f"labels={s.get('n_labels', 0)} rows={s.get('rows', 0)} cand_groups={s.get('build_candidate_groups', 0)} "
             f"legacy_groups={s.get('build_legacy_groups', 0)} pos={s.get('build_positives', 0)} neg={s.get('build_negatives', 0)} "
             f"outside_candidate={s.get('build_human_selected_outside_candidate_graph', 0)} "
+            f"outside_clean={s.get('build_human_selected_outside_candidate_graph_clean', 0)} "
+            f"outside_split={s.get('build_human_selected_outside_candidate_graph_split', 0)} "
             f"parquet_rows={s.get('build_candidate_parquet_rows', 0)} enriched={s.get('build_candidate_parquet_enriched', 0)} "
             f"empty_rows={s.get('build_empty_rows', 0)} empty_legacy_skipped={s.get('build_empty_legacy_skipped', 0)}"
         )

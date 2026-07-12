@@ -239,11 +239,13 @@ def test_review_reason_key_is_tolerated_and_round_trips_group_unchanged():
 # --- #344 candidate_edges (design §3 stage-1 consumer) ----------------------
 
 
-def _cand(ref, tgt, conf, selected, selected_elsewhere=False):
+def _cand(ref, tgt, conf, selected, selected_elsewhere=False, pruned=False):
     """Minimal stage-1 candidate_edges record (topology + confidence + flags)."""
     d = {"ref_id": ref, "target_id": tgt, "confidence": conf, "selected": selected}
     if selected_elsewhere:
         d["selected_elsewhere"] = True
+    if pruned:
+        d["pruned"] = True
     return d
 
 
@@ -357,6 +359,47 @@ def test_candidate_graph_rule5_keeps_single_endpoint_member():
     assert set(zip(df["ref_id"], df["target_id"])) == {("A", "T"), ("A", "U")}
     row_u = df[df["target_id"] == "U"].iloc[0]
     assert row_u["keep"] == 1 and not row_u["selected"]
+
+
+def test_candidate_graph_rule5_keeps_owned_pruned_pendant():
+    """Pre-prune ownership is stronger than endpoint membership: a pruned pair
+    with neither endpoint left in the group remains an observable positive."""
+    grp = _group_cg(
+        "g1",
+        [
+            _cand("A", "T", 0.99, selected=True),
+            _cand("X", "Y", 0.60, selected=False, pruned=True),
+        ],
+        ref_ids=["A"],
+        target_ids=["T"],
+        edges=[_edge("A", "T", 0.99), _edge("X", "Y", 0.60, selected=False, pruned=True)],
+    )
+    human = _labels([_label_row("hg1", [("A", "T"), ("X", "Y")])])
+    df = build_edge_table([grp], human, "ds")
+
+    assert set(zip(df["ref_id"], df["target_id"])) == {("A", "T"), ("X", "Y")}
+    pendant = df[(df["ref_id"] == "X") & (df["target_id"] == "Y")].iloc[0]
+    assert pendant["keep"] == 1
+    assert not bool(pendant["selected"])
+    assert df.attrs["build_stats"]["rule5_filtered"] == 0
+
+
+def test_candidate_graph_rule5_does_not_truthify_malformed_pruned_string():
+    """Only the producer's canonical JSON boolean can claim the ownership
+    exemption; a truthy string from malformed input remains rule-5 noise."""
+    malformed = _cand("X", "Y", 0.60, selected=False)
+    malformed["pruned"] = "false"
+    grp = _group_cg(
+        "g1",
+        [_cand("A", "T", 0.99, selected=True), malformed],
+        ref_ids=["A"],
+        target_ids=["T"],
+    )
+    human = _labels([_label_row("hg1", [("A", "T")])])
+
+    df = build_edge_table([grp], human, "ds")
+    assert set(zip(df["ref_id"], df["target_id"])) == {("A", "T")}
+    assert df.attrs["build_stats"]["rule5_filtered"] == 1
 
 
 def test_candidate_graph_enriches_structural_layer_from_edges():
@@ -580,4 +623,34 @@ def test_human_selected_outside_candidate_graph_counted():
     human = _labels([_label_row("hg1", [("A", "T"), ("B", "T")])])  # human kept BOTH
     df = build_edge_table([grp], human, "ds")
     assert set(df["ref_id"]) == {"A"}  # B->T not in the candidate universe
-    assert df.attrs["build_stats"]["human_selected_outside_candidate_graph"] == 1
+    stats = df.attrs["build_stats"]
+    assert stats["human_selected_outside_candidate_graph"] == 1
+    assert stats["human_selected_outside_candidate_graph_clean"] == 1
+    assert stats["human_selected_outside_candidate_graph_split"] == 0
+
+
+def test_human_selected_outside_candidate_graph_split_counted_separately():
+    """The total remains backward compatible while split-label misses are
+    separable from clean candidate-recall defects."""
+    g1 = _group_cg(
+        "g1",
+        [_cand("A", "T", 0.99, selected=True)],
+        ref_ids=["A"],
+        target_ids=["T"],
+        edges=[_edge("A", "T", 0.99)],
+    )
+    g1["rejected_edges"] = [_edge("B", "T", 0.2, selected=False)]
+    g2 = _group_cg(
+        "g2",
+        [_cand("C", "U", 0.99, selected=True)],
+        ref_ids=["C"],
+        target_ids=["U"],
+    )
+    human = _labels([_label_row("hg1", [("A", "T"), ("B", "T"), ("C", "U")])])
+
+    df = build_edge_table([g1, g2], human, "ds")
+    stats = df.attrs["build_stats"]
+    assert set(df["provenance"]) == {"split"}
+    assert stats["human_selected_outside_candidate_graph"] == 1
+    assert stats["human_selected_outside_candidate_graph_clean"] == 0
+    assert stats["human_selected_outside_candidate_graph_split"] == 1
