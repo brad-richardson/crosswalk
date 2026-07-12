@@ -23,9 +23,11 @@ from __future__ import annotations
 import json
 
 import geopandas as gpd
+import pandas as pd
 from shapely import LineString
 
-from crosswalk.config import settings
+from crosswalk.config import FEATURE_COLUMNS, FEATURE_VERSION, settings
+from crosswalk.filenames import candidates_sidecar_path
 from crosswalk.matching.stitch_options import build_stitch_options
 from crosswalk.matching.stitch_queue_refresh import (
     check_queue_optimizer_parity,
@@ -33,7 +35,7 @@ from crosswalk.matching.stitch_queue_refresh import (
     selected_pair_set,
 )
 from crosswalk.matching.types import MatchDecision, MatchResult
-from crosswalk.pipeline.runner import _export_groups_sidecar
+from crosswalk.pipeline.runner import _export_groups_sidecar, _signed_lateral_offset_m
 
 # Metric CRS so sliver/structure computation runs on meters (as in production).
 _CRS = "EPSG:32619"
@@ -64,7 +66,9 @@ def _tgt_gdf():
 
 
 def _mr(ref, tgt, conf, ref_idx, tgt_idx, gid=None):
-    feats = {"group_id": gid} if gid else {}
+    feats = {"hausdorff_distance_m": float(ref_idx + tgt_idx + 1)}
+    if gid:
+        feats["group_id"] = gid
     return MatchResult(
         ref_id=ref,
         target_id=tgt,
@@ -112,6 +116,7 @@ def _export(tmp_path, results, optimized, ref, tgt, **kwargs):
         target_id_column="id",
         reference_proj=ref,
         target_proj=tgt,
+        dataset_id="toy",
         **kwargs,
     )
     return _load(p)
@@ -141,6 +146,90 @@ def test_candidate_edges_round_trip_with_selected_flags(tmp_path):
     assert g["n_candidate_edges"] == 4
     # No pair here was selected in another group / as a 1:1.
     assert all("selected_elsewhere" not in e for e in cand)
+
+
+def test_typed_candidate_parquet_covers_full_graph_with_runtime_features(tmp_path):
+    ref, tgt, results, selected = _scenario()
+    out = tmp_path / "bridge.parquet"
+    sidecar = _export_groups_sidecar(
+        results=results,
+        optimized=selected,
+        output_path=out,
+        reference=ref,
+        target=tgt,
+        min_confidence=0.1,
+        ref_id_column="id",
+        target_id_column="id",
+        reference_proj=ref,
+        target_proj=tgt,
+        dataset_id="toy",
+    )
+    groups = _load(sidecar)
+    frame = pd.read_parquet(candidates_sidecar_path(out))
+
+    json_keys = {
+        (group["group_id"], edge["ref_id"], edge["target_id"])
+        for group in groups
+        for edge in group["candidate_edges"]
+    }
+    parquet_keys = set(frame[["group_id", "ref_id", "target_id"]].itertuples(index=False, name=None))
+    assert parquet_keys == json_keys
+    assert len(frame) == 4
+    assert frame["dataset_id"].eq("toy").all()
+    assert set(FEATURE_COLUMNS) <= set(frame.columns)
+    assert frame[FEATURE_COLUMNS].dtypes.map(lambda dtype: dtype.kind).eq("f").all()
+    assert frame["feature_version"].eq(FEATURE_VERSION).all()
+    assert frame["schema_version"].eq("1.0").all()
+    assert frame["model_hash"].str.fullmatch(r"[0-9a-f]{64}").all()
+    assert frame["ref_idx"].notna().all()
+    assert frame["target_idx"].notna().all()
+    assert frame["hausdorff_distance_m"].notna().all()
+    selected_rows = frame.set_index(["ref_id", "target_id"])
+    assert selected_rows.loc[("R1", "T1"), "lateral_offset_signed_m"] > 0
+    assert selected_rows.loc[("R3", "T1"), "lateral_offset_signed_m"] < 0
+    assert bool(selected_rows.loc[("R1", "T1"), "selected"])
+    assert selected_rows.loc[("R1", "T2"), "optimizer_decision"] == "rejected"
+    assert selected_rows.loc[("R1", "T2"), "decision_reason"] == "optimizer_rejected"
+
+
+def test_signed_lateral_offset_uses_reference_orientation():
+    target = LineString([(0, 2), (10, 2)])
+    assert _signed_lateral_offset_m(LineString([(0, 0), (10, 0)]), target) == 2.0
+    assert _signed_lateral_offset_m(LineString([(10, 0), (0, 0)]), target) == -2.0
+
+
+def test_candidate_parquet_flag_is_independent_and_clears_stale_file(tmp_path):
+    ref, tgt, results, selected = _scenario()
+    out = tmp_path / "bridge.parquet"
+    _export_groups_sidecar(
+        results,
+        selected,
+        out,
+        ref,
+        tgt,
+        min_confidence=0.1,
+        reference_proj=ref,
+        target_proj=tgt,
+    )
+    candidate_path = candidates_sidecar_path(out)
+    assert candidate_path.exists()
+
+    original = settings.stitch_persist_candidates
+    try:
+        settings.stitch_persist_candidates = False
+        _export_groups_sidecar(
+            results,
+            selected,
+            out,
+            ref,
+            tgt,
+            min_confidence=0.1,
+            reference_proj=ref,
+            target_proj=tgt,
+        )
+    finally:
+        settings.stitch_persist_candidates = original
+    assert not candidate_path.exists()
 
 
 def test_dropped_candidate_recorded_even_when_rejected_persistence_off(tmp_path):

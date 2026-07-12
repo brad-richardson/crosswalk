@@ -877,6 +877,13 @@ class MatcherSettings(BaseSettings):
         "sidecar (``candidate_edges``: every floor-passing pair with confidence + "
         "selected flag). Learned-resolver flip condition #1; additive.",
     )
+    stitch_persist_candidates: bool = Field(
+        default=True,
+        description="Persist a typed ``*_candidates.parquet`` row for every resolver "
+        "candidate edge, including all runtime pair features, structural context, "
+        "optimizer status, and feature/model provenance. Additive; does not change "
+        "matching or the groups JSON.",
+    )
 
     # --- Confidence-drop prune (M2 / resolver Phase 1) -------------------------
     # Post-optimizer prune of group (M:N/1:N/N:1) selections: drop a selected

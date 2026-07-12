@@ -23,7 +23,7 @@ from crosswalk.factory.manifest import (
     compute_score_key,
     file_fingerprint,
 )
-from crosswalk.factory.runner import FactoryPaths, build_keys, is_up_to_date
+from crosswalk.factory.runner import FactoryPaths, _normalize_outputs, build_keys, is_up_to_date
 from crosswalk.factory.scored_cache import read_scored_cache, write_scored_cache
 from crosswalk.matching.types import MatchDecision, MatchResult
 
@@ -155,6 +155,8 @@ def test_settings_snapshot_covers_decision_knobs():
         "resolver_prune_enabled",
         "resolver_prune_overrides",
         "contiguity_tolerance_m",
+        "stitch_persist_candidate_graph",
+        "stitch_persist_candidates",
     ):
         assert knob in snap, f"{knob} missing from settings_snapshot()"
 
@@ -174,6 +176,20 @@ def test_is_up_to_date(tmp_path):
     # Missing bridge -> stale even if manifest matches
     bpath.unlink()
     assert not is_up_to_date(mpath, bpath, "key1")
+
+
+def test_is_up_to_date_requires_candidates_for_group_outputs(tmp_path, monkeypatch):
+    from crosswalk.config import settings
+
+    monkeypatch.setattr(settings, "stitch_persist_candidates", True)
+    mpath = tmp_path / "manifest.json"
+    bpath = tmp_path / "bridge.parquet"
+    bpath.write_bytes(b"bridge")
+    Manifest(dataset="d", release="r", full_key="key", groups={"n_groups": 1}).write(mpath)
+
+    assert not is_up_to_date(mpath, bpath, "key")
+    (tmp_path / "candidates.parquet").write_bytes(b"candidates")
+    assert is_up_to_date(mpath, bpath, "key")
 
 
 def test_build_keys_reoptimize_semantics(tmp_path, monkeypatch):
@@ -376,7 +392,21 @@ def test_factory_paths_layout(tmp_path):
     assert b.parent.name == "dataset=us_frisco_trails"
     assert b.parent.parent.name == "release=2026-01-21.0"
     assert paths.groups("r", "d").name == "groups.json"
+    assert paths.candidates("r", "d").name == "candidates.parquet"
     assert paths.manifest("r", "d").name == "manifest.json"
+
+
+def test_factory_normalizes_groups_and_candidates_sidecars(tmp_path):
+    dataset_dir = tmp_path / "dataset=d"
+    dataset_dir.mkdir()
+    bridge = dataset_dir / "bridge.parquet"
+    (dataset_dir / "bridge_groups.json").write_text("{}")
+    (dataset_dir / "bridge_candidates.parquet").write_bytes(b"typed")
+
+    _normalize_outputs(dataset_dir, bridge)
+
+    assert (dataset_dir / "groups.json").read_text() == "{}"
+    assert (dataset_dir / "candidates.parquet").read_bytes() == b"typed"
 
 
 def test_file_fingerprint(tmp_path):

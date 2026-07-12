@@ -18,7 +18,8 @@ from typing import Any
 
 from loguru import logger
 
-from ..filenames import groups_sidecar_path
+from ..config import settings
+from ..filenames import candidates_sidecar_path, groups_sidecar_path
 from . import manifest as manifest_mod
 from .discovery import DatasetPair, resolve_release
 from .manifest import Manifest
@@ -31,6 +32,7 @@ from .scored_cache import (
 SCORED_CACHE_FILENAME = "scored_candidates.parquet"
 BRIDGE_FILENAME = "bridge.parquet"
 GROUPS_FILENAME = "groups.json"
+CANDIDATES_FILENAME = "candidates.parquet"
 UNMATCHED_FILENAME = "unmatched.parquet"
 DATASET_LOG_FILENAME = "run.log"
 
@@ -52,6 +54,9 @@ class FactoryPaths:
 
     def groups(self, release: str, name: str) -> Path:
         return self.dataset_dir(release, name) / GROUPS_FILENAME
+
+    def candidates(self, release: str, name: str) -> Path:
+        return self.dataset_dir(release, name) / CANDIDATES_FILENAME
 
     def manifest(self, release: str, name: str) -> Path:
         return self.dataset_dir(release, name) / manifest_mod.MANIFEST_FILENAME
@@ -108,24 +113,36 @@ def is_up_to_date(manifest_path: Path, bridge_path: Path, full_key: str) -> bool
         m = Manifest.read(manifest_path)
     except Exception:
         return False
-    return m.full_key == full_key
+    if m.full_key != full_key:
+        return False
+    return not (
+        settings.stitch_persist_candidates
+        and m.groups.get("n_groups", 0) > 0
+        and not (bridge_path.parent / CANDIDATES_FILENAME).exists()
+    )
 
 
 def _normalize_outputs(dataset_dir: Path, bridge_path: Path) -> None:
-    """Rename the pipeline's sidecar/unmatched files to the factory's names.
+    """Rename the pipeline's groups/candidates sidecars to factory names.
 
     ``optimize_and_export`` writes the sidecar at ``groups_sidecar_path(bridge)``
-    (``bridge_groups.json`` for a ``bridge.parquet`` output) and unmatched at
-    ``<dir>/unmatched.parquet``. Normalize the sidecar to ``groups.json``; the
-    unmatched name already matches.
+    and typed candidates at ``candidates_sidecar_path(bridge)``. Normalize those
+    to ``groups.json`` and ``candidates.parquet``; unmatched already matches.
     """
     sidecar = groups_sidecar_path(bridge_path)
-    target = dataset_dir / GROUPS_FILENAME
+    groups_target = dataset_dir / GROUPS_FILENAME
     if sidecar.exists():
-        sidecar.replace(target)
-    elif target.exists():
+        sidecar.replace(groups_target)
+    elif groups_target.exists():
         # Previous run produced groups; this run produced none — clear stale.
-        target.unlink()
+        groups_target.unlink()
+
+    candidates = candidates_sidecar_path(bridge_path)
+    candidates_target = dataset_dir / CANDIDATES_FILENAME
+    if candidates.exists():
+        candidates.replace(candidates_target)
+    elif candidates_target.exists():
+        candidates_target.unlink()
 
 
 def run_dataset(
