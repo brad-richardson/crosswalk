@@ -120,7 +120,7 @@ def _per_dataset_eval(
 ) -> list[dict]:
     rows = []
     for ds, sub_raw in raw_df.groupby("dataset_id"):
-        sel = sub_raw["selected"].astype(int).to_numpy()
+        sel = sub_raw["selected"].to_numpy()
         rows.append(_row_dict(f"optimizer:{ds}", sub_raw, sel))
         rows.append(_row_dict(f"naive_keepall:{ds}", sub_raw, np.ones(len(sub_raw), dtype=int)))
         t_oracle, pred_oracle = _oracle_conf_threshold(sub_raw)
@@ -165,7 +165,33 @@ def main() -> None:
     ap.add_argument("--n-splits", type=int, default=5)
     ap.add_argument("--include-split", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument(
+        "--repeat-seeds",
+        default="0,1,2,3,4",
+        help="Comma-separated split/model seeds for repeated grouped CV",
+    )
+    ap.add_argument(
+        "--bootstrap-resamples",
+        type=int,
+        default=2000,
+        help="Whole-group paired bootstrap draws",
+    )
+    ap.add_argument(
+        "--lodo",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run leave-one-dataset-out transfer evaluation",
+    )
     args = ap.parse_args()
+
+    try:
+        repeat_seeds = tuple(int(v.strip()) for v in args.repeat_seeds.split(",") if v.strip())
+    except ValueError as exc:
+        ap.error(f"--repeat-seeds must be comma-separated integers: {exc}")
+    if not repeat_seeds:
+        ap.error("--repeat-seeds must contain at least one integer")
+    if args.bootstrap_resamples < 1:
+        ap.error("--bootstrap-resamples must be >= 1")
 
     data_root = Path(args.data_root)
     labels_root = Path(args.labels_root)
@@ -206,9 +232,7 @@ def main() -> None:
 
     # ---- In-sample baselines (no features needed) ----
     baselines = []
-    baselines.append(
-        _row_dict("optimizer (selected)", raw_df, raw_df["selected"].astype(int).to_numpy())
-    )
+    baselines.append(_row_dict("optimizer (selected)", raw_df, raw_df["selected"].to_numpy()))
     baselines.append(_row_dict("naive_keepall (all 1)", raw_df, np.ones(len(raw_df), dtype=int)))
     baselines.append(
         _row_dict(
@@ -224,6 +248,7 @@ def main() -> None:
     # ---- Learned model (in-sample, optimistic) ----
     payload = _model_payload(model_path)
     feat_df = None
+    feat_cols: list[str] = []
     proba = None
     in_sample_rows = list(baselines)
     if payload is not None:
@@ -269,6 +294,8 @@ def main() -> None:
 
     # ---- Grouped CV OOF (honest) ----
     cv_rows = []
+    stability_result = None
+    lodo_result = None
     if feat_df is not None and payload is not None:
         try:
             from crosswalk.resolver.train import evaluate_all
@@ -303,6 +330,73 @@ def main() -> None:
                     )
         except Exception as e:
             print(f"[warn] grouped CV failed: {e}")
+
+        try:
+            from crosswalk.resolver.train import evaluate_repeated_grouped_cv
+
+            stability_result = evaluate_repeated_grouped_cv(
+                feat_df,
+                feat_cols,
+                selector=payload.get("selector", "ef1"),
+                n_splits=args.n_splits,
+                seeds=repeat_seeds,
+                bootstrap_resamples=args.bootstrap_resamples,
+            )
+            print("\n=== Repeated grouped CV stability ===")
+            for run in stability_result["runs"]:
+                print(
+                    f"seed={run['seed']:>3} F1={run['f1']:.3f} "
+                    f"Δprod={run['f1_delta']:+.3f} exact={run['group_exact']:.3f} "
+                    f"Δprod={run['group_exact_delta']:+.3f}"
+                )
+            boot = stability_result["paired_bootstrap"]
+            for metric in ("f1", "group_exact"):
+                summary = boot[metric]
+                print(
+                    f"paired bootstrap {metric}: Δ={summary['delta']:+.3f} "
+                    f"95% CI [{summary['ci_low']:+.3f}, {summary['ci_high']:+.3f}] "
+                    f"bootstrap support(Δ>0)="
+                    f"{summary['bootstrap_support_candidate_better']:.3f}"
+                )
+        except Exception as e:
+            raise RuntimeError("repeated grouped CV failed; refusing incomplete report") from e
+
+        if args.lodo and feat_df["dataset_id"].nunique() >= 2:
+            try:
+                from crosswalk.resolver.train import evaluate_leave_one_dataset_out
+
+                lodo_result = evaluate_leave_one_dataset_out(
+                    feat_df,
+                    feat_cols,
+                    selector=payload.get("selector", "ef1"),
+                    seed=args.seed,
+                    bootstrap_resamples=args.bootstrap_resamples,
+                )
+                print("\n=== Leave-one-dataset-out transfer ===")
+                for item in lodo_result["per_dataset"]:
+                    model_result = item["model"]
+                    production_result = item["baseline_production"]
+                    print(
+                        f"{item['dataset_id']}: edges={model_result.n_edges} "
+                        f"F1={model_result.f1:.3f} vs {production_result.f1:.3f} "
+                        f"exact={model_result.group_exact_rate:.3f} vs "
+                        f"{production_result.group_exact_rate:.3f}"
+                    )
+                boot = lodo_result["paired_bootstrap"]
+                for metric in ("f1", "group_exact"):
+                    summary = boot[metric]
+                    print(
+                        f"LODO paired bootstrap {metric}: Δ={summary['delta']:+.3f} "
+                        f"95% CI [{summary['ci_low']:+.3f}, {summary['ci_high']:+.3f}] "
+                        f"bootstrap support(Δ>0)="
+                        f"{summary['bootstrap_support_candidate_better']:.3f}"
+                    )
+            except Exception as e:
+                raise RuntimeError(
+                    "leave-one-dataset-out failed; refusing incomplete report"
+                ) from e
+        elif args.lodo:
+            print("\nLODO skipped: evaluation contains fewer than two datasets")
 
     # ---- Per-dataset ----
     per_ds_rows = _per_dataset_eval(raw_df, feat_df, proba, include_model=proba is not None)
@@ -361,6 +455,72 @@ def main() -> None:
     )
     if cv_rows:
         lines.extend(_md_table(cv_rows, f"Grouped CV OOF ({args.n_splits} folds) — honest"))
+    if stability_result is not None:
+        lines.extend(
+            [
+                "### Repeated stratified grouped CV",
+                "",
+                "Every edge is held out once per seed; rows from one dataset-scoped group never cross a fold.",
+                "",
+                "| seed | model F1 | Δ vs prod | model exact | Δ vs prod |",
+                "|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for run in stability_result["runs"]:
+            lines.append(
+                f"| {run['seed']} | {run['f1']:.4f} | {run['f1_delta']:+.4f} "
+                f"| {run['group_exact']:.4f} | {run['group_exact_delta']:+.4f} |"
+            )
+        lines.extend(["", "Paired whole-group bootstrap on the mean OOF probability decision:", ""])
+        lines.extend(
+            [
+                "| metric | observed Δ | 95% CI | bootstrap support (Δ > 0) |",
+                "|---|---:|---:|---:|",
+            ]
+        )
+        boot = stability_result["paired_bootstrap"]
+        for metric in ("f1", "group_exact"):
+            summary = boot[metric]
+            lines.append(
+                f"| {metric} | {summary['delta']:+.4f} "
+                f"| [{summary['ci_low']:+.4f}, {summary['ci_high']:+.4f}] "
+                f"| {summary['bootstrap_support_candidate_better']:.3f} |"
+            )
+        lines.append("")
+    if lodo_result is not None:
+        lines.extend(
+            [
+                "### Leave-one-dataset-out transfer",
+                "",
+                "| held-out dataset | edges | groups | model F1 | prod F1 | model exact | prod exact |",
+                "|---|---:|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for item in lodo_result["per_dataset"]:
+            model_result = item["model"]
+            production_result = item["baseline_production"]
+            lines.append(
+                f"| {item['dataset_id']} | {model_result.n_edges} | {model_result.n_groups} "
+                f"| {model_result.f1:.4f} | {production_result.f1:.4f} "
+                f"| {model_result.group_exact_rate:.4f} "
+                f"| {production_result.group_exact_rate:.4f} |"
+            )
+        lines.extend(["", "Paired dataset-cluster bootstrap over pooled LODO predictions:", ""])
+        lines.extend(
+            [
+                "| metric | observed Δ | 95% CI | bootstrap support (Δ > 0) |",
+                "|---|---:|---:|---:|",
+            ]
+        )
+        boot = lodo_result["paired_bootstrap"]
+        for metric in ("f1", "group_exact"):
+            summary = boot[metric]
+            lines.append(
+                f"| {metric} | {summary['delta']:+.4f} "
+                f"| [{summary['ci_low']:+.4f}, {summary['ci_high']:+.4f}] "
+                f"| {summary['bootstrap_support_candidate_better']:.3f} |"
+            )
+        lines.append("")
     if per_ds_rows:
         lines.extend(_md_table(per_ds_rows, "Per-dataset in-sample"))
 
@@ -373,7 +533,7 @@ def main() -> None:
         "- Legacy reject-all labels on legacy groups emit zero rows (honest cross-mode handling via `empty_legacy_skipped`)."
     )
     lines.append(
-        "- In-sample model numbers are optimistic (data leakage). Use the Grouped CV OOF block for the NO-GO decision."
+        "- In-sample model numbers are optimistic (data leakage). Use repeated grouped CV, its paired whole-group interval, and LODO transfer for the NO-GO decision."
     )
     lines.append(
         "- `optimizer (selected)` = sidecar `selected` flag: keep-all + vertex-junction tolerance + confidence prune (#284)."

@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import GroupKFold
 
-from crosswalk.resolver.features import FEATURE_COLUMNS, featurize, group_keys
+from crosswalk.resolver.features import FEATURE_COLUMNS, featurize, group_key_columns, group_keys
 
 
 def _prf(pred: np.ndarray, truth: np.ndarray) -> tuple[float, float, float]:
@@ -34,6 +34,23 @@ def _prf(pred: np.ndarray, truth: np.ndarray) -> tuple[float, float, float]:
     rec = tp / (tp + fn) if (tp + fn) else 1.0
     f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
     return prec, rec, f1
+
+
+def _validated_binary_vector(
+    values,
+    *,
+    name: str,
+    expected_length: int | None = None,
+) -> np.ndarray:
+    """Return a 1-D integer binary vector without lossy coercion."""
+    raw = np.asarray(values)
+    if raw.ndim != 1:
+        raise ValueError(f"{name} must be a one-dimensional binary vector")
+    if expected_length is not None and len(raw) != expected_length:
+        raise ValueError(f"{name} rows ({len(raw)}) != expected rows ({expected_length})")
+    if pd.isna(raw).any() or not np.isin(raw, [0, 1]).all():
+        raise ValueError(f"{name} must be binary with no null values")
+    return raw.astype(int)
 
 
 def _group_exact_rate(group_ids: np.ndarray, pred: np.ndarray, truth: np.ndarray) -> float:
@@ -98,7 +115,16 @@ def _eval_from_predictions(
     df: pd.DataFrame,
     pred: np.ndarray,
 ) -> EvalResult:
-    truth = df["keep"].to_numpy()
+    truth = _validated_binary_vector(
+        df["keep"].to_numpy(),
+        name="keep (binary evaluation truth)",
+        expected_length=len(df),
+    )
+    pred = _validated_binary_vector(
+        pred,
+        name="predictions",
+        expected_length=len(df),
+    )
     gids = group_keys(df).to_numpy()
     p, r, f1 = _prf(pred, truth)
     ge = _group_exact_rate(gids, pred, truth)
@@ -117,6 +143,130 @@ def _eval_from_predictions(
         recall_filtered=rf,
         f1_filtered=f1f,
     )
+
+
+def paired_group_bootstrap(
+    df: pd.DataFrame,
+    candidate_pred: np.ndarray,
+    baseline_pred: np.ndarray,
+    *,
+    n_resamples: int = 2000,
+    seed: int = 0,
+    confidence: float = 0.95,
+    resample_columns: list[str] | None = None,
+) -> dict:
+    """Estimate paired metric deltas by resampling dependent row clusters.
+
+    Edge rows within a group are dependent, so an edge-level bootstrap would
+    report intervals that are too narrow. Both strategies are evaluated on the
+    same sampled units on every draw, preserving the paired comparison. The
+    default unit is a dataset-scoped match group; LODO evaluation can instead
+    pass ``["dataset_id"]`` to represent between-dataset transfer uncertainty.
+    """
+    if n_resamples < 1:
+        raise ValueError("n_resamples must be >= 1")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be between 0 and 1")
+
+    frame = df.reset_index(drop=True)
+    truth = _validated_binary_vector(
+        frame["keep"].to_numpy(),
+        name="keep (binary evaluation truth)",
+        expected_length=len(frame),
+    )
+    candidate = _validated_binary_vector(
+        candidate_pred,
+        name="candidate predictions",
+        expected_length=len(frame),
+    )
+    baseline = _validated_binary_vector(
+        baseline_pred,
+        name="baseline predictions",
+        expected_length=len(frame),
+    )
+
+    group_columns = group_key_columns(frame)
+    missing_group_columns = [column for column in group_columns if column not in frame.columns]
+    if missing_group_columns or frame[group_columns].isna().any().any():
+        raise ValueError("bootstrap group keys must be present and non-null")
+    if any(frame[column].astype("string").str.strip().eq("").any() for column in group_columns):
+        raise ValueError("bootstrap group keys must be nonblank")
+    grouped = list(frame.groupby(group_columns, sort=False).indices.values())
+    if not grouped:
+        raise ValueError("paired bootstrap needs at least one group")
+    group_indices = [np.asarray(idx, dtype=int) for idx in grouped]
+    n_groups = len(group_indices)
+
+    unit_columns = list(resample_columns) if resample_columns is not None else group_columns
+    missing_columns = [column for column in unit_columns if column not in frame.columns]
+    if not unit_columns or missing_columns:
+        raise ValueError(f"invalid bootstrap resample columns: {missing_columns or unit_columns}")
+    if frame[unit_columns].isna().any().any():
+        raise ValueError("bootstrap resample keys must be non-null")
+    unit_index = pd.MultiIndex.from_frame(frame[unit_columns])
+    unit_codes, unit_values = pd.factorize(unit_index, sort=False)
+    n_units = len(unit_values)
+    unit_indices = [np.flatnonzero(unit_codes == unit) for unit in range(n_units)]
+
+    candidate_exact = np.asarray(
+        [np.array_equal(candidate[idx], truth[idx]) for idx in group_indices], dtype=float
+    )
+    baseline_exact = np.asarray(
+        [np.array_equal(baseline[idx], truth[idx]) for idx in group_indices], dtype=float
+    )
+    exact_delta_by_unit: list[list[float]] = [[] for _ in range(n_units)]
+    for group_pos, idx in enumerate(group_indices):
+        group_units = np.unique(unit_codes[idx])
+        if len(group_units) != 1:
+            raise ValueError("a match group crosses bootstrap resample units")
+        exact_delta_by_unit[int(group_units[0])].append(
+            float(candidate_exact[group_pos] - baseline_exact[group_pos])
+        )
+
+    rng = np.random.default_rng(seed)
+    f1_delta = np.empty(n_resamples, dtype=float)
+    exact_delta = np.empty(n_resamples, dtype=float)
+    for draw in range(n_resamples):
+        sampled_units = rng.integers(0, n_units, size=n_units)
+        sampled_rows = np.concatenate([unit_indices[i] for i in sampled_units])
+        candidate_f1 = _prf(candidate[sampled_rows], truth[sampled_rows])[2]
+        baseline_f1 = _prf(baseline[sampled_rows], truth[sampled_rows])[2]
+        f1_delta[draw] = candidate_f1 - baseline_f1
+        sampled_exact = np.concatenate(
+            [np.asarray(exact_delta_by_unit[i], dtype=float) for i in sampled_units]
+        )
+        exact_delta[draw] = float(sampled_exact.mean())
+
+    observed_candidate = _eval_from_predictions("candidate", frame, candidate)
+    observed_baseline = _eval_from_predictions("baseline", frame, baseline)
+    alpha = (1.0 - confidence) / 2.0
+
+    def _summary(values: np.ndarray, observed: float) -> dict[str, float]:
+        return {
+            "delta": float(observed),
+            "ci_low": float(np.quantile(values, alpha)),
+            "ci_high": float(np.quantile(values, 1.0 - alpha)),
+            "bootstrap_support_candidate_better": float(
+                np.mean(values > 0.0) + 0.5 * np.mean(values == 0.0)
+            ),
+        }
+
+    return {
+        "n_groups": n_groups,
+        "n_resample_units": n_units,
+        "resample_columns": unit_columns,
+        "n_resamples": n_resamples,
+        "confidence": confidence,
+        "seed": seed,
+        "f1": _summary(
+            f1_delta,
+            observed_candidate.f1 - observed_baseline.f1,
+        ),
+        "group_exact": _summary(
+            exact_delta,
+            observed_candidate.group_exact_rate - observed_baseline.group_exact_rate,
+        ),
+    }
 
 
 def run_cv(
@@ -192,7 +342,7 @@ def run_cv(
     # Optimizer baseline = the sidecar's own per-edge `selected` flag (True for
     # ~all persisted edges, False for the handful of junction slivers), NOT a
     # blanket all-ones vector.
-    keep_all = df["selected"].astype(int).to_numpy()
+    keep_all = df["selected"].to_numpy()
     results = {
         "model": _eval_from_predictions("learned (xgb, grouped CV)", df, oof_pred),
         "baseline_keepall": _eval_from_predictions("baseline: optimizer selected", df, keep_all),

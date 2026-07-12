@@ -11,6 +11,7 @@ from crosswalk.resolver.round2 import (
     EXTENDED_FEATURE_COLUMNS,
     featurize_extended,
     select_expected_f1,
+    select_group_predictions,
 )
 
 
@@ -81,6 +82,31 @@ class TestSelectExpectedF1:
             chosen = set(np.flatnonzero(sel))
             k = len(chosen)
             assert chosen == set(np.argsort(-probs)[:k])
+
+
+class TestSelectGroupPredictions:
+    def test_rejects_invalid_probabilities(self):
+        df = _toy_edge_table()
+
+        with pytest.raises(ValueError, match="finite one-dimensional"):
+            select_group_predictions(
+                df,
+                np.array([0.9, np.nan, 0.1]),
+                selector="ef1",
+            )
+        with pytest.raises(ValueError, match="between 0 and 1"):
+            select_group_predictions(
+                df,
+                np.array([0.9, 1.1, 0.1]),
+                selector="ef1",
+            )
+
+    def test_rejects_null_group_key(self):
+        df = _toy_edge_table()
+        df.loc[0, "group_id"] = None
+
+        with pytest.raises(ValueError, match="group keys"):
+            select_group_predictions(df, np.array([0.9, 0.8, 0.7]), selector="ef1")
 
 
 class TestFeaturizeExtended:
