@@ -30,6 +30,19 @@ _STRUCT_KEYS = (
     "corridor_tgt",
 )
 
+# Decision provenance is audit context, not an input to option construction.
+# Preserve it on the exact displayed edge so the committed panel evidence can
+# distinguish a production MATCH from a conservative REVIEW/demotion later.
+_DECISION_KEYS = (
+    "selected",
+    "decision",
+    "review_reason",
+    "optimizer_decision",
+    "decision_reason",
+    "pruned",
+    "selected_elsewhere",
+)
+
 
 def build_stitch_options(group: dict) -> dict:
     """Build the assignment option picker + optimizer pre-seed for a group.
@@ -82,6 +95,9 @@ def build_stitch_options(group: dict) -> dict:
                 for sk in _STRUCT_KEYS:
                     if sk in src:
                         enriched[sk] = src[sk]
+                for dk in _DECISION_KEYS:
+                    if dk in src:
+                        enriched[dk] = src[dk]
                 out.append(enriched)
         return out
 

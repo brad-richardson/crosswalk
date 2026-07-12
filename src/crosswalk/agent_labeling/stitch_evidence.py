@@ -8,6 +8,7 @@ For each M:N group in a stitch batch, writes a self-contained evidence pack:
         option_B.png        - ...
         metadata.yaml       - option table + per-segment names/classes
         prompt.txt          - rubric + option table + required JSON output
+        evidence.json       - exact displayed menu + content hashes
 
 The agent (any provider) picks one option letter, or NONE if no option is
 correct. Options are the deduplicated optimizer assignment + top-K
@@ -52,6 +53,7 @@ from .image_renderer import (
     _make_bbox_square,
     _to_linestring,
 )
+from .stitch_provenance import build_evidence_record, safe_group_id, write_evidence_manifest
 
 # Styling
 CONTEXT_COLOR = (190, 190, 190)  # light gray context roads
@@ -86,6 +88,13 @@ _STRUCT_KEYS = (
     "biconnected_block",
     "corridor_ref",
     "corridor_tgt",
+    "selected",
+    "decision",
+    "review_reason",
+    "optimizer_decision",
+    "decision_reason",
+    "pruned",
+    "selected_elsewhere",
 )
 
 # Group-level #267 structural summary fields (surfaced compactly, missing omitted).
@@ -380,7 +389,7 @@ def prune_options_for_panel(
     }
 
 
-def build_metadata(group: dict, options_ctx: dict) -> dict:
+def build_metadata(group: dict, options_ctx: dict, *, evidence: dict | None = None) -> dict:
     """Build the metadata dict describing the group and its options."""
     ref_ids = group.get("ref_ids", list(group.get("ref_geometries", {}).keys()))
     target_ids = group.get("target_ids", list(group.get("target_geometries", {}).keys()))
@@ -411,6 +420,8 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
                 "edge": f"{ref_labels.get(rid, rid)}->{target_labels.get(tid, tid)}",
                 "ref": ref_labels.get(rid, rid),
                 "target": target_labels.get(tid, tid),
+                "ref_id": str(rid),
+                "target_id": str(tid),
                 "confidence": round(float(e.get("confidence", 0.0)), 3),
                 "is_sliver": is_sliver,
             }
@@ -452,7 +463,7 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
         if group.get("n_subproblems"):
             decomposition_meta["n_subproblems"] = group["n_subproblems"]
 
-    return {
+    metadata = {
         "group_id": group.get("group_id"),
         **decomposition_meta,
         "match_type": group.get("match_type"),
@@ -487,6 +498,9 @@ def build_metadata(group: dict, options_ctx: dict) -> dict:
         },
         "options": options_meta,
     }
+    if evidence is not None:
+        metadata["evidence"] = evidence
+    return metadata
 
 
 def _edge_struct_str(e: dict) -> str:
@@ -827,11 +841,36 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     return "\n".join(lines)
 
 
-def generate_group_evidence(group: dict, group_dir: Path) -> dict | None:
+def generate_group_evidence(
+    group: dict,
+    group_dir: Path,
+    *,
+    source_artifacts: dict | None = None,
+    batch_generation_source: dict | None = None,
+) -> dict | None:
     """Generate the full evidence pack for one group. Returns the metadata dict.
 
     Returns None if the group has no options.
     """
+    safe_group_id(group.get("group_id"))
+    group_dir = Path(group_dir)
+
+    # Clear the files a voter can consume before deciding whether the refreshed
+    # group still has a menu.  Otherwise options -> no-options regeneration
+    # leaves an old prompt/images behind and the runner can vote stale evidence.
+    if group_dir.exists():
+        for pattern in (
+            "overview.png",
+            "option_*.png",
+            "zoom_*.png",
+            "metadata.yaml",
+            "prompt.txt",
+            "evidence.json",
+        ):
+            for old in group_dir.glob(pattern):
+                if old.is_file():
+                    old.unlink()
+
     options_ctx = build_stitch_options(group)
     if not options_ctx["options"]:
         logger.warning(f"Group {group.get('group_id')}: no options, skipping")
@@ -846,6 +885,16 @@ def generate_group_evidence(group: dict, group_dir: Path) -> dict | None:
             f"{prune_info['n_before']} -> {prune_info['n_after']} (diversity)"
         )
 
+    evidence = build_evidence_record(
+        group,
+        options_ctx,
+        source_artifacts=source_artifacts,
+        batch_generation_source=batch_generation_source,
+        options_pruned=prune_info,
+    )
+
+    # Regeneration in the same directory must never leave a stale option or
+    # junction crop that a glob-based provider attachment could still see.
     group_dir.mkdir(parents=True, exist_ok=True)
 
     overview = render_group_overview(group)
@@ -855,7 +904,7 @@ def generate_group_evidence(group: dict, group_dir: Path) -> dict | None:
         img = render_option(group, opt)
         img.save(group_dir / f"option_{opt['letter']}.png")
 
-    metadata = build_metadata(group, options_ctx)
+    metadata = build_metadata(group, options_ctx, evidence=evidence)
     if prune_info is not None:
         metadata["options_pruned"] = prune_info
 
@@ -881,6 +930,7 @@ def generate_group_evidence(group: dict, group_dir: Path) -> dict | None:
 
     prompt = build_prompt(group_dir, metadata, options_ctx)
     (group_dir / "prompt.txt").write_text(prompt)
+    write_evidence_manifest(group_dir, evidence)
 
     return metadata
 
@@ -909,7 +959,12 @@ def generate_stitch_evidence(
         gid = group.get("group_id")
         if wanted is not None and gid not in wanted:
             continue
-        meta = generate_group_evidence(group, output_dir / str(gid))
+        meta = generate_group_evidence(
+            group,
+            output_dir / str(gid),
+            source_artifacts=batch.get("source_artifacts"),
+            batch_generation_source=batch.get("batch_generation_source"),
+        )
         if meta is not None:
             generated.append(gid)
     return generated

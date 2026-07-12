@@ -97,6 +97,8 @@ accurate.
 from __future__ import annotations
 
 import json
+import math
+import tempfile
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -119,6 +121,7 @@ from .panel_routing import (
     REASON_QUORUM_NONE,
     REASON_UNANIMOUS_NONE,
     _int_or_none,
+    candidate_edge_count,
     counts_show_abstention,
     derive_route_reason,
 )
@@ -128,7 +131,22 @@ from .stitch_eval import (
     _map_set_labels_to_groups,
     map_human_labels_to_groups,
 )
-from .stitch_runner import _edge_classes_for, _segment_class_maps, has_cross_mode_edge
+from .stitch_provenance import (
+    canonical_json,
+    consensus_policy_signature,
+    load_evidence_manifest,
+    safe_group_id,
+    sha256_file,
+    validate_manifest_against_batch,
+)
+from .stitch_runner import (
+    Vote,
+    _edge_classes_for,
+    _load_group_context,
+    _segment_class_maps,
+    compute_consensus,
+    has_cross_mode_edge,
+)
 
 # Bumped v1 -> v2 when the panel composition changed (Opus 4.8 / gpt-5.5 /
 # Gemini 3.5 Flash Medium); v2 -> v3 when the evidence-pack inputs changed
@@ -1429,6 +1447,8 @@ def write_vote_provenance(
     batch_dirs: list[Path],
     dataset: str,
     votes_dir: Path = Path("labels/votes"),
+    *,
+    require_evidence: bool = False,
 ) -> tuple[int, int]:
     """Snapshot raw panel ballots + consensus into a git-tracked location.
 
@@ -1437,6 +1457,8 @@ def write_vote_provenance(
     so the audit trail behind every exported label is never committed. This
     copies them into ``labels/votes/dataset=<dataset>/`` — which *is* tracked —
     tagging each row with a ``source_batch`` column for cross-batch traceability.
+    It also archives one compact ``evidence.csv`` row per voted group containing
+    the exact option menu/displayed edge universe and its pack hashes.
 
     **Accumulates** like the label store: the existing archived files are read
     back and merged with the current batches, so exporting batches across
@@ -1452,7 +1474,10 @@ def write_vote_provenance(
     ``source_batch`` is the batch dir *basename*, so duplicate basenames in one
     call would collapse distinct ballots — we refuse that rather than lose data.
     Field-level best-effort: an empty or malformed batch CSV is skipped, not
-    fatal. Returns ``(n_vote_rows, n_consensus_rows)``.
+    fatal. When ``require_evidence`` is true (the label-export CLI uses it),
+    every consensus group must also have a verifiable evidence pack; otherwise
+    the call raises before a panel label can be minted without its menu.
+    Returns ``(n_vote_rows, n_consensus_rows)``.
     """
     out_dir = Path(votes_dir) / f"dataset={dataset}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1478,7 +1503,294 @@ def write_vote_provenance(
         # replacement rows.
         return None if df.empty else df
 
-    def _collect(filename: str, dedupe_on: list[str]) -> int:
+    def _cell_text(value) -> str:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return ""
+        return str(value).strip()
+
+    def _strict_edge_set(value, *, where: str) -> frozenset[tuple[str, str]]:
+        text = _cell_text(value)
+        if not text:
+            data = []
+        else:
+            try:
+                data = json.loads(text)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{where} has malformed edge_set JSON") from exc
+        if not isinstance(data, list):
+            raise ValueError(f"{where} edge_set must be a JSON list")
+        pairs: list[tuple[str, str]] = []
+        for item in data:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                raise ValueError(f"{where} edge_set contains a malformed edge")
+            pairs.append((str(item[0]), str(item[1])))
+        if len(pairs) != len(set(pairs)):
+            raise ValueError(f"{where} edge_set contains duplicate edges")
+        return frozenset(pairs)
+
+    def _validate_choice_link(
+        row: pd.Series,
+        *,
+        option_by_letter: dict[str, tuple[str, frozenset[tuple[str, str]]]],
+        where: str,
+        allow_abstain: bool,
+    ) -> None:
+        choice = _cell_text(row.get("choice"))
+        if choice in option_by_letter:
+            expected_option, expected_edges = option_by_letter[choice]
+        elif choice == "NONE":
+            expected_option, expected_edges = "NONE", frozenset()
+        elif allow_abstain and choice == "ABSTAIN":
+            expected_option, expected_edges = "ABSTAIN", frozenset()
+        elif not choice and not allow_abstain:
+            # ``compute_consensus`` writes an empty choice only when all voters
+            # abstained; there is no selected option or edge in that outcome.
+            expected_option, expected_edges = "", frozenset()
+        else:
+            raise ValueError(f"{where} references unknown choice {choice!r}")
+        if _cell_text(row.get("chosen_option_id")) != expected_option:
+            raise ValueError(f"{where} chosen_option_id does not match choice {choice!r}")
+        if _strict_edge_set(row.get("edge_set"), where=where) != expected_edges:
+            raise ValueError(f"{where} edge_set does not match choice {choice!r}")
+
+    def _validate_strict_group(
+        bd: Path,
+        group_id: str,
+        votes: pd.DataFrame | None,
+        consensus_group: pd.DataFrame,
+        manifest: dict,
+    ) -> None:
+        where = f"{bd.name}/{group_id}"
+        evidence = manifest.get("evidence") or {}
+        identities = {
+            _cell_text(manifest.get("group_id")),
+            _cell_text(evidence.get("group_id")),
+        }
+        if group_id in {"", ".", ".."} or Path(group_id).name != group_id:
+            raise ValueError(f"unsafe evidence group_id for {where}")
+        if identities != {group_id}:
+            raise ValueError(f"evidence manifest group_id does not match {where}")
+        if len(consensus_group) != 1:
+            raise ValueError(f"strict provenance requires exactly one consensus row for {where}")
+        if votes is None or "group_id" not in votes:
+            raise ValueError(f"strict provenance requires ballots for {where}")
+        vote_group = votes[votes["group_id"].astype(str) == group_id]
+        if vote_group.empty:
+            raise ValueError(f"strict provenance requires ballots for {where}")
+        if "provider" not in vote_group or vote_group["provider"].astype(str).duplicated().any():
+            raise ValueError(f"strict provenance requires one ballot per provider for {where}")
+
+        vote_fields = {
+            "evidence_id",
+            "evidence_pack_sha256",
+            "displayed_candidate_universe_sha256",
+            "option_menu_sha256",
+            "chosen_option_id",
+            "panel_invocation_sha256",
+        }
+        consensus_fields = vote_fields | {"consensus_policy_sha256"}
+        missing_votes = sorted(vote_fields - set(vote_group.columns))
+        missing_consensus = sorted(consensus_fields - set(consensus_group.columns))
+        if missing_votes or missing_consensus:
+            raise ValueError(
+                f"strict provenance linkage fields missing for {where}: "
+                f"votes={missing_votes}, consensus={missing_consensus}"
+            )
+
+        expected = {
+            "evidence_id": _cell_text(evidence.get("evidence_id")),
+            "evidence_pack_sha256": _cell_text(manifest.get("evidence_pack_sha256")),
+            "displayed_candidate_universe_sha256": _cell_text(
+                evidence.get("displayed_candidate_universe_sha256")
+            ),
+            "option_menu_sha256": _cell_text(evidence.get("option_menu_sha256")),
+        }
+        consensus_row = consensus_group.iloc[0]
+        for field_name, expected_value in expected.items():
+            if not expected_value:
+                raise ValueError(f"verified evidence is missing {field_name} for {where}")
+            if set(vote_group[field_name].map(_cell_text)) != {expected_value}:
+                raise ValueError(f"ballot {field_name} does not match evidence for {where}")
+            if _cell_text(consensus_row.get(field_name)) != expected_value:
+                raise ValueError(f"consensus {field_name} does not match evidence for {where}")
+
+        invocation_values = set(vote_group["panel_invocation_sha256"].map(_cell_text))
+        consensus_invocation = _cell_text(consensus_row.get("panel_invocation_sha256"))
+        if "" in invocation_values or invocation_values != {consensus_invocation}:
+            raise ValueError(f"panel invocation linkage does not match for {where}")
+        expected_policy = consensus_policy_signature(
+            max_edges=settings.stitch_export_backstop_max_edges,
+            min_voter_confidence=settings.stitch_min_voter_confidence,
+            runtime_contract_sha256=sha256_file(Path(__file__).with_name("stitch_runner.py")),
+        )
+        if _cell_text(consensus_row.get("consensus_policy_sha256")) != expected_policy:
+            raise ValueError(f"consensus policy linkage is stale or missing for {where}")
+
+        try:
+            recorded_n_votes = int(consensus_row.get("n_votes"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"consensus n_votes is invalid for {where}") from exc
+        if recorded_n_votes != len(vote_group):
+            raise ValueError(f"consensus n_votes does not match ballots for {where}")
+
+        option_by_letter: dict[str, tuple[str, frozenset[tuple[str, str]]]] = {}
+        for option in evidence.get("option_menu", []):
+            letter = _cell_text(option.get("letter"))
+            option_id = _cell_text(option.get("option_id"))
+            edges = frozenset(
+                (str(edge["ref_id"]), str(edge["target_id"])) for edge in option.get("edges", [])
+            )
+            if not letter or not option_id or letter in option_by_letter:
+                raise ValueError(f"verified evidence has a malformed option menu for {where}")
+            option_by_letter[letter] = (option_id, edges)
+        for index, vote in vote_group.iterrows():
+            _validate_choice_link(
+                vote,
+                option_by_letter=option_by_letter,
+                where=f"ballot {where} row {index}",
+                allow_abstain=True,
+            )
+        _validate_choice_link(
+            consensus_row,
+            option_by_letter=option_by_letter,
+            where=f"consensus {where}",
+            allow_abstain=False,
+        )
+
+        # The consensus row is an executable claim about these ballots, not an
+        # independent annotation. Replay the current, signature-bound policy so
+        # edited routing/tier/confidence fields cannot mint a label even when
+        # their menu hashes still look valid.
+        replay_votes: list[Vote] = []
+        for _, vote in vote_group.iterrows():
+            confidence = float(vote.get("confidence"))
+            if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+                raise ValueError(f"ballot confidence is invalid for {where}")
+            replay_votes.append(
+                Vote(
+                    group_id=group_id,
+                    provider=_cell_text(vote.get("provider")),
+                    model=_cell_text(vote.get("model")),
+                    choice=_cell_text(vote.get("choice")),
+                    confidence=confidence,
+                    reasoning=_cell_text(vote.get("reasoning")),
+                    edge_set=_strict_edge_set(vote.get("edge_set"), where=where),
+                )
+            )
+        metadata = _load_group_context(bd / group_id)[2]
+        ref_class, target_class = _segment_class_maps(metadata)
+        base = compute_consensus(replay_votes)
+        replay = compute_consensus(
+            replay_votes,
+            edge_classes=_edge_classes_for(base.edge_set, ref_class, target_class),
+            n_candidate_edges=candidate_edge_count(metadata),
+            min_voter_confidence=settings.stitch_min_voter_confidence,
+        )
+        try:
+            recorded_mean = float(consensus_row.get("mean_confidence"))
+            recorded_n_valid = int(consensus_row.get("n_valid"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"consensus statistics are invalid for {where}") from exc
+        if not math.isfinite(recorded_mean) or not 0.0 <= recorded_mean <= 1.0:
+            raise ValueError(f"consensus mean confidence is invalid for {where}")
+        if not all(
+            (
+                _cell_text(consensus_row.get("consensus")) == replay.consensus,
+                _cell_text(consensus_row.get("choice")) == replay.choice,
+                _strict_edge_set(consensus_row.get("edge_set"), where=where) == replay.edge_set,
+                _cell_text(consensus_row.get("routing")) == replay.routing,
+                recorded_n_votes == replay.n_votes,
+                recorded_n_valid == replay.n_valid,
+                _cell_text(consensus_row.get("minority")) == replay.minority,
+                math.isclose(recorded_mean, replay.mean_confidence, abs_tol=1e-12),
+                _cell_text(consensus_row.get("route_reason")) == replay.route_reason,
+            )
+        ):
+            raise ValueError(f"consensus row is not derivable from ballots for {where}")
+
+    verified_evidence: dict[tuple[Path, str], dict] = {}
+    verified_votes: dict[Path, pd.DataFrame | None] = {}
+    verified_consensus: dict[Path, pd.DataFrame] = {}
+    if require_evidence:
+        # Validate every referenced pack before rewriting any tracked archive.
+        # This keeps strict export fail-closed as one preflight instead of
+        # discovering a bad menu after votes.csv was already replaced.
+        for bd in batch_dirs:
+            bd = Path(bd)
+            consensus = _read_csv(bd / "consensus.csv")
+            if consensus is None:
+                continue
+            if "group_id" not in consensus:
+                raise ValueError(f"consensus.csv has no group_id column in {bd.name}")
+            batch_path = bd / "batch.json"
+            batch_schema = 0
+            batch_payload: dict | None = None
+            if batch_path.exists():
+                try:
+                    batch_payload = json.loads(batch_path.read_text())
+                    batch_schema = int(batch_payload.get("schema_version", 0))
+                except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                    raise ValueError(f"invalid batch.json provenance in {bd.name}: {exc}") from exc
+                if batch_schema >= 2 and _cell_text(batch_payload.get("dataset_id")) != dataset:
+                    raise ValueError(
+                        f"schema-v2 batch dataset mismatch in {bd.name}: "
+                        f"expected {dataset!r}, got {batch_payload.get('dataset_id')!r}"
+                    )
+            votes = _read_csv(bd / "votes.csv")
+            for raw_group_id in sorted(set(consensus["group_id"].astype(str))):
+                try:
+                    group_id = safe_group_id(raw_group_id)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"invalid evidence group_id in {bd.name}: {raw_group_id!r}"
+                    ) from exc
+                group_dir = bd / group_id
+                if not group_dir.is_dir():
+                    raise ValueError(f"missing evidence pack directory for {bd.name}/{group_id}")
+                try:
+                    manifest = load_evidence_manifest(
+                        group_dir,
+                        allow_legacy=batch_schema < 2,
+                    )
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    raise ValueError(
+                        f"invalid evidence provenance for {bd.name}/{group_id}: {exc}"
+                    ) from exc
+                try:
+                    validate_manifest_against_batch(manifest, batch_payload or {}, group_id)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"evidence pack does not match batch.json for {bd.name}/{group_id}: {exc}"
+                    ) from exc
+                file_names = {item["path"] for item in manifest.get("files", [])}
+                required_files = {"metadata.yaml", "prompt.txt", "overview.png"}
+                if not required_files <= file_names:
+                    raise ValueError(
+                        f"incomplete evidence pack for {bd.name}/{group_id}: "
+                        f"missing {sorted(required_files - file_names)}"
+                    )
+                _validate_strict_group(
+                    bd,
+                    group_id,
+                    votes,
+                    consensus[consensus["group_id"].astype(str) == group_id],
+                    manifest,
+                )
+                verified_evidence[(bd, group_id)] = manifest
+            verified_votes[bd] = votes
+            verified_consensus[bd] = consensus
+
+    def _batch_csv(bd: Path, filename: str) -> pd.DataFrame | None:
+        """Reuse strict-preflight snapshots so validated rows cannot be swapped."""
+        bd = Path(bd)
+        if require_evidence and bd in verified_consensus:
+            if filename == "votes.csv":
+                return verified_votes[bd]
+            if filename == "consensus.csv":
+                return verified_consensus[bd]
+        return _read_csv(bd / filename)
+
+    def _prepare_archive(filename: str, dedupe_on: list[str]) -> pd.DataFrame | None:
         # Current batches first: only a batch that contributes a READABLE file
         # in this call supersedes its archived rows — a listed batch whose CSV
         # is missing/empty keeps its archive untouched (never delete ballots
@@ -1486,7 +1798,7 @@ def write_vote_provenance(
         new_frames: list[pd.DataFrame] = []
         contributing: set[str] = set()
         for bd in batch_dirs:
-            df = _read_csv(Path(bd) / filename)
+            df = _batch_csv(Path(bd), filename)
             if df is None:
                 continue
             if "source_batch" in df.columns:  # a re-archived tree; re-tag cleanly
@@ -1508,14 +1820,163 @@ def write_vote_provenance(
                 frames.append(existing)
         frames.extend(new_frames)
         if not frames:
-            return 0
+            return None
         merged = pd.concat(frames, ignore_index=True)
         keys = [c for c in dedupe_on if c in merged.columns]
         if keys:
             merged = merged.drop_duplicates(subset=keys, keep="last")
-        merged.to_csv(out_dir / filename, index=False)
-        return len(merged)
+        return merged
 
-    n_votes = _collect("votes.csv", ["source_batch", "group_id", "provider"])
-    n_consensus = _collect("consensus.csv", ["source_batch", "group_id"])
+    votes_archive = _prepare_archive("votes.csv", ["source_batch", "group_id", "provider"])
+    consensus_archive = _prepare_archive("consensus.csv", ["source_batch", "group_id"])
+
+    # Archive the menu itself, not just a hash pointing back into ignored data/.
+    # Restrict to groups with consensus rows so unused packs do not masquerade as
+    # observed panel evidence. Like the ballot archive, a refreshed batch
+    # replaces its previous evidence rows wholesale.
+    evidence_frames: list[pd.DataFrame] = []
+    contributing_evidence: set[str] = set()
+    for bd in batch_dirs:
+        consensus = _batch_csv(Path(bd), "consensus.csv")
+        if consensus is None:
+            continue
+        contributing_evidence.add(Path(bd).name)
+        rows: list[dict] = []
+        for group_id in sorted(set(consensus["group_id"].astype(str))):
+            group_dir = Path(bd) / group_id
+            if not group_dir.is_dir():
+                if require_evidence:
+                    raise ValueError(
+                        f"missing evidence pack directory for {Path(bd).name}/{group_id}"
+                    )
+                continue
+            try:
+                manifest = verified_evidence.get((Path(bd), group_id)) or load_evidence_manifest(
+                    group_dir
+                )
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                if require_evidence:
+                    raise ValueError(
+                        f"invalid evidence provenance for {Path(bd).name}/{group_id}: {exc}"
+                    ) from exc
+                logger.warning(
+                    "Skipping evidence provenance for {}/{}: {}",
+                    Path(bd).name,
+                    group_id,
+                    exc,
+                )
+                continue
+            evidence = manifest["evidence"]
+            rows.append(
+                {
+                    "source_batch": Path(bd).name,
+                    "group_id": group_id,
+                    "evidence_id": evidence["evidence_id"],
+                    "evidence_pack_sha256": manifest["evidence_pack_sha256"],
+                    "displayed_candidate_universe_sha256": evidence[
+                        "displayed_candidate_universe_sha256"
+                    ],
+                    "option_menu_sha256": evidence["option_menu_sha256"],
+                    "displayed_candidate_count": evidence["displayed_candidate_count"],
+                    "evidence": canonical_json(evidence),
+                }
+            )
+        if rows:
+            evidence_frames.append(pd.DataFrame(rows))
+
+    existing_evidence = _read_csv(out_dir / "evidence.csv")
+    merged_evidence: list[pd.DataFrame] = []
+    empty_evidence_archive: pd.DataFrame | None = None
+    if existing_evidence is not None:
+        if "source_batch" in existing_evidence and contributing_evidence:
+            existing_evidence = existing_evidence[
+                ~existing_evidence["source_batch"].astype(str).isin(contributing_evidence)
+            ]
+        if not existing_evidence.empty:
+            merged_evidence.append(existing_evidence)
+        elif contributing_evidence:
+            # A refreshed non-strict batch with no readable pack must remove
+            # its old menu row instead of pairing new ballots with stale evidence.
+            empty_evidence_archive = existing_evidence
+    merged_evidence.extend(evidence_frames)
+    evidence_archive: pd.DataFrame | None = empty_evidence_archive
+    if merged_evidence:
+        evidence_df = pd.concat(merged_evidence, ignore_index=True)
+        evidence_archive = evidence_df.drop_duplicates(
+            subset=["source_batch", "group_id"], keep="last"
+        )
+
+    # Prepare and validate all three outputs before touching any tracked file.
+    # Then stage every CSV beside its destination and replace as one rollback-
+    # protected unit: a late evidence/schema or I/O failure cannot leave a new
+    # votes.csv paired with an old consensus/evidence archive.
+    archives = {
+        out_dir / "votes.csv": votes_archive,
+        out_dir / "consensus.csv": consensus_archive,
+        out_dir / "evidence.csv": evidence_archive,
+    }
+    staged: dict[Path, Path] = {}
+    backups: dict[Path, Path] = {}
+    originally_present = {path: path.exists() for path in archives}
+    commit_complete = False
+    rollback_complete = True
+    try:
+        for destination, frame in archives.items():
+            if frame is None:
+                continue
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="",
+                dir=out_dir,
+                prefix=f".{destination.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as tmp:
+                staged[destination] = Path(tmp.name)
+                frame.to_csv(tmp, index=False)
+        for destination in staged:
+            if destination.exists():
+                with tempfile.NamedTemporaryFile(
+                    dir=out_dir,
+                    prefix=f".{destination.name}.",
+                    suffix=".bak",
+                    delete=False,
+                ) as tmp:
+                    backup = Path(tmp.name)
+                backup.unlink()
+                backups[destination] = backup
+                destination.replace(backup)
+        for destination, temporary in staged.items():
+            temporary.replace(destination)
+        commit_complete = True
+    except Exception as commit_error:
+        rollback_errors: list[str] = []
+        for destination in reversed(list(staged)):
+            backup = backups.get(destination)
+            try:
+                if backup is not None and backup.exists():
+                    backup.replace(destination)
+                elif not originally_present[destination] and destination.exists():
+                    destination.unlink()
+            except OSError as rollback_error:
+                rollback_complete = False
+                rollback_errors.append(f"{destination}: {rollback_error}")
+        if rollback_errors:
+            raise RuntimeError(
+                "vote-provenance archive commit failed and rollback was incomplete; "
+                f"preserved backups: {rollback_errors}"
+            ) from commit_error
+        raise
+    finally:
+        for temporary in staged.values():
+            with suppress(OSError):
+                temporary.unlink()
+        if commit_complete or rollback_complete:
+            for backup in backups.values():
+                with suppress(OSError):
+                    backup.unlink()
+
+    n_votes = 0 if votes_archive is None else len(votes_archive)
+    n_consensus = 0 if consensus_archive is None else len(consensus_archive)
     return n_votes, n_consensus

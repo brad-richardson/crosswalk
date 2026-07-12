@@ -1,5 +1,6 @@
 """AI agent labeling commands."""
 
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -977,10 +978,12 @@ def generate_stitch_batch(
         generate_stitch_evidence,
         missing_evidence_packs,
     )
+    from ..agent_labeling.stitch_provenance import artifact_descriptor
     from ..config import settings
     from ..filenames import (
         PROJECT_ROOT,
         bridge_filename,
+        candidates_sidecar_path,
         groups_sidecar_path,
     )
     from ..labeling.stitching_store import StitchingLabelStore
@@ -989,6 +992,7 @@ def generate_stitch_batch(
         group_candidate_edge_count,
         select_stitching_batch,
     )
+    from ..provenance import source_commit_provenance
 
     # Validate --decompose-max-edges against the export backstop (#367 Mode B).
     # A budget ABOVE the backstop is a silent mini-void: sub-problems sized
@@ -1031,6 +1035,13 @@ def generate_stitch_batch(
     sidecar = json.loads(sidecar_path.read_text())
     groups = sidecar.get("groups", [])
     console.print(f"[blue]Loaded {len(groups)} groups from sidecar[/blue]")
+    candidates_path = candidates_sidecar_path(bridge_path)
+    source_artifacts = {
+        "groups_sidecar": artifact_descriptor(sidecar_path, root=PROJECT_ROOT),
+        "candidates_parquet": artifact_descriptor(candidates_path, root=PROJECT_ROOT),
+        "bridge_parquet": artifact_descriptor(bridge_path, root=PROJECT_ROOT),
+    }
+    batch_generation_source = {"source_commit": source_commit_provenance(PROJECT_ROOT)}
 
     # Determine requested group_ids.
     requested: list[str] | None = None
@@ -1265,11 +1276,33 @@ def generate_stitch_batch(
     name = batch_name or dataset
     batch_dir = output_dir / name
     batch_dir.mkdir(parents=True, exist_ok=True)
-    batch = {"dataset_id": dataset, "groups": selected + decomposed_parents}
+    batch = {
+        "schema_version": 2,
+        "dataset_id": dataset,
+        "source_artifacts": source_artifacts,
+        "batch_generation_source": batch_generation_source,
+        "groups": selected + decomposed_parents,
+    }
+
+    # A batch name may be intentionally reused. Remove only obsolete generated
+    # evidence directories (identified by their managed pack files) so the new
+    # schema-v2 roster cannot accidentally inherit and vote a prior wave.
+    current_group_ids = {str(group["group_id"]) for group in batch["groups"]}
+    for child in batch_dir.iterdir():
+        if (
+            child.is_dir()
+            and child.name not in current_group_ids
+            and any(
+                (child / name).exists() for name in ("prompt.txt", "metadata.yaml", "evidence.json")
+            )
+        ):
+            shutil.rmtree(child)
     (batch_dir / "batch.json").write_text(json.dumps(batch))
     if decomposition_manifest:
         (batch_dir / "decomposition.json").write_text(json.dumps(decomposition_manifest, indent=2))
         console.print(f"  Decomposition manifest: {batch_dir / 'decomposition.json'}")
+    elif (batch_dir / "decomposition.json").exists():
+        (batch_dir / "decomposition.json").unlink()
 
     console.print(f"[blue]Generating evidence packs -> {batch_dir}[/blue]")
     generated = generate_stitch_evidence(
@@ -2119,6 +2152,28 @@ def export_stitch_panel(
         console.print("[cyan]Dry run — no labels written.[/cyan]")
         return
 
+    # Provenance is part of the label contract, not a best-effort afterthought:
+    # archive the ballots, consensus and exact displayed menu before minting a
+    # panel label. If this fails, no durable label is written without its audit
+    # trail. An archive can safely precede a later label-store failure; it is
+    # evidence of a completed panel judgment, not itself a label.
+    try:
+        n_votes, n_consensus = write_vote_provenance(
+            batch_dirs,
+            dataset,
+            require_evidence=True,
+        )
+    except Exception as e:  # noqa: BLE001 - surfaced as an operator-facing CLI failure
+        console.print(
+            f"[red]Evidence-provenance archival failed ({e}); refusing to write "
+            f"panel labels without their exact displayed menu.[/red]"
+        )
+        raise typer.Exit(1) from e
+    console.print(
+        f"[green]Archived vote provenance: {n_votes} ballots, {n_consensus} consensus "
+        f"rows plus exact evidence menus to labels/votes/dataset={dataset}[/green]"
+    )
+
     written = write_exports(report, dataset, labels_dir)
     n_empty = len(report.exported_empty)
     empty_written = f" ({n_empty} reject-all empty-set)" if n_empty else ""
@@ -2126,20 +2181,6 @@ def export_stitch_panel(
         f"[green]Wrote {written} panel labels{empty_written} to "
         f"{labels_dir}/dataset={dataset}[/green]"
     )
-
-    # Best-effort: labels are already persisted above, so a malformed batch CSV
-    # must not crash the command and leave an inconsistent "failed" export.
-    try:
-        n_votes, n_consensus = write_vote_provenance(batch_dirs, dataset)
-        console.print(
-            f"[green]Archived vote provenance: {n_votes} ballots, {n_consensus} consensus "
-            f"rows to labels/votes/dataset={dataset}[/green]"
-        )
-    except Exception as e:  # noqa: BLE001 - provenance is best-effort, never fail the export
-        console.print(
-            f"[yellow]Warning: vote-provenance archival skipped ({e}); "
-            f"labels were still written.[/yellow]"
-        )
 
 
 @agent_app.command("import")

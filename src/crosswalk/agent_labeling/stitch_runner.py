@@ -46,6 +46,14 @@ from .panel_routing import (
     candidate_edge_count,
     derive_route_reason,
 )
+from .stitch_provenance import (
+    batch_group_map,
+    consensus_policy_signature,
+    invocation_signature,
+    load_evidence_manifest,
+    sha256_file,
+    validate_manifest_against_batch,
+)
 
 # OSError errnos that are deterministic for a fixed command: retrying identically
 # fails identically, so they hard-fail immediately rather than consuming the
@@ -368,6 +376,12 @@ class Vote:
     # free-text ``error`` — see :class:`AbstainReason`.
     abstain_reason: AbstainReason = AbstainReason.UNSET
     pack_feedback: str = ""  # diagnostic self-report JSON (wave-local; usually "")
+    evidence_id: str = ""
+    evidence_pack_sha256: str = ""
+    displayed_candidate_universe_sha256: str = ""
+    option_menu_sha256: str = ""
+    chosen_option_id: str = ""
+    panel_invocation_sha256: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -929,8 +943,12 @@ def _scratch_pack(group_dir: Path, prompt: str) -> tuple[Path, str, tempfile.Tem
     """
     tmp = tempfile.TemporaryDirectory(prefix="stitch_pack_")
     scratch = Path(tmp.name)
-    for img in group_dir.glob("*.png"):
-        shutil.copy2(img, scratch / img.name)
+    managed_images = [group_dir / "overview.png"]
+    managed_images.extend(sorted(group_dir.glob("option_*.png")))
+    managed_images.extend(sorted(group_dir.glob("zoom_*.png")))
+    for img in managed_images:
+        if img.is_file():
+            shutil.copy2(img, scratch / img.name)
     canonical = str(group_dir.resolve())
     rewritten = prompt.replace(canonical, str(scratch))
     return scratch, rewritten, tmp
@@ -1379,6 +1397,13 @@ class Consensus:
     # below_quorum:<n>, no_majority, all_abstained, class-mismatch, size_gated,
     # low_confidence; plus the legacy pre-v5 "abstention").
     route_reason: str = ""
+    evidence_id: str = ""
+    evidence_pack_sha256: str = ""
+    displayed_candidate_universe_sha256: str = ""
+    option_menu_sha256: str = ""
+    chosen_option_id: str = ""
+    panel_invocation_sha256: str = ""
+    consensus_policy_sha256: str = ""
 
 
 def compute_consensus(
@@ -1570,6 +1595,12 @@ VOTES_COLUMNS = [
     "timestamp",
     "error",
     "pack_feedback",
+    "evidence_id",
+    "evidence_pack_sha256",
+    "displayed_candidate_universe_sha256",
+    "option_menu_sha256",
+    "chosen_option_id",
+    "panel_invocation_sha256",
 ]
 CONSENSUS_COLUMNS = [
     "group_id",
@@ -1582,6 +1613,13 @@ CONSENSUS_COLUMNS = [
     "minority",
     "mean_confidence",
     "route_reason",
+    "evidence_id",
+    "evidence_pack_sha256",
+    "displayed_candidate_universe_sha256",
+    "option_menu_sha256",
+    "chosen_option_id",
+    "panel_invocation_sha256",
+    "consensus_policy_sha256",
 ]
 
 
@@ -1602,6 +1640,12 @@ def _vote_row(v: Vote) -> dict:
         "timestamp": v.timestamp,
         "error": v.error,
         "pack_feedback": v.pack_feedback,
+        "evidence_id": v.evidence_id,
+        "evidence_pack_sha256": v.evidence_pack_sha256,
+        "displayed_candidate_universe_sha256": v.displayed_candidate_universe_sha256,
+        "option_menu_sha256": v.option_menu_sha256,
+        "chosen_option_id": v.chosen_option_id,
+        "panel_invocation_sha256": v.panel_invocation_sha256,
     }
 
 
@@ -1617,6 +1661,13 @@ def _consensus_row(c: Consensus) -> dict:
         "minority": c.minority,
         "mean_confidence": c.mean_confidence,
         "route_reason": c.route_reason,
+        "evidence_id": c.evidence_id,
+        "evidence_pack_sha256": c.evidence_pack_sha256,
+        "displayed_candidate_universe_sha256": c.displayed_candidate_universe_sha256,
+        "option_menu_sha256": c.option_menu_sha256,
+        "chosen_option_id": c.chosen_option_id,
+        "panel_invocation_sha256": c.panel_invocation_sha256,
+        "consensus_policy_sha256": c.consensus_policy_sha256,
     }
 
 
@@ -1660,12 +1711,46 @@ def run_batch(
     group_dirs = sorted(
         d for d in batch_dir.iterdir() if d.is_dir() and (d / "prompt.txt").exists()
     )
+    allow_legacy_evidence = True
+    batch: dict | None = None
+    batch_path = batch_dir / "batch.json"
+    if batch_path.exists():
+        batch = json.loads(batch_path.read_text())
+        if int(batch.get("schema_version") or 0) >= 2:
+            allow_legacy_evidence = False
+            roster = set(batch_group_map(batch))
+            stale = sorted(d.name for d in group_dirs if d.name not in roster)
+            if stale:
+                raise ValueError(
+                    "evidence packs are outside the current schema-v2 batch roster: "
+                    f"{stale}; regenerate or remove the stale packs"
+                )
+            group_dirs = [d for d in group_dirs if d.name in roster]
     if group_ids:
         wanted = set(group_ids)
         group_dirs = [d for d in group_dirs if d.name in wanted]
     if limit > 0:
         group_dirs = group_dirs[:limit]
     selected_ids = {d.name for d in group_dirs}
+    group_dirs_by_id = {d.name: d for d in group_dirs}
+    evidence_by_id = {
+        d.name: load_evidence_manifest(d, allow_legacy=allow_legacy_evidence) for d in group_dirs
+    }
+    for group_id, manifest in evidence_by_id.items():
+        validate_manifest_against_batch(manifest, batch or {}, group_id)
+    panel_invocation_sha = invocation_signature(
+        panel,
+        timeout=timeout,
+        collect_feedback=collect_feedback,
+        invocation_budget_s=invocation_budget_s,
+        effective_timeouts=[resolve_timeout(provider, timeout) for provider in panel],
+        runtime_contract_sha256=sha256_file(Path(__file__)),
+    )
+    policy_sha = consensus_policy_signature(
+        max_edges=settings.stitch_export_backstop_max_edges,
+        min_voter_confidence=settings.stitch_min_voter_confidence,
+        runtime_contract_sha256=sha256_file(Path(__file__)),
+    )
 
     # Resume: carry forward already-completed groups from the partial files and
     # skip re-running them. A group only counts as done when (a) it is present
@@ -1682,24 +1767,177 @@ def run_batch(
     if resume and votes_partial.exists() and consensus_partial.exists():
         prev_votes = pd.read_csv(votes_partial, dtype={"group_id": str})
         prev_cons = pd.read_csv(consensus_partial, dtype={"group_id": str})
-        panel_names = {p.name for p in panel}
-        prev_names = set(prev_votes["provider"].astype(str).unique())
-        if prev_names != panel_names:
-            logger.warning(
-                f"resume: partials were written by a different panel "
-                f"({sorted(prev_names)} != {sorted(panel_names)}); ignoring them "
-                f"and re-running all groups"
+        recorded = set(prev_votes["group_id"].astype(str)) & set(prev_cons["group_id"].astype(str))
+        expected_voters = {(p.name, p.model) for p in panel}
+        for gid in sorted(recorded & selected_ids):
+            vote_group = prev_votes[prev_votes["group_id"].astype(str) == gid]
+            cons_group = prev_cons[prev_cons["group_id"].astype(str) == gid]
+            manifest = evidence_by_id[gid]
+            evidence = manifest["evidence"]
+            actual_voters = set(
+                zip(
+                    vote_group.get("provider", pd.Series(dtype=str)).astype(str),
+                    vote_group.get("model", pd.Series(dtype=str)).astype(str),
+                    strict=False,
+                )
             )
-        else:
-            recorded = set(prev_votes["group_id"]) & set(prev_cons["group_id"])
-            done_ids = recorded & selected_ids
-            vote_rows = prev_votes[prev_votes["group_id"].isin(done_ids)].to_dict("records")
-            consensus_out = prev_cons[prev_cons["group_id"].isin(done_ids)].to_dict("records")
-            carry = recorded - selected_ids
-            unselected_votes = prev_votes[prev_votes["group_id"].isin(carry)].to_dict("records")
-            unselected_cons = prev_cons[prev_cons["group_id"].isin(carry)].to_dict("records")
-            if done_ids:
-                logger.info(f"resume: skipping {len(done_ids)} already-completed groups")
+            complete = (
+                len(vote_group) == len(panel)
+                and not vote_group.duplicated(subset=["provider"]).any()
+                and actual_voters == expected_voters
+                and len(cons_group) == 1
+            )
+
+            def _all_equal(frame: pd.DataFrame, column: str, expected: str) -> bool:
+                return (
+                    column in frame
+                    and len(frame) > 0
+                    and set(frame[column].astype(str)) == {expected}
+                )
+
+            option_ids = {
+                str(option["letter"]): str(option["option_id"])
+                for option in evidence["option_menu"]
+            }
+            option_edges = {
+                str(option["letter"]): frozenset(
+                    (str(edge["ref_id"]), str(edge["target_id"])) for edge in option["edges"]
+                )
+                for option in evidence["option_menu"]
+            }
+            option_ids.update({"NONE": "NONE", "ABSTAIN": "ABSTAIN", "": ""})
+            option_edges.update({"NONE": frozenset(), "ABSTAIN": frozenset(), "": frozenset()})
+
+            def _stored_edges(value: object) -> frozenset[tuple[str, str]] | None:
+                try:
+                    parsed = json.loads(str(value))
+                    return frozenset((str(edge[0]), str(edge[1])) for edge in parsed)
+                except (json.JSONDecodeError, TypeError, IndexError):
+                    return None
+
+            def _text(value: object) -> str:
+                return "" if pd.isna(value) else str(value)
+
+            def _rows_match_menu(
+                frame: pd.DataFrame,
+                option_ids: dict[str, str] = option_ids,
+                option_edges: dict[str, frozenset[tuple[str, str]]] = option_edges,
+            ) -> bool:
+                required = {"choice", "chosen_option_id", "edge_set"}
+                if not required <= set(frame.columns):
+                    return False
+                for row in frame.to_dict("records"):
+                    choice = _text(row.get("choice"))
+                    if choice not in option_ids:
+                        return False
+                    if _text(row.get("chosen_option_id")) != option_ids[choice]:
+                        return False
+                    if _stored_edges(row.get("edge_set")) != option_edges[choice]:
+                        return False
+                return True
+
+            compatible = complete and all(
+                (
+                    _all_equal(vote_group, "evidence_id", evidence["evidence_id"]),
+                    _all_equal(
+                        vote_group,
+                        "evidence_pack_sha256",
+                        manifest["evidence_pack_sha256"],
+                    ),
+                    _all_equal(
+                        vote_group,
+                        "panel_invocation_sha256",
+                        panel_invocation_sha,
+                    ),
+                    _all_equal(
+                        vote_group,
+                        "displayed_candidate_universe_sha256",
+                        evidence["displayed_candidate_universe_sha256"],
+                    ),
+                    _all_equal(vote_group, "option_menu_sha256", evidence["option_menu_sha256"]),
+                    _rows_match_menu(vote_group),
+                    _all_equal(cons_group, "evidence_id", evidence["evidence_id"]),
+                    _all_equal(
+                        cons_group,
+                        "evidence_pack_sha256",
+                        manifest["evidence_pack_sha256"],
+                    ),
+                    _all_equal(
+                        cons_group,
+                        "panel_invocation_sha256",
+                        panel_invocation_sha,
+                    ),
+                    _all_equal(
+                        cons_group,
+                        "displayed_candidate_universe_sha256",
+                        evidence["displayed_candidate_universe_sha256"],
+                    ),
+                    _all_equal(cons_group, "option_menu_sha256", evidence["option_menu_sha256"]),
+                    _rows_match_menu(cons_group),
+                    _all_equal(cons_group, "consensus_policy_sha256", policy_sha),
+                )
+            )
+            if compatible:
+                replay_votes = [
+                    Vote(
+                        group_id=gid,
+                        provider=str(row["provider"]),
+                        model=str(row["model"]),
+                        choice=_text(row["choice"]),
+                        confidence=float(row["confidence"]),
+                        reasoning=_text(row.get("reasoning")),
+                        edge_set=option_edges[_text(row["choice"])],
+                    )
+                    for row in vote_group.to_dict("records")
+                ]
+                meta = _load_group_context(group_dirs_by_id[gid])[2]
+                ref_class, tgt_class = _segment_class_maps(meta)
+                base = compute_consensus(replay_votes)
+                replay = compute_consensus(
+                    replay_votes,
+                    edge_classes=_edge_classes_for(base.edge_set, ref_class, tgt_class),
+                    n_candidate_edges=candidate_edge_count(meta),
+                    min_voter_confidence=settings.stitch_min_voter_confidence,
+                )
+                stored = cons_group.iloc[0]
+                compatible = all(
+                    (
+                        str(stored["consensus"]) == replay.consensus,
+                        _text(stored.get("choice")) == replay.choice,
+                        _stored_edges(stored["edge_set"]) == replay.edge_set,
+                        str(stored["routing"]) == replay.routing,
+                        int(stored["n_votes"]) == replay.n_votes,
+                        int(stored["n_valid"]) == replay.n_valid,
+                        _text(stored.get("minority")) == replay.minority,
+                        math.isclose(
+                            float(stored["mean_confidence"]),
+                            replay.mean_confidence,
+                            abs_tol=1e-12,
+                        ),
+                        _text(stored.get("route_reason")) == replay.route_reason,
+                    )
+                )
+            if compatible:
+                done_ids.add(gid)
+            else:
+                logger.warning(
+                    f"resume: group {gid} has incomplete or stale panel/evidence/policy "
+                    f"provenance; re-running it"
+                )
+
+        vote_rows = prev_votes[prev_votes["group_id"].astype(str).isin(done_ids)].to_dict("records")
+        consensus_out = prev_cons[prev_cons["group_id"].astype(str).isin(done_ids)].to_dict(
+            "records"
+        )
+        carry = recorded - selected_ids
+        unselected_votes = prev_votes[prev_votes["group_id"].astype(str).isin(carry)].to_dict(
+            "records"
+        )
+        unselected_cons = prev_cons[prev_cons["group_id"].astype(str).isin(carry)].to_dict(
+            "records"
+        )
+        if done_ids:
+            logger.info(f"resume: skipping {len(done_ids)} already-completed groups")
 
     def _flush() -> None:
         pd.DataFrame(unselected_votes + vote_rows, columns=VOTES_COLUMNS).to_csv(
@@ -1737,6 +1975,21 @@ def run_batch(
             collect_feedback=collect_feedback,
             invocation_budget_s=invocation_budget_s,
         )
+        manifest = evidence_by_id[gid]
+        evidence = manifest["evidence"]
+        option_ids = {
+            str(option["letter"]): str(option["option_id"]) for option in evidence["option_menu"]
+        }
+        option_ids.update({"NONE": "NONE", "ABSTAIN": "ABSTAIN"})
+        for vote in votes:
+            vote.evidence_id = evidence["evidence_id"]
+            vote.evidence_pack_sha256 = manifest["evidence_pack_sha256"]
+            vote.displayed_candidate_universe_sha256 = evidence[
+                "displayed_candidate_universe_sha256"
+            ]
+            vote.option_menu_sha256 = evidence["option_menu_sha256"]
+            vote.chosen_option_id = option_ids[vote.choice]
+            vote.panel_invocation_sha256 = panel_invocation_sha
         for v in votes:
             if v.choice == "ABSTAIN" and v.abstain_reason == AbstainReason.TIMEOUT:
                 consecutive_timeouts[v.provider] = consecutive_timeouts.get(v.provider, 0) + 1
@@ -1767,6 +2020,13 @@ def run_batch(
             n_candidate_edges=candidate_edge_count(meta),
             min_voter_confidence=settings.stitch_min_voter_confidence,
         )
+        cons.evidence_id = evidence["evidence_id"]
+        cons.evidence_pack_sha256 = manifest["evidence_pack_sha256"]
+        cons.displayed_candidate_universe_sha256 = evidence["displayed_candidate_universe_sha256"]
+        cons.option_menu_sha256 = evidence["option_menu_sha256"]
+        cons.chosen_option_id = option_ids.get(cons.choice, "")
+        cons.panel_invocation_sha256 = panel_invocation_sha
+        cons.consensus_policy_sha256 = policy_sha
         consensus_out.append(_consensus_row(cons))
         logger.info(
             f"  -> {cons.consensus} choice={cons.choice} routing={cons.routing} "
