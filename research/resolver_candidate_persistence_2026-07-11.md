@@ -44,6 +44,25 @@ substrate.
   decisions.
 - Factory staleness keys include both candidate persistence flags.
 
+### Seattle-scale acceptance
+
+A full single-worker `crosswalk stitch us_seattle_sidewalks` run against the
+stable-COMPKEY target produced:
+
+| item | result |
+|---|---:|
+| parquet rows / JSON candidate keys | 33,246 / 33,246 |
+| groups | 18,416 |
+| total columns / runtime feature columns | 123 / 83 |
+| duplicate `(dataset, group, ref, target)` keys | 0 |
+| non-null signed offsets | 33,246 |
+| parquet size | 13.67 MiB |
+| optimizer status | 23,923 selected; 5,127 pruned; 4,009 rejected; 187 selected elsewhere |
+
+Every parquet key exactly matched the uncapped JSON candidate universe, every
+runtime feature had floating dtype, the model hash and schema/feature versions
+were single-valued, and all rows recorded active calibration.
+
 ## Remaining resolver work, in order
 
 1. Join the parquet in the resolver training-table builder and assert runtime /

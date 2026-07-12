@@ -630,7 +630,7 @@ Dependencies flow downward; R1–R3 can interleave with L1–L2.
 
 | # | PR | Depends on | Acceptance criteria |
 |---|---|---|---|
-| **P1** | Candidate parquet sidecar (`<dataset>_candidates.parquet`, §3.2) — stage 2 following #344's `candidate_edges` | — | Schema per §3.2 (uncapped group rows, 83 typed feature cols + §5.5 derivability extras, keys); groups.json byte-identical; stitch gate PASS unchanged; size within estimate on Seattle; flag default-on. **Implemented 2026-07-11; full Seattle size validation pending local regeneration.** |
+| **P1** | Candidate parquet sidecar (`<dataset>_candidates.parquet`, §3.2) — stage 2 following #344's `candidate_edges` | — | Schema per §3.2 (uncapped group rows, 83 typed feature cols + §5.5 derivability extras, keys); groups.json byte-identical; stitch gate PASS unchanged; size within estimate on Seattle; flag default-on. **Implemented and Seattle-validated 2026-07-11: 33,246 rows / 18,416 groups / 13.67 MiB.** |
 | **L1** | Empty-set label export (unanimous-NONE → `selected_edges=[]`, §2.4a) + eval support for empty truth sets | — | Round-trips through `labels/stitching/` + `stitch_eval` mapping; gate metrics well-defined for empty labels; the 4 known cross-mode groups exported after human confirm |
 | **L2** | De-anchored review mode + 30–50-group unbiased slice (§2.4b) | P1 (UI reads full candidate set) | Slice committed with `deanchored` provenance; render_review_diffs cross-product check clean |
 | **L3** | Targeted cross-mode panel waves (Bogotá bike, SG footpaths) to ≥ 20 reject groups | L1 | ≥ 20 labeled cross-mode groups, held out of training by construction |
