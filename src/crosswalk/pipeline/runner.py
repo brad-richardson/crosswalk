@@ -1,5 +1,6 @@
 """Pipeline orchestration - runs the full matching pipeline."""
 
+import hashlib
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -11,8 +12,16 @@ import pandas as pd
 from loguru import logger
 
 from ..blocking import generate_candidates
-from ..config import CLASS_COLUMN, DATA_VERSION, DEFAULT_SNAP_TOLERANCE_M, NAMES_COLUMN, settings
-from ..filenames import extract_version_from_filename, groups_sidecar_path
+from ..config import (
+    CLASS_COLUMN,
+    DATA_VERSION,
+    DEFAULT_SNAP_TOLERANCE_M,
+    FEATURE_COLUMNS,
+    FEATURE_VERSION,
+    NAMES_COLUMN,
+    settings,
+)
+from ..filenames import candidates_sidecar_path, extract_version_from_filename, groups_sidecar_path
 from ..matching import MatchDecision, optimize_matches_with_grouping
 from ..matching.optimizer import compute_sliver_candidate_edges
 from ..matching.types import MatchType
@@ -345,6 +354,8 @@ GEOJSON_COORD_PRECISION = 7
 # 7 decimal places gives sub-mm precision on typical road segments.
 ALIGNMENT_FRAC_PRECISION = 7
 
+CANDIDATE_SIDECAR_SCHEMA_VERSION = "1.0"
+
 
 def _is_nan(val) -> bool:
     """Check if a value is NaN (works for float, numpy, pandas NA)."""
@@ -514,6 +525,322 @@ def _compute_candidate_graph_by_group(
     return {gid: [pairs[p] for p in sorted(pairs)] for gid, pairs in by_gid.items()}
 
 
+def _signed_lateral_offset_m(ref_geom, target_geom) -> float:
+    """Mean target offset signed left (+) / right (-) of ref orientation.
+
+    The existing ``lateral_offset_m`` feature is an unsigned distance.  This
+    companion value samples the target, projects each sample to the reference,
+    and signs its distance with the local reference tangent.  It deliberately
+    preserves the reference geometry's stored orientation; a future group
+    decoder can normalize corridor direction before measuring sign consistency.
+    """
+    if (
+        ref_geom is None
+        or target_geom is None
+        or ref_geom.is_empty
+        or target_geom.is_empty
+        or ref_geom.length <= 0
+        or target_geom.length <= 0
+    ):
+        return float("nan")
+
+    signed: list[float] = []
+    tangent_step = max(float(ref_geom.length) * 1e-6, 1e-4)
+    for fraction in (0.1, 0.3, 0.5, 0.7, 0.9):
+        sample = target_geom.interpolate(fraction, normalized=True)
+        along = float(ref_geom.project(sample))
+        nearest = ref_geom.interpolate(along)
+        before = ref_geom.interpolate(max(0.0, along - tangent_step))
+        after = ref_geom.interpolate(min(float(ref_geom.length), along + tangent_step))
+        tx = float(after.x - before.x)
+        ty = float(after.y - before.y)
+        vx = float(sample.x - nearest.x)
+        vy = float(sample.y - nearest.y)
+        cross = tx * vy - ty * vx
+        tangent_length = (tx * tx + ty * ty) ** 0.5
+        signed.append(cross / tangent_length if tangent_length > 0 else 0.0)
+    return float(sum(signed) / len(signed))
+
+
+def _active_model_hash() -> str:
+    """SHA-256 of the model used by the default stitch scoring path."""
+    path = _default_model_path()
+    digest = hashlib.sha256()
+    with path.open("rb") as model_file:
+        for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _export_candidates_sidecar(
+    *,
+    groups: list[dict],
+    candidate_graph_by_gid: dict[str, list[dict]],
+    best_by_pair: dict[tuple[str, str], Any],
+    output_path: Path,
+    reference_proj: gpd.GeoDataFrame,
+    target_proj: gpd.GeoDataFrame,
+    ref_id_column: str,
+    target_id_column: str,
+    sliver_pairs_str: set[tuple[str, str]],
+    pruned_gid_by_pair: dict[tuple[str, str], str],
+    dataset_id: str | None,
+) -> Path | None:
+    """Persist one typed parquet row for every stage-1 resolver candidate."""
+    path = candidates_sidecar_path(output_path)
+    if not settings.stitch_persist_candidates or not groups:
+        if path.exists():
+            path.unlink()
+            logger.info(f"Removed stale candidates sidecar: {path}")
+        return None
+
+    from ..features.alignment import create_subline
+    from ..matching.optimizer import PARALLEL_SIBLING_REVIEW_FLAG, compute_group_structure
+
+    ref_geoms = reference_proj.geometry.to_numpy()
+    target_geoms = target_proj.geometry.to_numpy()
+    ref_classes = (
+        reference_proj[CLASS_COLUMN].to_numpy() if CLASS_COLUMN in reference_proj.columns else None
+    )
+    target_classes = (
+        target_proj[CLASS_COLUMN].to_numpy() if CLASS_COLUMN in target_proj.columns else None
+    )
+    ref_geom_by_id = {
+        str(segment_id): geom
+        for segment_id, geom in zip(reference_proj[ref_id_column], reference_proj.geometry)
+    }
+    target_geom_by_id = {
+        str(segment_id): geom
+        for segment_id, geom in zip(target_proj[target_id_column], target_proj.geometry)
+    }
+    ref_class_by_id = (
+        {
+            str(segment_id): value
+            for segment_id, value in zip(
+                reference_proj[ref_id_column], reference_proj[CLASS_COLUMN]
+            )
+        }
+        if ref_classes is not None
+        else {}
+    )
+    target_class_by_id = (
+        {
+            str(segment_id): value
+            for segment_id, value in zip(target_proj[target_id_column], target_proj[CLASS_COLUMN])
+        }
+        if target_classes is not None
+        else {}
+    )
+
+    def _at(values, idx):
+        if values is None or idx is None or idx < 0 or idx >= len(values):
+            return None
+        return values[idx]
+
+    def _class_value(value) -> str | None:
+        return None if value is None or _is_nan(value) else str(value)
+
+    def _aligned(geom, start, end):
+        if geom is None or start is None or end is None or _is_nan(start) or _is_nan(end):
+            return geom
+        subline = create_subline(geom, float(start), float(end))
+        return subline if subline is not None else geom
+
+    group_by_gid = {str(group["group_id"]): group for group in groups}
+    model_hash = _active_model_hash()
+    calibration_active = _calibration_active()
+    rows: list[dict[str, Any]] = []
+    for gid in sorted(candidate_graph_by_gid):
+        group = group_by_gid.get(gid)
+        if group is None:
+            continue
+        candidates = candidate_graph_by_gid[gid]
+        pairs = [(str(edge["ref_id"]), str(edge["target_id"])) for edge in candidates]
+        assignment_pairs = {
+            (str(edge["ref_id"]), str(edge["target_id"]))
+            for edge in group.get("optimizer_assignment", [])
+        }
+        all_ref_ids = sorted({pair[0] for pair in pairs})
+        all_target_ids = sorted({pair[1] for pair in pairs})
+        structure, _ = compute_group_structure(
+            edges=pairs,
+            ref_ids=all_ref_ids,
+            target_ids=all_target_ids,
+            assignment_pairs=assignment_pairs,
+            sliver_pairs=sliver_pairs_str,
+            ref_geoms=ref_geom_by_id,
+            target_geoms=target_geom_by_id,
+            tolerance=DEFAULT_SNAP_TOLERANCE_M,
+            corridor_aware=settings.optimizer_corridor_aware,
+            max_turn_deg=settings.optimizer_corridor_max_turn_deg,
+        )
+
+        for candidate, pair in zip(candidates, pairs):
+            result = best_by_pair.get(pair)
+            if result is None:
+                logger.warning(f"Candidate sidecar skipped missing scored pair {gid}: {pair}")
+                continue
+            ref_idx = getattr(result, "ref_idx", None)
+            target_idx = getattr(result, "target_idx", None)
+            ref_geom = _at(ref_geoms, ref_idx)
+            if ref_geom is None:
+                ref_geom = ref_geom_by_id.get(pair[0])
+            target_geom = _at(target_geoms, target_idx)
+            if target_geom is None:
+                target_geom = target_geom_by_id.get(pair[1])
+            ref_class = _at(ref_classes, ref_idx)
+            if ref_class is None:
+                ref_class = ref_class_by_id.get(pair[0])
+            target_class = _at(target_classes, target_idx)
+            if target_class is None:
+                target_class = target_class_by_id.get(pair[1])
+            aligned_ref = _aligned(ref_geom, result.gers_start_frac, result.gers_end_frac)
+            aligned_target = _aligned(target_geom, result.local_start_frac, result.local_end_frac)
+
+            pruned = pruned_gid_by_pair.get(pair) == gid
+            selected = bool(candidate.get("selected", False))
+            selected_elsewhere = bool(candidate.get("selected_elsewhere", False))
+            features = getattr(result, "features", {}) or {}
+            if pruned:
+                optimizer_decision = "pruned"
+                decision_reason = "confidence_drop_prune"
+            elif selected:
+                is_demoted = bool(features.get(PARALLEL_SIBLING_REVIEW_FLAG))
+                optimizer_decision = "review" if is_demoted else "selected"
+                decision_reason = "parallel_sibling" if is_demoted else "optimizer_assignment"
+            elif selected_elsewhere:
+                optimizer_decision = "selected_elsewhere"
+                decision_reason = "assigned_to_other_group"
+            else:
+                optimizer_decision = "rejected"
+                decision_reason = "optimizer_rejected"
+
+            edge_structure = structure.get(pair, {})
+            row: dict[str, Any] = {
+                "dataset_id": dataset_id or "",
+                "group_id": gid,
+                "ref_id": pair[0],
+                "target_id": pair[1],
+                "ref_idx": ref_idx,
+                "target_idx": target_idx,
+                "selected": selected,
+                "selected_elsewhere": selected_elsewhere,
+                "pruned": pruned,
+                "is_sliver": bool(edge_structure.get("is_sliver", pair in sliver_pairs_str)),
+                "decision": result.decision.value,
+                "optimizer_decision": optimizer_decision,
+                "decision_reason": decision_reason,
+                "confidence": float(result.confidence),
+                "gers_start_frac": result.gers_start_frac,
+                "gers_end_frac": result.gers_end_frac,
+                "local_start_frac": result.local_start_frac,
+                "local_end_frac": result.local_end_frac,
+                "degree_ref": edge_structure.get("degree_ref"),
+                "degree_tgt": edge_structure.get("degree_tgt"),
+                "is_bridge": bool(edge_structure.get("is_bridge", False)),
+                "biconnected_block": edge_structure.get("biconnected_block"),
+                "corridor_ref": edge_structure.get("corridor_ref"),
+                "corridor_tgt": edge_structure.get("corridor_tgt"),
+                "match_type": group.get("match_type"),
+                "n_edges": group.get("n_edges"),
+                "n_candidate_edges": len(candidates),
+                "n_corridors": group.get("n_corridors"),
+                "n_assignment_components": group.get("n_assignment_components"),
+                "largest_biconnected_block": group.get("largest_biconnected_block"),
+                "oversized_group": bool(group.get("oversized_group", False)),
+                "ref_class": _class_value(ref_class),
+                "target_class": _class_value(target_class),
+                "ref_length_m": float(ref_geom.length) if ref_geom is not None else float("nan"),
+                "target_length_m": (
+                    float(target_geom.length) if target_geom is not None else float("nan")
+                ),
+                "lateral_offset_signed_m": _signed_lateral_offset_m(aligned_ref, aligned_target),
+                "feature_version": FEATURE_VERSION,
+                "model_hash": model_hash,
+                "calibration_active": calibration_active,
+                "schema_version": CANDIDATE_SIDECAR_SCHEMA_VERSION,
+            }
+            for feature_name in FEATURE_COLUMNS:
+                try:
+                    row[feature_name] = float(features.get(feature_name, float("nan")))
+                except (TypeError, ValueError):
+                    row[feature_name] = float("nan")
+            rows.append(row)
+
+    if not rows:
+        if path.exists():
+            path.unlink()
+        return None
+
+    frame = pd.DataFrame(rows).sort_values(["group_id", "ref_id", "target_id"])
+    string_columns = [
+        "dataset_id",
+        "group_id",
+        "ref_id",
+        "target_id",
+        "decision",
+        "optimizer_decision",
+        "decision_reason",
+        "match_type",
+        "ref_class",
+        "target_class",
+        "feature_version",
+        "model_hash",
+        "schema_version",
+    ]
+    nullable_int_columns = [
+        "ref_idx",
+        "target_idx",
+        "degree_ref",
+        "degree_tgt",
+        "biconnected_block",
+        "corridor_ref",
+        "corridor_tgt",
+        "n_edges",
+        "n_candidate_edges",
+        "n_corridors",
+        "n_assignment_components",
+        "largest_biconnected_block",
+    ]
+    bool_columns = [
+        "selected",
+        "selected_elsewhere",
+        "pruned",
+        "is_sliver",
+        "is_bridge",
+        "oversized_group",
+        "calibration_active",
+    ]
+    float_columns = [
+        "confidence",
+        "gers_start_frac",
+        "gers_end_frac",
+        "local_start_frac",
+        "local_end_frac",
+        "ref_length_m",
+        "target_length_m",
+        "lateral_offset_signed_m",
+        *FEATURE_COLUMNS,
+    ]
+    for column in string_columns:
+        frame[column] = frame[column].astype("string")
+    for column in nullable_int_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("Int64")
+    for column in bool_columns:
+        frame[column] = frame[column].astype(bool)
+    for column in float_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("float64")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    frame.to_parquet(temporary, index=False, compression="snappy")
+    temporary.replace(path)
+    logger.info(
+        f"Exported {len(frame)} typed resolver candidates "
+        f"({len(FEATURE_COLUMNS)} pair features) to {path}"
+    )
+    return path
+
+
 def _export_groups_sidecar(
     results: list,
     optimized: list,
@@ -529,6 +856,7 @@ def _export_groups_sidecar(
     pruned_pairs: set[tuple[Any, Any]] | None = None,
     pruned_group_ids: dict[tuple[Any, Any], Any] | None = None,
     glue_min_confidence: float | None = None,
+    dataset_id: str | None = None,
 ) -> Path | None:
     """Export a groups sidecar JSON alongside the bridge file.
 
@@ -648,7 +976,9 @@ def _export_groups_sidecar(
     # (``candidate_edges``); no existing key or consumer is affected. See
     # ``_compute_candidate_graph_by_group`` for the attribution rule.
     candidate_graph_by_gid: dict[str, list[dict]] = {}
-    if settings.stitch_persist_candidate_graph and assignment_by_gid:
+    if (
+        settings.stitch_persist_candidate_graph or settings.stitch_persist_candidates
+    ) and assignment_by_gid:
         candidate_graph_by_gid = _compute_candidate_graph_by_group(
             results=results,
             optimized=optimized,
@@ -1058,8 +1388,16 @@ def _export_groups_sidecar(
                 # attributed to exactly one group, with the optimizer's decision
                 # (`selected`). Uncapped, minimal uniform schema; empty when
                 # settings.stitch_persist_candidate_graph is off.
-                "candidate_edges": candidate_graph_by_gid.get(group_id, []),
-                "n_candidate_edges": len(candidate_graph_by_gid.get(group_id, [])),
+                "candidate_edges": (
+                    candidate_graph_by_gid.get(group_id, [])
+                    if settings.stitch_persist_candidate_graph
+                    else []
+                ),
+                "n_candidate_edges": (
+                    len(candidate_graph_by_gid.get(group_id, []))
+                    if settings.stitch_persist_candidate_graph
+                    else 0
+                ),
                 # M2 candidate-graph persistence: non-selected candidates the
                 # optimizer saw for this group's nodes (sibling to `edges`).
                 "rejected_edges": rejected_edges,
@@ -1089,6 +1427,10 @@ def _export_groups_sidecar(
         if stale.exists():
             stale.unlink()
             logger.info(f"Removed stale groups sidecar: {stale}")
+        stale_candidates = candidates_sidecar_path(output_path)
+        if stale_candidates.exists():
+            stale_candidates.unlink()
+            logger.info(f"Removed stale candidates sidecar: {stale_candidates}")
         return None
 
     sidecar_path = groups_sidecar_path(output_path)
@@ -1099,6 +1441,19 @@ def _export_groups_sidecar(
         "groups": groups,
     }
 
+    _export_candidates_sidecar(
+        groups=groups,
+        candidate_graph_by_gid=candidate_graph_by_gid,
+        best_by_pair=best_by_pair,
+        output_path=output_path,
+        reference_proj=reference_proj,
+        target_proj=target_proj,
+        ref_id_column=ref_id_column,
+        target_id_column=target_id_column,
+        sliver_pairs_str=sliver_pairs_str,
+        pruned_gid_by_pair=pruned_gid_by_pair,
+        dataset_id=dataset_id,
+    )
     sidecar_path.write_text(json.dumps(sidecar, indent=2))
     logger.info(f"Exported {len(groups)} match groups to {sidecar_path}")
     return sidecar_path
@@ -1335,6 +1690,7 @@ def optimize_and_export(
         pruned_pairs=pruned_pairs,
         pruned_group_ids=pruned_group_ids,
         glue_min_confidence=glue_min_confidence,
+        dataset_id=prune_dataset_key,
     )
 
     if progress_callback:

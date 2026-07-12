@@ -292,6 +292,21 @@ def groups_sidecar_path(bridge_path: Path) -> Path:
     return bridge_path.parent / f"{stem}.json"
 
 
+def candidates_sidecar_path(bridge_path: Path) -> Path:
+    """Get the typed resolver-candidate parquet alongside a bridge file.
+
+    Example:
+        data/output/us_boston_streets_bridge.parquet
+        -> data/output/us_boston_streets_candidates.parquet
+    """
+    stem = bridge_path.stem
+    if stem.endswith("_bridge"):
+        stem = stem[: -len("_bridge")] + "_candidates"
+    else:
+        stem = stem + "_candidates"
+    return bridge_path.parent / f"{stem}.parquet"
+
+
 # Sentinel "dataset" id for the combined cross-dataset stitching review queue
 # (crosswalk data stitch-batch-all). It is not a real dataset — its batch file
 # aggregates every per-dataset queue, and each group inside carries its own

@@ -85,6 +85,8 @@ def settings_snapshot() -> dict[str, Any]:
         "stitch_export_backstop_max_edges": settings.stitch_export_backstop_max_edges,
         "stitch_persist_rejected_edges": settings.stitch_persist_rejected_edges,
         "stitch_rejected_edges_max_per_group": settings.stitch_rejected_edges_max_per_group,
+        "stitch_persist_candidate_graph": settings.stitch_persist_candidate_graph,
+        "stitch_persist_candidates": settings.stitch_persist_candidates,
         "resolver_prune_enabled": settings.resolver_prune_enabled,
         "resolver_prune_overrides": dict(settings.resolver_prune_overrides or {}),
     }

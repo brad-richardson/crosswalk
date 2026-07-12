@@ -239,7 +239,7 @@ pair level.
 
 Still missing, and blocking round 3 (flip condition #3 in round 2):
 
-1. **The 78 pair features for candidate edges.** They exist for only ~5% of
+1. **The 83 pair features for candidate edges.** They exist for only ~5% of
    group edges via `labels/features/` (pair-labeled pairs only), and #344's
    `candidate_edges` carries no feature columns. Yet the full vectors are
    computed for *every scored candidate* at match time — the factory
@@ -260,12 +260,12 @@ every persisted group (selected + rejected + pruned, **no cap**):
 
 | column group | columns |
 |---|---|
-| keys | `group_id`, `ref_id`, `target_id`, `ref_idx`, `target_idx` |
+| keys | `dataset_id`, `group_id`, `ref_id`, `target_id`, `ref_idx`, `target_idx` |
 | status | `selected` (bool), `pruned` (bool), `is_sliver` (bool), `decision` |
 | score | `confidence` (calibrated), alignment fracs ×4 |
 | structural layer | `degree_ref`, `degree_tgt`, `is_bridge`, `biconnected_block`, `corridor_ref`, `corridor_tgt` |
 | group context (denormalized) | `match_type`, `n_edges`, `n_corridors`, `n_assignment_components`, `largest_biconnected_block`, `oversized_group` |
-| pair features | the 78 `FEATURE_COLUMNS` as native float64 columns (NaN-preserving, not JSON — columnar reads matter for training) |
+| pair features | the 83 current `FEATURE_COLUMNS` as native float64 columns (NaN-preserving, not JSON — columnar reads matter for training) |
 | UDF-derivability extras (§5.5) | `ref_class`, `target_class`, `ref_length_m`, `target_length_m`, `lateral_offset_signed_m` |
 | provenance | `feature_version`, `model_hash`, `schema_version` (file-level metadata is fine) |
 
@@ -292,7 +292,7 @@ JSON `rejected_edges` list and its cap stay as-is for the UI. Flag:
 
 **Convergence note (stage 2, following #344's stage 1):** the three
 non-negotiables from this design's perspective are (a) *uncapped* group
-candidate rows (already true of #344's `candidate_edges`), (b) the 78 features
+candidate rows (already true of #344's `candidate_edges`), (b) the 83 features
 as *typed columns keyed by (group_id, ref_id, target_id)*, (c) the §5.5
 UDF-derivability rule — no resolver input may require repo-side state.
 Everything else (exact column naming, whether group context is denormalized) is
@@ -343,7 +343,7 @@ Three tiers, all available per-row from the §3 parquet:
    group-relative confidence (`conf_rel_max` dominated round-1 importances),
    spans, degree/bridge/sliver, competition (`n_share_*`, `conf_margin_*`,
    `is_best_for_*`, span-overlap-with-higher), group counts.
-2. **The 78 pair features**, newly available for every candidate edge. The ones
+2. **The 83 pair features**, newly available for every candidate edge. The ones
    with a designed role:
    - *Cross-mode geometric* (§4.3): the Parallel Sibling family
      (`has_parallel_sibling_ref`, `parallel_fraction_ref`,
@@ -513,7 +513,7 @@ indexes, settings). Audit of §4.2 against this rule:
 | feature tier | verdict |
 |---|---|
 | 26 sidecar features (tier 1) | Derivable in-UDF from `confidence` + structure + span columns (group-relative aggregates are group-local by construction) |
-| 78 pair features (tier 2) | Persisted columns by design. The context-heavy ones (Parallel Sibling, crossing-angle, graphlet, topology) need full-dataset spatial context to *compute* — so they are computed once at match time repo-side and **persisted**; the UDF never recomputes them. This is the load-bearing reason tier 2 must live in the parquet at all |
+| 83 pair features (tier 2) | Persisted columns by design. The context-heavy ones (Parallel Sibling, crossing-angle, graphlet, topology) need full-dataset spatial context to *compute* — so they are computed once at match time repo-side and **persisted**; the UDF never recomputes them. This is the load-bearing reason tier 2 must live in the parquet at all |
 | group aggregates (tier 3) | Derivable in-UDF **except** three inputs that must be added as persisted columns (now in §3.2): `lateral_offset_signed_m` (shipped offset is unsigned; sign consistency is not derivable downstream), `ref_class`/`target_class` (exclusive-lane evidence needs per-edge classes; groups.json holds them group-level only), `ref_length_m`/`target_length_m` (frac→meter conversion for overlap/gap constraints) |
 
 No proposed feature had to be dropped; three required persistence instead of
@@ -630,7 +630,7 @@ Dependencies flow downward; R1–R3 can interleave with L1–L2.
 
 | # | PR | Depends on | Acceptance criteria |
 |---|---|---|---|
-| **P1** | Candidate parquet sidecar (`<dataset>_candidates.parquet`, §3.2) — stage 2 following #344's `candidate_edges` | — | Schema per §3.2 (uncapped group rows, 78 typed feature cols + §5.5 derivability extras, keys); groups.json byte-identical; stitch gate PASS unchanged; size within estimate on Seattle; flag default-on |
+| **P1** | Candidate parquet sidecar (`<dataset>_candidates.parquet`, §3.2) — stage 2 following #344's `candidate_edges` | — | Schema per §3.2 (uncapped group rows, 83 typed feature cols + §5.5 derivability extras, keys); groups.json byte-identical; stitch gate PASS unchanged; size within estimate on Seattle; flag default-on. **Implemented and Seattle-validated 2026-07-11: 33,246 rows / 18,416 groups / 13.67 MiB.** |
 | **L1** | Empty-set label export (unanimous-NONE → `selected_edges=[]`, §2.4a) + eval support for empty truth sets | — | Round-trips through `labels/stitching/` + `stitch_eval` mapping; gate metrics well-defined for empty labels; the 4 known cross-mode groups exported after human confirm |
 | **L2** | De-anchored review mode + 30–50-group unbiased slice (§2.4b) | P1 (UI reads full candidate set) | Slice committed with `deanchored` provenance; render_review_diffs cross-product check clean |
 | **L3** | Targeted cross-mode panel waves (Bogotá bike, SG footpaths) to ≥ 20 reject groups | L1 | ≥ 20 labeled cross-mode groups, held out of training by construction |
