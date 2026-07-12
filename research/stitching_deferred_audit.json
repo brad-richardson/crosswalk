@@ -1,0 +1,1294 @@
+{
+  "artifact_source": {
+    "commit": "9adfdefa7a5893dea207bbdd17db828013d6644f",
+    "tree": "00418f8e72b8f60409bd2ad79cf12f5b98de40ff"
+  },
+  "build_invocation": {
+    "candidates": null,
+    "filter_rule5": true,
+    "include_empty": true,
+    "include_rejected": true,
+    "include_split": true,
+    "prefer_candidate_graph": true
+  },
+  "datasets": {
+    "us_boston_streets": {
+      "audit": {
+        "legacy_known_omissions": [
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:5466d710-7428-4b8a-9931-b8c9afd749c0:us_boston_streets_9989_882a3066b3:bb93702d",
+            "current_group_id": "310b338c",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "bb93702d",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "5466d710-7428-4b8a-9931-b8c9afd749c0",
+            "ref_name": "",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_9989_882a3066b3",
+            "target_name": "WELLES AVENUE"
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:8c62758e-cdee-4ec5-a5f0-3a7e53c25546:us_boston_streets_9989_882a3066b3:bb93702d",
+            "current_group_id": "310b338c",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "bb93702d",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "8c62758e-cdee-4ec5-a5f0-3a7e53c25546",
+            "ref_name": "",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_9989_882a3066b3",
+            "target_name": "WELLES AVENUE"
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:83381cb5-c064-44a9-a8f5-7fa02259fbb6:us_boston_streets_4130_882a30660b:a89e4b84",
+            "current_group_id": "4995e327",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "a89e4b84",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "83381cb5-c064-44a9-a8f5-7fa02259fbb6",
+            "ref_name": "",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_4130_882a30660b",
+            "target_name": "NORTH MARGIN STREET"
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:da6921cb-eb01-4638-84a7-4106412efe5c:us_boston_streets_4130_882a30660b:a89e4b84",
+            "current_group_id": "4995e327",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "a89e4b84",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "da6921cb-eb01-4638-84a7-4106412efe5c",
+            "ref_name": "",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_4130_882a30660b",
+            "target_name": "NORTH MARGIN STREET"
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:f6c9b841-e180-46a7-9811-2bd6cce1243a:us_boston_streets_4130_882a30660b:a89e4b84",
+            "current_group_id": "4995e327",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "a89e4b84",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "f6c9b841-e180-46a7-9811-2bd6cce1243a",
+            "ref_name": "",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_4130_882a30660b",
+            "target_name": "NORTH MARGIN STREET"
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:726ce920-9b48-4349-87e5-f824013e807a:us_boston_streets_6653_882a3064c7:701d491e",
+            "current_group_id": "658fce64",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "701d491e",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "726ce920-9b48-4349-87e5-f824013e807a",
+            "ref_name": "American Legion Highway",
+            "retained_after_quarantine": false,
+            "target_id": "us_boston_streets_6653_882a3064c7",
+            "target_name": ""
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:d9d22d5e-f2c6-4e25-847a-f57f83670b94:us_boston_streets_20_882a306639:cc0c30a0",
+            "current_group_id": "6cf0a147",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "cc0c30a0",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "d9d22d5e-f2c6-4e25-847a-f57f83670b94",
+            "ref_name": "",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_20_882a306639",
+            "target_name": "CHESTNUT STREET"
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:cd06bc62-c453-436a-ba1e-1a8d737d65b6:us_boston_streets_1373_882a306419:f170979a",
+            "current_group_id": "6eb7078b",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "f170979a",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "cd06bc62-c453-436a-ba1e-1a8d737d65b6",
+            "ref_name": "Bragdon Street",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_1373_882a306419",
+            "target_name": ""
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:b02844df-c219-4bfe-9e38-932ea6727b6f:us_boston_streets_10413_882a3066b5:058c4460",
+            "current_group_id": "7b7c77dc",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "058c4460",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "b02844df-c219-4bfe-9e38-932ea6727b6f",
+            "ref_name": "Park Street",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_10413_882a3066b5",
+            "target_name": ""
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:1b670d46-c6e3-49ad-a08a-61ea60aa0c0e:us_boston_streets_34_882a30644b:9ac35fb7+f452e052",
+            "current_group_id": "90dc1de1",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 2,
+            "occurrences": [
+              {
+                "human_group_id": "9ac35fb7",
+                "provenance": "split"
+              },
+              {
+                "human_group_id": "f452e052",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "1b670d46-c6e3-49ad-a08a-61ea60aa0c0e",
+            "ref_name": "Boylston Street",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_34_882a30644b",
+            "target_name": ""
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:b3c8bbdc-0216-4bc8-8af6-1c8fae2f1b46:us_boston_streets_6050_882a30644b:9ac35fb7+f452e052",
+            "current_group_id": "90dc1de1",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 2,
+            "occurrences": [
+              {
+                "human_group_id": "9ac35fb7",
+                "provenance": "split"
+              },
+              {
+                "human_group_id": "f452e052",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "b3c8bbdc-0216-4bc8-8af6-1c8fae2f1b46",
+            "ref_name": "Boylston Street",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_6050_882a30644b",
+            "target_name": ""
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:cd456724-7e95-4749-855a-180e383e293a:us_boston_streets_1609_882a3066b5:77d260da",
+            "current_group_id": "9466ce8e",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "77d260da",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "cd456724-7e95-4749-855a-180e383e293a",
+            "ref_name": "Vassar Street",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_1609_882a3066b5",
+            "target_name": ""
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:8cf1ac96-aa94-42eb-bbe2-64ce5ebbca8b:us_boston_streets_6790_882a306633:04fc93e5",
+            "current_group_id": "ec725e24",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "04fc93e5",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "8cf1ac96-aa94-42eb-bbe2-64ce5ebbca8b",
+            "ref_name": "",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_6790_882a306633",
+            "target_name": "RUTLAND STREET"
+          },
+          {
+            "case_id": "legacy_known_omission:us_boston_streets:a2be6d1c-e452-4288-b094-46356f60c67f:us_boston_streets_5818_882a30661d:3074ed80",
+            "current_group_id": "f1b99028",
+            "dataset_id": "us_boston_streets",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "3074ed80",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "a2be6d1c-e452-4288-b094-46356f60c67f",
+            "ref_name": "",
+            "retained_after_quarantine": true,
+            "target_id": "us_boston_streets_5818_882a30661d",
+            "target_name": "CROSS STREET"
+          }
+        ],
+        "quarantined_groups": [
+          {
+            "case_id": "label_collision:us_boston_streets:3ef22541+5ebfa40f",
+            "conflicting_edges": [
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                "target_id": "us_boston_streets_1538_882a3064c9"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                "target_id": "us_boston_streets_1709_882a3064cd"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                "target_id": "us_boston_streets_3646_882a3064c9"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                "target_id": "us_boston_streets_4955_882a3064cd"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                "target_id": "us_boston_streets_9525_882a3064c9"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "7335ad08-9930-4631-9034-4ed31590bdd6",
+                "target_id": "us_boston_streets_1106_882a3064c9"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "7335ad08-9930-4631-9034-4ed31590bdd6",
+                "target_id": "us_boston_streets_3646_882a3064c9"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "abe46d73-52e0-4a0a-896d-f143e93bb4a3",
+                "target_id": "us_boston_streets_1538_882a3064c9"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "abe46d73-52e0-4a0a-896d-f143e93bb4a3",
+                "target_id": "us_boston_streets_3646_882a3064c9"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "c019ceef-962a-4d32-9a49-2fbca911138e",
+                "target_id": "us_boston_streets_1106_882a3064c9"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "c019ceef-962a-4d32-9a49-2fbca911138e",
+                "target_id": "us_boston_streets_1399_882a3064c9"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "c019ceef-962a-4d32-9a49-2fbca911138e",
+                "target_id": "us_boston_streets_2002_882a3064c9"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "3ef22541",
+                    "keep": 0,
+                    "provenance": "clean"
+                  },
+                  {
+                    "human_group_id": "5ebfa40f",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "e4429917-62e7-492a-858c-3384a9bcf2d7",
+                "target_id": "us_boston_streets_1538_882a3064c9"
+              }
+            ],
+            "conflicting_key_count": 13,
+            "current_group_id": "42a76195",
+            "dataset_id": "us_boston_streets",
+            "historical_human_group_ids": [
+              "3ef22541",
+              "5ebfa40f"
+            ],
+            "historical_labels": [
+              {
+                "human_group_id": "3ef22541",
+                "label_semantics": "pair",
+                "labeled_at": "2026-07-04T23:25:55.027162+00:00",
+                "labeler": "brad",
+                "provenance": "clean",
+                "selected_edges": [
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_10134_882a3066a7"
+                  },
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_3119_882a3066a7"
+                  },
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_4593_882a3064cd"
+                  }
+                ]
+              },
+              {
+                "human_group_id": "5ebfa40f",
+                "label_semantics": "pair",
+                "labeled_at": "2026-07-05T15:44:35.273748+00:00",
+                "labeler": "brad",
+                "provenance": "clean",
+                "selected_edges": [
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_10134_882a3066a7"
+                  },
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_1538_882a3064c9"
+                  },
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_1709_882a3064cd"
+                  },
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_3119_882a3066a7"
+                  },
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_3646_882a3064c9"
+                  },
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_4593_882a3064cd"
+                  },
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_4955_882a3064cd"
+                  },
+                  {
+                    "ref_id": "5c5ce238-4dcf-4ee8-8f3c-e40103d27883",
+                    "target_id": "us_boston_streets_9525_882a3064c9"
+                  },
+                  {
+                    "ref_id": "7335ad08-9930-4631-9034-4ed31590bdd6",
+                    "target_id": "us_boston_streets_1106_882a3064c9"
+                  },
+                  {
+                    "ref_id": "7335ad08-9930-4631-9034-4ed31590bdd6",
+                    "target_id": "us_boston_streets_3646_882a3064c9"
+                  },
+                  {
+                    "ref_id": "abe46d73-52e0-4a0a-896d-f143e93bb4a3",
+                    "target_id": "us_boston_streets_1538_882a3064c9"
+                  },
+                  {
+                    "ref_id": "abe46d73-52e0-4a0a-896d-f143e93bb4a3",
+                    "target_id": "us_boston_streets_3646_882a3064c9"
+                  },
+                  {
+                    "ref_id": "c019ceef-962a-4d32-9a49-2fbca911138e",
+                    "target_id": "us_boston_streets_1106_882a3064c9"
+                  },
+                  {
+                    "ref_id": "c019ceef-962a-4d32-9a49-2fbca911138e",
+                    "target_id": "us_boston_streets_1399_882a3064c9"
+                  },
+                  {
+                    "ref_id": "c019ceef-962a-4d32-9a49-2fbca911138e",
+                    "target_id": "us_boston_streets_2002_882a3064c9"
+                  },
+                  {
+                    "ref_id": "e4429917-62e7-492a-858c-3384a9bcf2d7",
+                    "target_id": "us_boston_streets_1538_882a3064c9"
+                  }
+                ]
+              }
+            ],
+            "raw_row_occurrences": 32
+          },
+          {
+            "case_id": "label_collision:us_boston_streets:701d491e+d8f883c1",
+            "conflicting_edges": [
+              {
+                "claims": [
+                  {
+                    "human_group_id": "701d491e",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "d8f883c1",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "726ce920-9b48-4349-87e5-f824013e807a",
+                "target_id": "us_boston_streets_3149_882a3064c7"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "701d491e",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "d8f883c1",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "726ce920-9b48-4349-87e5-f824013e807a",
+                "target_id": "us_boston_streets_4444_882a3064c1"
+              }
+            ],
+            "conflicting_key_count": 2,
+            "current_group_id": "658fce64",
+            "dataset_id": "us_boston_streets",
+            "historical_human_group_ids": [
+              "701d491e",
+              "d8f883c1"
+            ],
+            "historical_labels": [
+              {
+                "human_group_id": "701d491e",
+                "label_semantics": "pair",
+                "labeled_at": "2026-07-03T23:42:43.973203+00:00",
+                "labeler": "brad",
+                "provenance": "split",
+                "selected_edges": [
+                  {
+                    "ref_id": "01fa8038-4ffb-47ce-8cdd-9bc5bca9e20f",
+                    "target_id": "us_boston_streets_7852_882a3064c7"
+                  },
+                  {
+                    "ref_id": "0b9be5a8-07d0-4dd1-b477-cba3dbf7423e",
+                    "target_id": "us_boston_streets_1971_882a3064c7"
+                  },
+                  {
+                    "ref_id": "0b9be5a8-07d0-4dd1-b477-cba3dbf7423e",
+                    "target_id": "us_boston_streets_5888_882a3064c7"
+                  },
+                  {
+                    "ref_id": "59b73d04-a69d-4a7b-80fa-b76409a163c8",
+                    "target_id": "us_boston_streets_5888_882a3064c7"
+                  },
+                  {
+                    "ref_id": "59b73d04-a69d-4a7b-80fa-b76409a163c8",
+                    "target_id": "us_boston_streets_7852_882a3064c7"
+                  },
+                  {
+                    "ref_id": "726ce920-9b48-4349-87e5-f824013e807a",
+                    "target_id": "us_boston_streets_3833_882a3064c7"
+                  },
+                  {
+                    "ref_id": "726ce920-9b48-4349-87e5-f824013e807a",
+                    "target_id": "us_boston_streets_6653_882a3064c7"
+                  },
+                  {
+                    "ref_id": "8ec35d3b-e4f8-4e60-9727-04fafcf450e9",
+                    "target_id": "us_boston_streets_727_882a3064c7"
+                  },
+                  {
+                    "ref_id": "9203993e-d562-431e-8d11-8276c0698c96",
+                    "target_id": "us_boston_streets_5888_882a3064c7"
+                  },
+                  {
+                    "ref_id": "9203993e-d562-431e-8d11-8276c0698c96",
+                    "target_id": "us_boston_streets_727_882a3064c7"
+                  },
+                  {
+                    "ref_id": "9203993e-d562-431e-8d11-8276c0698c96",
+                    "target_id": "us_boston_streets_7722_882a3064c7"
+                  },
+                  {
+                    "ref_id": "b6b8a25b-fb82-4d12-88fd-53e0f5c4890a",
+                    "target_id": "us_boston_streets_6653_882a3064c7"
+                  }
+                ]
+              },
+              {
+                "human_group_id": "d8f883c1",
+                "label_semantics": "pair",
+                "labeled_at": "2026-07-04T23:12:42.258050+00:00",
+                "labeler": "brad",
+                "provenance": "clean",
+                "selected_edges": [
+                  {
+                    "ref_id": "726ce920-9b48-4349-87e5-f824013e807a",
+                    "target_id": "us_boston_streets_3149_882a3064c7"
+                  },
+                  {
+                    "ref_id": "726ce920-9b48-4349-87e5-f824013e807a",
+                    "target_id": "us_boston_streets_3833_882a3064c7"
+                  },
+                  {
+                    "ref_id": "726ce920-9b48-4349-87e5-f824013e807a",
+                    "target_id": "us_boston_streets_4444_882a3064c1"
+                  }
+                ]
+              }
+            ],
+            "raw_row_occurrences": 38
+          },
+          {
+            "case_id": "label_collision:us_boston_streets:2eb37ad1+6ffc5468",
+            "conflicting_edges": [
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "049329fa-4c7b-4af4-a56a-65c920d9c8b3",
+                "target_id": "us_boston_streets_9896_882a30660d"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "04fb1009-7b72-4f58-8e16-f6e329dea9ed",
+                "target_id": "us_boston_streets_10440_882a30666b"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "4251cd7f-f6b0-40f3-bf80-febff7ed970c",
+                "target_id": "us_boston_streets_10440_882a30666b"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "4251cd7f-f6b0-40f3-bf80-febff7ed970c",
+                "target_id": "us_boston_streets_1811_882a30666b"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "809d82cd-13f3-4801-9379-d1b694e9283e",
+                "target_id": "us_boston_streets_3739_882a30666b"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "809d82cd-13f3-4801-9379-d1b694e9283e",
+                "target_id": "us_boston_streets_4310_882a30660d"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "809d82cd-13f3-4801-9379-d1b694e9283e",
+                "target_id": "us_boston_streets_9896_882a30660d"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "955360a0-f6df-476d-99c0-c628183741f1",
+                "target_id": "us_boston_streets_2302_882a30666b"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "955360a0-f6df-476d-99c0-c628183741f1",
+                "target_id": "us_boston_streets_7284_882a30666b"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "c0dbbfa4-9eb1-400e-861b-30cd876298d3",
+                "target_id": "us_boston_streets_1811_882a30666b"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "c0dbbfa4-9eb1-400e-861b-30cd876298d3",
+                "target_id": "us_boston_streets_2302_882a30666b"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "db2437cd-dce9-42d4-a697-ac32a0e87ab6",
+                "target_id": "us_boston_streets_9896_882a30660d"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "e00f312e-6e33-43ad-927d-270baf6da2e3",
+                "target_id": "us_boston_streets_10478_882a30666b"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "e00f312e-6e33-43ad-927d-270baf6da2e3",
+                "target_id": "us_boston_streets_3739_882a30666b"
+              },
+              {
+                "claims": [
+                  {
+                    "human_group_id": "2eb37ad1",
+                    "keep": 0,
+                    "provenance": "split"
+                  },
+                  {
+                    "human_group_id": "6ffc5468",
+                    "keep": 1,
+                    "provenance": "clean"
+                  }
+                ],
+                "ref_id": "edec1740-0077-4a8e-9222-fb049b034c03",
+                "target_id": "us_boston_streets_9896_882a30660d"
+              }
+            ],
+            "conflicting_key_count": 15,
+            "current_group_id": "6ffc5468",
+            "dataset_id": "us_boston_streets",
+            "historical_human_group_ids": [
+              "2eb37ad1",
+              "6ffc5468"
+            ],
+            "historical_labels": [
+              {
+                "human_group_id": "2eb37ad1",
+                "label_semantics": "pair",
+                "labeled_at": "2026-07-05T00:16:16.415668+00:00",
+                "labeler": "panel_unanimous_v1",
+                "provenance": "split",
+                "selected_edges": [
+                  {
+                    "ref_id": "049329fa-4c7b-4af4-a56a-65c920d9c8b3",
+                    "target_id": "us_boston_streets_3739_882a30666b"
+                  },
+                  {
+                    "ref_id": "04fb1009-7b72-4f58-8e16-f6e329dea9ed",
+                    "target_id": "us_boston_streets_1811_882a30666b"
+                  },
+                  {
+                    "ref_id": "20a412df-f943-4f2b-a3b4-5d9d7dd58ef8",
+                    "target_id": "us_boston_streets_10440_882a30666b"
+                  },
+                  {
+                    "ref_id": "4251cd7f-f6b0-40f3-bf80-febff7ed970c",
+                    "target_id": "us_boston_streets_7284_882a30666b"
+                  },
+                  {
+                    "ref_id": "5b7577ee-e939-4814-b002-fb3fe35b9735",
+                    "target_id": "us_boston_streets_6049_882a30666b"
+                  },
+                  {
+                    "ref_id": "5b7577ee-e939-4814-b002-fb3fe35b9735",
+                    "target_id": "us_boston_streets_699_882a306669"
+                  },
+                  {
+                    "ref_id": "769f8d50-3332-4169-9a09-300d2e0a524a",
+                    "target_id": "us_boston_streets_6991_882a30660d"
+                  },
+                  {
+                    "ref_id": "809d82cd-13f3-4801-9379-d1b694e9283e",
+                    "target_id": "us_boston_streets_9290_882a30660d"
+                  },
+                  {
+                    "ref_id": "90e0745a-b14c-4d77-bc79-96cf3d3cbc36",
+                    "target_id": "us_boston_streets_4310_882a30660d"
+                  },
+                  {
+                    "ref_id": "90e0745a-b14c-4d77-bc79-96cf3d3cbc36",
+                    "target_id": "us_boston_streets_4558_882a306663"
+                  },
+                  {
+                    "ref_id": "955360a0-f6df-476d-99c0-c628183741f1",
+                    "target_id": "us_boston_streets_1234_882a30666b"
+                  },
+                  {
+                    "ref_id": "994a4731-a5a0-43b1-a7c3-e3a1fee86d39",
+                    "target_id": "us_boston_streets_5504_882a306669"
+                  },
+                  {
+                    "ref_id": "b1a3701a-aef3-4474-9ec9-f9517fb14b14",
+                    "target_id": "us_boston_streets_9896_882a30660d"
+                  },
+                  {
+                    "ref_id": "be8a146f-80a4-43aa-b2aa-dd66ea02b253",
+                    "target_id": "us_boston_streets_5299_882a30660d"
+                  },
+                  {
+                    "ref_id": "c0dbbfa4-9eb1-400e-861b-30cd876298d3",
+                    "target_id": "us_boston_streets_5280_882a30666b"
+                  },
+                  {
+                    "ref_id": "c41069e6-2817-431d-8120-2a468ed060af",
+                    "target_id": "us_boston_streets_10478_882a30666b"
+                  },
+                  {
+                    "ref_id": "c41069e6-2817-431d-8120-2a468ed060af",
+                    "target_id": "us_boston_streets_1234_882a30666b"
+                  },
+                  {
+                    "ref_id": "dcd9c0dc-72de-43d6-9eaa-e9d3205f0ec5",
+                    "target_id": "us_boston_streets_2302_882a30666b"
+                  },
+                  {
+                    "ref_id": "e00f312e-6e33-43ad-927d-270baf6da2e3",
+                    "target_id": "us_boston_streets_10536_882a30666b"
+                  },
+                  {
+                    "ref_id": "e00f312e-6e33-43ad-927d-270baf6da2e3",
+                    "target_id": "us_boston_streets_4015_882a306669"
+                  }
+                ]
+              },
+              {
+                "human_group_id": "6ffc5468",
+                "label_semantics": "pair",
+                "labeled_at": "2026-07-05T12:54:03.544686+00:00",
+                "labeler": "brad",
+                "provenance": "clean",
+                "selected_edges": [
+                  {
+                    "ref_id": "049329fa-4c7b-4af4-a56a-65c920d9c8b3",
+                    "target_id": "us_boston_streets_3739_882a30666b"
+                  },
+                  {
+                    "ref_id": "049329fa-4c7b-4af4-a56a-65c920d9c8b3",
+                    "target_id": "us_boston_streets_9896_882a30660d"
+                  },
+                  {
+                    "ref_id": "04fb1009-7b72-4f58-8e16-f6e329dea9ed",
+                    "target_id": "us_boston_streets_10440_882a30666b"
+                  },
+                  {
+                    "ref_id": "04fb1009-7b72-4f58-8e16-f6e329dea9ed",
+                    "target_id": "us_boston_streets_1811_882a30666b"
+                  },
+                  {
+                    "ref_id": "20a412df-f943-4f2b-a3b4-5d9d7dd58ef8",
+                    "target_id": "us_boston_streets_10440_882a30666b"
+                  },
+                  {
+                    "ref_id": "4251cd7f-f6b0-40f3-bf80-febff7ed970c",
+                    "target_id": "us_boston_streets_10440_882a30666b"
+                  },
+                  {
+                    "ref_id": "4251cd7f-f6b0-40f3-bf80-febff7ed970c",
+                    "target_id": "us_boston_streets_1811_882a30666b"
+                  },
+                  {
+                    "ref_id": "4251cd7f-f6b0-40f3-bf80-febff7ed970c",
+                    "target_id": "us_boston_streets_7284_882a30666b"
+                  },
+                  {
+                    "ref_id": "809d82cd-13f3-4801-9379-d1b694e9283e",
+                    "target_id": "us_boston_streets_3739_882a30666b"
+                  },
+                  {
+                    "ref_id": "809d82cd-13f3-4801-9379-d1b694e9283e",
+                    "target_id": "us_boston_streets_4310_882a30660d"
+                  },
+                  {
+                    "ref_id": "809d82cd-13f3-4801-9379-d1b694e9283e",
+                    "target_id": "us_boston_streets_9290_882a30660d"
+                  },
+                  {
+                    "ref_id": "809d82cd-13f3-4801-9379-d1b694e9283e",
+                    "target_id": "us_boston_streets_9896_882a30660d"
+                  },
+                  {
+                    "ref_id": "90e0745a-b14c-4d77-bc79-96cf3d3cbc36",
+                    "target_id": "us_boston_streets_4310_882a30660d"
+                  },
+                  {
+                    "ref_id": "90e0745a-b14c-4d77-bc79-96cf3d3cbc36",
+                    "target_id": "us_boston_streets_4558_882a306663"
+                  },
+                  {
+                    "ref_id": "955360a0-f6df-476d-99c0-c628183741f1",
+                    "target_id": "us_boston_streets_1234_882a30666b"
+                  },
+                  {
+                    "ref_id": "955360a0-f6df-476d-99c0-c628183741f1",
+                    "target_id": "us_boston_streets_2302_882a30666b"
+                  },
+                  {
+                    "ref_id": "955360a0-f6df-476d-99c0-c628183741f1",
+                    "target_id": "us_boston_streets_7284_882a30666b"
+                  },
+                  {
+                    "ref_id": "b1a3701a-aef3-4474-9ec9-f9517fb14b14",
+                    "target_id": "us_boston_streets_9896_882a30660d"
+                  },
+                  {
+                    "ref_id": "c0dbbfa4-9eb1-400e-861b-30cd876298d3",
+                    "target_id": "us_boston_streets_1811_882a30666b"
+                  },
+                  {
+                    "ref_id": "c0dbbfa4-9eb1-400e-861b-30cd876298d3",
+                    "target_id": "us_boston_streets_2302_882a30666b"
+                  },
+                  {
+                    "ref_id": "c0dbbfa4-9eb1-400e-861b-30cd876298d3",
+                    "target_id": "us_boston_streets_5280_882a30666b"
+                  },
+                  {
+                    "ref_id": "c41069e6-2817-431d-8120-2a468ed060af",
+                    "target_id": "us_boston_streets_10478_882a30666b"
+                  },
+                  {
+                    "ref_id": "c41069e6-2817-431d-8120-2a468ed060af",
+                    "target_id": "us_boston_streets_1234_882a30666b"
+                  },
+                  {
+                    "ref_id": "db2437cd-dce9-42d4-a697-ac32a0e87ab6",
+                    "target_id": "us_boston_streets_9896_882a30660d"
+                  },
+                  {
+                    "ref_id": "dcd9c0dc-72de-43d6-9eaa-e9d3205f0ec5",
+                    "target_id": "us_boston_streets_2302_882a30666b"
+                  },
+                  {
+                    "ref_id": "e00f312e-6e33-43ad-927d-270baf6da2e3",
+                    "target_id": "us_boston_streets_10478_882a30666b"
+                  },
+                  {
+                    "ref_id": "e00f312e-6e33-43ad-927d-270baf6da2e3",
+                    "target_id": "us_boston_streets_10536_882a30666b"
+                  },
+                  {
+                    "ref_id": "e00f312e-6e33-43ad-927d-270baf6da2e3",
+                    "target_id": "us_boston_streets_3739_882a30666b"
+                  },
+                  {
+                    "ref_id": "edec1740-0077-4a8e-9222-fb049b034c03",
+                    "target_id": "us_boston_streets_9896_882a30660d"
+                  }
+                ]
+              }
+            ],
+            "raw_row_occurrences": 60
+          }
+        ],
+        "schema_version": 1
+      },
+      "inputs": {
+        "groups": {
+          "path": "data/output/us_boston_streets_groups.json",
+          "sha256": "5eaeadc4ac7ad1d0d061c14c58fbdecbe501ce07144ff3686ac5a77218807f28"
+        },
+        "labels": {
+          "path": "labels/stitching/dataset=us_boston_streets/data.csv",
+          "sha256": "16014f8b5734932ffa29fcb7ba447e397f872d1cd3a99dab4b3f604af5fbf470"
+        }
+      },
+      "stats": {
+        "candidate_groups": 107,
+        "candidate_seen": 693,
+        "conflicting_keys": 30,
+        "deduplicated_rows": 2,
+        "duplicate_keys": 67,
+        "duplicate_rows": 67,
+        "empty_legacy_skipped": 0,
+        "empty_rows": 0,
+        "empty_unrecovered": 0,
+        "human_selected_outside_candidate_graph": 16,
+        "human_selected_outside_candidate_graph_clean": 0,
+        "human_selected_outside_candidate_graph_split": 16,
+        "legacy_groups": 0,
+        "legacy_known_omission_occurrences": 16,
+        "legacy_known_omission_occurrences_clean": 0,
+        "legacy_known_omission_occurrences_split": 16,
+        "legacy_known_omission_unique_raw_keys": 14,
+        "legacy_known_omission_unique_raw_keys_clean": 0,
+        "legacy_known_omission_unique_raw_keys_split": 14,
+        "legacy_known_omission_unique_retained_keys": 13,
+        "legacy_known_omission_unique_retained_keys_clean": 0,
+        "legacy_known_omission_unique_retained_keys_split": 13,
+        "negatives": 145,
+        "new_negatives": 0,
+        "positives": 413,
+        "quarantined_groups": 3,
+        "quarantined_rows": 130,
+        "raw_rows": 690,
+        "rows": 558,
+        "rule5_filtered": 3,
+        "selected_elsewhere_excluded": 0
+      }
+    },
+    "us_seattle_sidewalks": {
+      "audit": {
+        "legacy_known_omissions": [
+          {
+            "case_id": "legacy_known_omission:us_seattle_sidewalks:0fada7b9-a294-4f48-bf31-fcb0aa8be06a:sea_sidewalk_292556_8828d542dd:670e939f",
+            "current_group_id": "4a7f3a7d",
+            "dataset_id": "us_seattle_sidewalks",
+            "occurrence_count": 1,
+            "occurrences": [
+              {
+                "human_group_id": "670e939f",
+                "provenance": "split"
+              }
+            ],
+            "ref_id": "0fada7b9-a294-4f48-bf31-fcb0aa8be06a",
+            "ref_name": "",
+            "retained_after_quarantine": true,
+            "target_id": "sea_sidewalk_292556_8828d542dd",
+            "target_name": ""
+          }
+        ],
+        "quarantined_groups": [],
+        "schema_version": 1
+      },
+      "inputs": {
+        "groups": {
+          "path": "data/output/us_seattle_sidewalks_groups.json",
+          "sha256": "6310d7c4180b0d212d67eae757c57a8d4dbb290847d2c9a1017c3448d8983b00"
+        },
+        "labels": {
+          "path": "labels/stitching/dataset=us_seattle_sidewalks/data.csv",
+          "sha256": "c7dbd3bc8fb67ccef2ab480594b5202dea4228abf4dc00ebff9115acfdc0593b"
+        }
+      },
+      "stats": {
+        "candidate_groups": 14,
+        "candidate_seen": 96,
+        "conflicting_keys": 0,
+        "deduplicated_rows": 0,
+        "duplicate_keys": 0,
+        "duplicate_rows": 0,
+        "empty_legacy_skipped": 0,
+        "empty_rows": 0,
+        "empty_unrecovered": 0,
+        "human_selected_outside_candidate_graph": 1,
+        "human_selected_outside_candidate_graph_clean": 0,
+        "human_selected_outside_candidate_graph_split": 1,
+        "legacy_groups": 0,
+        "legacy_known_omission_occurrences": 1,
+        "legacy_known_omission_occurrences_clean": 0,
+        "legacy_known_omission_occurrences_split": 1,
+        "legacy_known_omission_unique_raw_keys": 1,
+        "legacy_known_omission_unique_raw_keys_clean": 0,
+        "legacy_known_omission_unique_raw_keys_split": 1,
+        "legacy_known_omission_unique_retained_keys": 1,
+        "legacy_known_omission_unique_retained_keys_clean": 0,
+        "legacy_known_omission_unique_retained_keys_split": 1,
+        "negatives": 43,
+        "new_negatives": 0,
+        "positives": 49,
+        "quarantined_groups": 0,
+        "quarantined_rows": 0,
+        "raw_rows": 92,
+        "rows": 92,
+        "rule5_filtered": 4,
+        "selected_elsewhere_excluded": 0
+      }
+    }
+  },
+  "schema_version": 1
+}

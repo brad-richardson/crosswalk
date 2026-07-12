@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from pathlib import Path
 
+import pandas as pd
 import pytest
 import yaml
 
+from crosswalk.agent_labeling.stitch_evidence import generate_group_evidence
 from crosswalk.agent_labeling.stitch_export import (
     PANEL_LABELER,
     PANEL_NONE_LABELER,
@@ -27,6 +30,12 @@ from crosswalk.agent_labeling.stitch_export import (
     write_exports,
     write_vote_provenance,
 )
+from crosswalk.agent_labeling.stitch_provenance import (
+    consensus_policy_signature,
+    load_evidence_manifest,
+    sha256_file,
+)
+from crosswalk.config import settings
 from crosswalk.labeling.stitching_store import STITCHING_LABEL_COLUMNS, StitchingLabelStore
 
 VOTES_COLUMNS = [
@@ -746,6 +755,126 @@ def _voter_rows(group_id: str, choice: str = "A") -> list[dict]:
     ]
 
 
+_VOTE_LINK_COLUMNS = [
+    "evidence_id",
+    "evidence_pack_sha256",
+    "displayed_candidate_universe_sha256",
+    "option_menu_sha256",
+    "chosen_option_id",
+    "panel_invocation_sha256",
+]
+_CONSENSUS_LINK_COLUMNS = [*_VOTE_LINK_COLUMNS, "consensus_policy_sha256"]
+
+
+def _write_linked_panel_rows(batch: Path, group_id: str, *, choice: str = "A") -> dict:
+    """Write runner-shaped ballots/consensus linked to the current evidence pack."""
+    manifest = load_evidence_manifest(batch / group_id, allow_legacy=False)
+    evidence = manifest["evidence"]
+    options = {option["letter"]: option for option in evidence["option_menu"]}
+    option = options[choice]
+    edges = json.dumps([[edge["ref_id"], edge["target_id"]] for edge in option["edges"]])
+    invocation = "a" * 64
+    shared = {
+        "evidence_id": evidence["evidence_id"],
+        "evidence_pack_sha256": manifest["evidence_pack_sha256"],
+        "displayed_candidate_universe_sha256": evidence["displayed_candidate_universe_sha256"],
+        "option_menu_sha256": evidence["option_menu_sha256"],
+        "chosen_option_id": option["option_id"],
+        "panel_invocation_sha256": invocation,
+    }
+    vote_rows = [
+        {
+            "group_id": group_id,
+            "provider": provider,
+            "model": model,
+            "choice": choice,
+            "confidence": 0.9,
+            "edge_set": edges,
+            **shared,
+        }
+        for provider, model in (("claude", "opus"), ("codex", "gpt"), ("agy", "gemini"))
+    ]
+    with (batch / "votes.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[*VOTES_COLUMNS, *_VOTE_LINK_COLUMNS])
+        writer.writeheader()
+        for row in vote_rows:
+            writer.writerow({column: row.get(column, "") for column in writer.fieldnames})
+
+    with (batch / "consensus.csv").open(newline="") as f:
+        consensus_rows = list(csv.DictReader(f))
+    assert len(consensus_rows) == 1
+    consensus_rows[0].update(
+        choice=choice,
+        edge_set=edges,
+        n_votes="3",
+        n_valid="3",
+        route_reason="unanimous",
+        **shared,
+        consensus_policy_sha256=consensus_policy_signature(
+            max_edges=settings.stitch_export_backstop_max_edges,
+            min_voter_confidence=settings.stitch_min_voter_confidence,
+            runtime_contract_sha256=sha256_file(
+                Path(__file__).parents[2] / "src/crosswalk/agent_labeling/stitch_runner.py"
+            ),
+        ),
+    )
+    with (batch / "consensus.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[*CONSENSUS_COLUMNS, *_CONSENSUS_LINK_COLUMNS])
+        writer.writeheader()
+        writer.writerows(consensus_rows)
+    return manifest
+
+
+def _make_linked_evidence_batch(tmp_path: Path, name: str, group_id: str) -> tuple[Path, dict]:
+    batch = tmp_path / name
+    make_batch(
+        batch,
+        DATASET,
+        [
+            {
+                "group_id": group_id,
+                "match_type": "1:N",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+            }
+        ],
+    )
+    group = {
+        "group_id": group_id,
+        "match_type": "1:N",
+        "ref_ids": ["r1"],
+        "target_ids": ["t1", "t2"],
+        "edges": [
+            {"ref_id": "r1", "target_id": "t1", "confidence": 0.9},
+            {"ref_id": "r1", "target_id": "t2", "confidence": 0.6},
+        ],
+        "optimizer_assignment": [{"ref_id": "r1", "target_id": "t1"}],
+        "alternatives": [],
+        "ref_geometries": {"r1": {"type": "LineString", "coordinates": [[0.0, 0.0], [0.01, 0.0]]}},
+        "target_geometries": {
+            "t1": {"type": "LineString", "coordinates": [[0.0, 0.0], [0.01, 0.0]]},
+            "t2": {
+                "type": "LineString",
+                "coordinates": [[0.0, 0.001], [0.01, 0.001]],
+            },
+        },
+    }
+    generate_group_evidence(group, batch / group_id)
+    (batch / "batch.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "dataset_id": DATASET,
+                "source_artifacts": {"status": "unavailable"},
+                "batch_generation_source": {"status": "unavailable"},
+                "groups": [group],
+            }
+        )
+    )
+    _write_linked_panel_rows(batch, group_id)
+    return batch, group
+
+
 def test_vote_provenance_archived_from_batches(tmp_path):
     """votes.csv + consensus.csv are snapshotted into a tracked labels/votes tree."""
     b1 = tmp_path / "b1"
@@ -789,6 +918,59 @@ def test_vote_provenance_archived_from_batches(tmp_path):
     assert {v["source_batch"] for v in votes} == {"b1", "b2"}
     assert {c["source_batch"] for c in cons} == {"b1", "b2"}
     assert {v["provider"] for v in votes} == {"claude", "codex", "agy"}
+
+
+def test_vote_provenance_archives_exact_displayed_menu(tmp_path):
+    batch = tmp_path / "evidence-wave"
+    make_batch(
+        batch,
+        DATASET,
+        [
+            {
+                "group_id": "g1",
+                "match_type": "1:N",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+            }
+        ],
+    )
+    group = {
+        "group_id": "g1",
+        "match_type": "1:N",
+        "ref_ids": ["r1"],
+        "target_ids": ["t1", "t2"],
+        "edges": [
+            {"ref_id": "r1", "target_id": "t1", "confidence": 0.9},
+            {"ref_id": "r1", "target_id": "t2", "confidence": 0.6},
+        ],
+        "optimizer_assignment": [{"ref_id": "r1", "target_id": "t1"}],
+        "alternatives": [{"edges": [{"ref_id": "r1", "target_id": "t2"}]}],
+        "ref_geometries": {"r1": {"type": "LineString", "coordinates": [[0.0, 0.0], [0.01, 0.0]]}},
+        "target_geometries": {
+            "t1": {"type": "LineString", "coordinates": [[0.0, 0.0], [0.01, 0.0]]},
+            "t2": {"type": "LineString", "coordinates": [[0.0, 0.001], [0.01, 0.001]]},
+        },
+    }
+    generate_group_evidence(
+        group,
+        batch / "g1",
+        source_artifacts={"groups_sidecar": {"available": True, "sha256": "b" * 64}},
+    )
+    _write_votes(batch, _voter_rows("g1"))
+
+    write_vote_provenance([batch], DATASET, votes_dir=tmp_path / "votes")
+
+    evidence_path = tmp_path / "votes" / f"dataset={DATASET}" / "evidence.csv"
+    rows = list(csv.DictReader(evidence_path.open()))
+    assert len(rows) == 1
+    evidence = json.loads(rows[0]["evidence"])
+    assert evidence["selectable_choices"] == ["A", "B", "NONE"]
+    assert evidence["displayed_candidate_count"] == 2
+    assert {(edge["ref_id"], edge["target_id"]) for edge in evidence["displayed_edges"]} == {
+        ("r1", "t1"),
+        ("r1", "t2"),
+    }
+    assert evidence["source_artifacts"]["groups_sidecar"]["sha256"] == "b" * 64
 
 
 def test_vote_provenance_quad_panel_keeps_four_rows_per_group(tmp_path):
@@ -893,6 +1075,314 @@ def test_vote_provenance_tolerates_missing_votes_csv(tmp_path):
     assert n_votes == 0 and n_consensus == 1
     assert not (votes_dir / f"dataset={DATASET}" / "votes.csv").exists()
     assert (votes_dir / f"dataset={DATASET}" / "consensus.csv").exists()
+
+
+def test_vote_provenance_strict_mode_refuses_missing_evidence_pack(tmp_path):
+    batch = tmp_path / "no-pack"
+    make_batch(
+        batch,
+        DATASET,
+        [
+            {
+                "group_id": "g1",
+                "match_type": "1:1",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+            }
+        ],
+    )
+    _write_votes(batch, _voter_rows("g1"))
+    shutil.rmtree(batch / "g1")
+
+    with pytest.raises(ValueError, match="missing evidence pack"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+    assert not (tmp_path / "votes" / f"dataset={DATASET}" / "votes.csv").exists()
+
+
+def test_vote_provenance_strict_mode_links_ballots_consensus_and_menu(tmp_path):
+    batch, _group = _make_linked_evidence_batch(tmp_path, "linked", "g1")
+    votes_dir = tmp_path / "votes"
+
+    n_votes, n_consensus = write_vote_provenance(
+        [batch],
+        DATASET,
+        votes_dir=votes_dir,
+        require_evidence=True,
+    )
+
+    assert (n_votes, n_consensus) == (3, 1)
+    archive = votes_dir / f"dataset={DATASET}"
+    assert {path.name for path in archive.glob("*.csv")} == {
+        "votes.csv",
+        "consensus.csv",
+        "evidence.csv",
+    }
+
+
+def test_vote_provenance_strict_mode_refuses_regenerated_menu_after_ballot(tmp_path):
+    batch, group = _make_linked_evidence_batch(tmp_path, "regenerated", "g1")
+    group["alternatives"] = [{"edges": [{"ref_id": "r1", "target_id": "t2"}]}]
+    generate_group_evidence(group, batch / "g1")
+    batch_payload = json.loads((batch / "batch.json").read_text())
+    batch_payload["groups"] = [group]
+    (batch / "batch.json").write_text(json.dumps(batch_payload))
+
+    with pytest.raises(ValueError, match="ballot evidence_id does not match"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+    assert not (tmp_path / "votes" / f"dataset={DATASET}" / "votes.csv").exists()
+
+
+def test_vote_provenance_strict_mode_never_downgrades_v2_pack_to_legacy(tmp_path):
+    batch, _group = _make_linked_evidence_batch(tmp_path, "v2-missing-manifest", "g1")
+    batch_payload = json.loads((batch / "batch.json").read_text())
+    batch_payload["schema_version"] = 2
+    (batch / "batch.json").write_text(json.dumps(batch_payload))
+    (batch / "g1" / "evidence.json").unlink()
+    # Even stripping the embedded evidence marker from metadata cannot make a
+    # schema-v2 batch masquerade as a pre-provenance legacy pack.
+    metadata_path = batch / "g1" / "metadata.yaml"
+    metadata = yaml.safe_load(metadata_path.read_text())
+    metadata.pop("evidence", None)
+    metadata_path.write_text(yaml.safe_dump(metadata))
+
+    with pytest.raises(ValueError, match="missing .*evidence.json"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+
+
+def test_vote_provenance_strict_mode_rejects_downgraded_batch_contract(tmp_path):
+    batch, group = _make_linked_evidence_batch(tmp_path, "downgraded-batch", "g1")
+    changed_group = dict(group)
+    changed_group["match_type"] = "M:N"
+    payload = json.loads((batch / "batch.json").read_text())
+    payload["schema_version"] = 1
+    payload["groups"] = [changed_group]
+    (batch / "batch.json").write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError, match="current evidence manifest requires a schema-v2"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+
+
+def test_vote_provenance_strict_mode_requires_batch_for_current_manifest(tmp_path):
+    batch, _group = _make_linked_evidence_batch(tmp_path, "missing-batch", "g1")
+    (batch / "batch.json").unlink()
+
+    with pytest.raises(ValueError, match="current evidence manifest requires a schema-v2"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+
+
+def test_vote_provenance_strict_mode_binds_pack_to_v2_batch_group(tmp_path):
+    batch, group = _make_linked_evidence_batch(tmp_path, "v2-changed-group", "g1")
+    changed_group = dict(group)
+    changed_group["match_type"] = "M:N"
+    (batch / "batch.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "dataset_id": DATASET,
+                "source_artifacts": {"status": "unavailable"},
+                "batch_generation_source": {"status": "unavailable"},
+                "groups": [changed_group],
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="source group does not match"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+
+
+def test_vote_provenance_strict_mode_rejects_v2_dataset_mismatch(tmp_path):
+    batch, group = _make_linked_evidence_batch(tmp_path, "v2-wrong-dataset", "g1")
+    (batch / "batch.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "dataset_id": "different_dataset",
+                "source_artifacts": {"status": "unavailable"},
+                "batch_generation_source": {"status": "unavailable"},
+                "groups": [group],
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="batch dataset mismatch"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+
+
+def test_vote_provenance_strict_mode_refuses_edge_set_not_in_chosen_option(tmp_path):
+    batch, _group = _make_linked_evidence_batch(tmp_path, "wrong-edge", "g1")
+    with (batch / "votes.csv").open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    rows[0]["edge_set"] = json.dumps([["r1", "t2"]])
+    with (batch / "votes.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[*VOTES_COLUMNS, *_VOTE_LINK_COLUMNS])
+        writer.writeheader()
+        writer.writerows(rows)
+
+    with pytest.raises(ValueError, match="edge_set does not match choice"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+
+
+def test_vote_provenance_strict_mode_replays_consensus_from_ballots(tmp_path):
+    batch, _group = _make_linked_evidence_batch(tmp_path, "edited-consensus", "g1")
+    consensus = pd.read_csv(batch / "consensus.csv")
+    consensus.loc[0, "routing"] = "human_review"
+    consensus.to_csv(batch / "consensus.csv", index=False)
+
+    with pytest.raises(ValueError, match="not derivable from ballots"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+
+
+def test_vote_provenance_strict_mode_rejects_out_of_range_confidence(tmp_path):
+    batch, _group = _make_linked_evidence_batch(tmp_path, "bad-confidence", "g1")
+    votes = pd.read_csv(batch / "votes.csv")
+    votes["confidence"] = 1.1
+    votes.to_csv(batch / "votes.csv", index=False)
+
+    with pytest.raises(ValueError, match="ballot confidence is invalid"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+
+
+def test_vote_provenance_nonstrict_refresh_drops_stale_evidence_row(tmp_path):
+    batch, _group = _make_linked_evidence_batch(tmp_path, "nonstrict-refresh", "g1")
+    votes_dir = tmp_path / "votes"
+    write_vote_provenance(
+        [batch],
+        DATASET,
+        votes_dir=votes_dir,
+        require_evidence=True,
+    )
+    shutil.rmtree(batch / "g1")
+
+    write_vote_provenance([batch], DATASET, votes_dir=votes_dir, require_evidence=False)
+
+    evidence_path = votes_dir / f"dataset={DATASET}" / "evidence.csv"
+    assert pd.read_csv(evidence_path).empty
+
+
+def test_vote_provenance_late_prepare_failure_preserves_all_archives(tmp_path, monkeypatch):
+    first, _group = _make_linked_evidence_batch(tmp_path, "first", "g1")
+    votes_dir = tmp_path / "votes"
+    write_vote_provenance(
+        [first],
+        DATASET,
+        votes_dir=votes_dir,
+        require_evidence=True,
+    )
+    archive = votes_dir / f"dataset={DATASET}"
+    before = {path.name: path.read_bytes() for path in archive.glob("*.csv")}
+    second, _group = _make_linked_evidence_batch(tmp_path, "second", "g2")
+
+    # votes use a three-column dedupe key; consensus and evidence both use the
+    # two-column key. Fail the second two-column call, which is the evidence
+    # frame after votes and consensus have already been fully prepared.
+    original_drop_duplicates = pd.DataFrame.drop_duplicates
+    two_key_calls = 0
+
+    def fail_during_evidence_prepare(frame, *args, **kwargs):
+        nonlocal two_key_calls
+        subset = kwargs.get("subset", args[0] if args else None)
+        if subset == ["source_batch", "group_id"]:
+            two_key_calls += 1
+            if two_key_calls == 2:
+                raise RuntimeError("synthetic late evidence preparation failure")
+        return original_drop_duplicates(frame, *args, **kwargs)
+
+    monkeypatch.setattr(pd.DataFrame, "drop_duplicates", fail_during_evidence_prepare)
+
+    with pytest.raises(RuntimeError, match="late evidence preparation"):
+        write_vote_provenance(
+            [second],
+            DATASET,
+            votes_dir=votes_dir,
+            require_evidence=True,
+        )
+
+    after = {path.name: path.read_bytes() for path in archive.glob("*.csv")}
+    assert after == before
+
+
+def test_vote_provenance_commit_failure_rolls_back_all_archives(tmp_path, monkeypatch):
+    first, _group = _make_linked_evidence_batch(tmp_path, "first", "g1")
+    votes_dir = tmp_path / "votes"
+    write_vote_provenance(
+        [first],
+        DATASET,
+        votes_dir=votes_dir,
+        require_evidence=True,
+    )
+    archive = votes_dir / f"dataset={DATASET}"
+    before = {path.name: path.read_bytes() for path in archive.glob("*.csv")}
+    second, _group = _make_linked_evidence_batch(tmp_path, "second", "g2")
+
+    original_replace = Path.replace
+
+    def fail_consensus_commit(path, target):
+        target = Path(target)
+        if path.name.endswith(".tmp") and target.name == "consensus.csv":
+            raise OSError("synthetic consensus commit failure")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_consensus_commit)
+    with pytest.raises(OSError, match="consensus commit failure"):
+        write_vote_provenance(
+            [second],
+            DATASET,
+            votes_dir=votes_dir,
+            require_evidence=True,
+        )
+
+    after = {path.name: path.read_bytes() for path in archive.glob("*.csv")}
+    assert after == before
 
 
 def _make_group_batch(bd, group_id, edges):

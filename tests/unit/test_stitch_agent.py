@@ -31,6 +31,10 @@ from crosswalk.agent_labeling.stitch_evidence import (
     generate_group_evidence,
     prune_options_for_panel,
 )
+from crosswalk.agent_labeling.stitch_provenance import (
+    EvidenceProvenanceError,
+    load_evidence_manifest,
+)
 from crosswalk.matching.stitch_options import build_stitch_options
 
 # ---------------------------------------------------------------------------
@@ -1125,10 +1129,121 @@ def test_generate_group_evidence_writes_files(tmp_path):
     assert (d / "option_B.png").exists()
     assert (d / "metadata.yaml").exists()
     assert (d / "prompt.txt").exists()
+    assert (d / "evidence.json").exists()
     prompt = (d / "prompt.txt").read_text()
     assert '"choice"' in prompt
     assert "NONE" in prompt
     assert meta is not None
+
+
+def test_evidence_manifest_records_exact_menu_and_decision_provenance(tmp_path):
+    g = make_group()
+    g["edges"][0].update(
+        selected=False,
+        decision="review",
+        review_reason="coverage_conflict",
+    )
+    d = tmp_path / g["group_id"]
+
+    generate_group_evidence(
+        g,
+        d,
+        source_artifacts={"groups_sidecar": {"available": True, "sha256": "a" * 64}},
+    )
+    manifest = load_evidence_manifest(d, allow_legacy=False)
+    evidence = manifest["evidence"]
+
+    assert evidence["selectable_choices"] == ["A", "B", "NONE"]
+    assert evidence["source_candidate_edges"] == [
+        {"ref_id": R1, "target_id": T1},
+        {"ref_id": R1, "target_id": T2},
+        {"ref_id": R2, "target_id": T2},
+    ]
+    assert evidence["displayed_candidate_count"] == 3
+    assert {(edge["ref_id"], edge["target_id"]) for edge in evidence["displayed_edges"]} == {
+        (R1, T1),
+        (R1, T2),
+        (R2, T2),
+    }
+    reviewed = next(
+        edge
+        for edge in evidence["displayed_edges"]
+        if (edge["ref_id"], edge["target_id"]) == (R1, T1)
+    )
+    assert reviewed["decision"] == "review"
+    assert reviewed["review_reason"] == "coverage_conflict"
+    assert evidence["source_artifacts"]["groups_sidecar"]["sha256"] == "a" * 64
+    assert len(evidence["option_menu"]) == 2
+    assert all(len(option["option_id"]) == 64 for option in evidence["option_menu"])
+    assert len(manifest["evidence_pack_sha256"]) == 64
+
+
+def test_evidence_empty_candidate_graph_falls_back_to_legacy_edge_universe(tmp_path):
+    g = make_group()
+    g["candidate_edges"] = []
+    d = tmp_path / g["group_id"]
+
+    generate_group_evidence(g, d)
+    evidence = load_evidence_manifest(d, allow_legacy=False)["evidence"]
+
+    assert evidence["source_universe_kind"] == "edges+rejected_edges"
+    assert evidence["source_candidate_count"] == 3
+
+
+def test_evidence_regeneration_removes_stale_managed_assets(tmp_path):
+    g = make_group()
+    d = tmp_path / g["group_id"]
+    generate_group_evidence(g, d)
+    (d / "option_Z.png").write_bytes(b"stale")
+    (d / "zoom_stale.png").write_bytes(b"stale")
+
+    generate_group_evidence(g, d)
+
+    assert not (d / "option_Z.png").exists()
+    assert not (d / "zoom_stale.png").exists()
+    load_evidence_manifest(d, allow_legacy=False)  # exact managed-file set verifies
+
+
+def test_evidence_manifest_rejects_pack_mutation(tmp_path):
+    g = make_group()
+    d = tmp_path / g["group_id"]
+    generate_group_evidence(g, d)
+    (d / "prompt.txt").write_text("tampered prompt")
+
+    with pytest.raises(EvidenceProvenanceError, match="files changed"):
+        load_evidence_manifest(d, allow_legacy=False)
+
+
+def test_evidence_manifest_cannot_silently_downgrade_new_pack(tmp_path):
+    g = make_group()
+    d = tmp_path / g["group_id"]
+    generate_group_evidence(g, d)
+    (d / "evidence.json").unlink()
+
+    with pytest.raises(EvidenceProvenanceError, match="provenance-aware"):
+        load_evidence_manifest(d)
+
+
+def test_evidence_manifest_binds_group_identity_to_directory(tmp_path):
+    g = make_group()
+    original = tmp_path / g["group_id"]
+    renamed = tmp_path / "different-group"
+    generate_group_evidence(g, original)
+    original.rename(renamed)
+
+    with pytest.raises(EvidenceProvenanceError, match="group identity mismatch"):
+        load_evidence_manifest(renamed, allow_legacy=False)
+
+
+@pytest.mark.parametrize("bad_id", ["", True, {"structured": "id"}, "../escape"])
+def test_evidence_rejects_unsafe_ids_before_writing(tmp_path, bad_id):
+    g = make_group()
+    g["group_id"] = bad_id
+    d = tmp_path / "would-be-pack"
+
+    with pytest.raises(EvidenceProvenanceError):
+        generate_group_evidence(g, d)
+    assert not d.exists()
 
 
 def test_prompt_dedupes_edge_descriptors_across_options(tmp_path):
@@ -1178,9 +1293,15 @@ def test_prompt_dedupes_edge_descriptors_across_options(tmp_path):
 
 def test_generate_group_evidence_no_options_returns_none(tmp_path):
     g = make_group()
+    d = tmp_path / "x"
+    generate_group_evidence(g, tmp_path / g["group_id"])
+    # Simulate reuse of this path for the refreshed no-option representation.
+    (tmp_path / g["group_id"]).rename(d)
     g["optimizer_assignment"] = []
     g["alternatives"] = []
-    assert generate_group_evidence(g, tmp_path / "x") is None
+    assert generate_group_evidence(g, d) is None
+    assert not (d / "prompt.txt").exists()
+    assert not (d / "evidence.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -2717,6 +2838,7 @@ def _write_min_pack(batch_dir, gid):
     import yaml
 
     g = make_group()
+    g["group_id"] = gid
     ctx = build_stitch_options(g)
     meta = build_metadata(g, ctx)
     d = batch_dir / gid
@@ -2724,6 +2846,64 @@ def _write_min_pack(batch_dir, gid):
     (d / "metadata.yaml").write_text(yaml.safe_dump(meta))
     (d / "prompt.txt").write_text('respond {"choice": "A"}')
     return d
+
+
+def test_scratch_pack_ignores_unmanaged_png(tmp_path):
+    group_dir = tmp_path / "g1"
+    group_dir.mkdir()
+    (group_dir / "overview.png").write_bytes(b"overview")
+    (group_dir / "option_A.png").write_bytes(b"option")
+    (group_dir / "other.png").write_bytes(b"unmanaged")
+
+    scratch, _prompt, temp_dir = sr._scratch_pack(group_dir, "prompt")
+    try:
+        assert (scratch / "overview.png").exists()
+        assert (scratch / "option_A.png").exists()
+        assert not (scratch / "other.png").exists()
+    finally:
+        temp_dir.cleanup()
+
+
+def test_run_batch_rejects_pack_outside_schema_v2_roster(tmp_path):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "stale")
+    (batch_dir / "batch.json").write_text(
+        json.dumps({"schema_version": 2, "groups": [{"group_id": "current"}]})
+    )
+
+    with pytest.raises(ValueError, match="outside the current schema-v2 batch roster"):
+        sr.run_batch(batch_dir, panel=[])
+
+
+def test_run_batch_binds_schema_v2_pack_to_exact_group_payload(tmp_path):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    group = make_group()
+    group["group_id"] = "g1"
+    source_artifacts = {"groups_sidecar": {"available": True, "sha256": "a" * 64}}
+    generation_source = {"source_commit": {"commit": "abc", "dirty": False}}
+    generate_group_evidence(
+        group,
+        batch_dir / "g1",
+        source_artifacts=source_artifacts,
+        batch_generation_source=generation_source,
+    )
+    changed_group = copy.deepcopy(group)
+    changed_group["edges"][0]["confidence"] = 0.01
+    (batch_dir / "batch.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "source_artifacts": source_artifacts,
+                "batch_generation_source": generation_source,
+                "groups": [changed_group],
+            }
+        )
+    )
+
+    with pytest.raises(EvidenceProvenanceError, match="source group does not match"):
+        sr.run_batch(batch_dir, panel=[])
 
 
 def test_run_batch_resume_skips_completed_groups(tmp_path, monkeypatch):
@@ -3030,6 +3210,143 @@ def test_run_batch_resume_rejects_mismatched_panel(tmp_path, monkeypatch):
     votes_df, _cons_df = sr.run_batch(batch_dir, panel=panel4, resume=True)
     assert calls["n"] == 4
     assert set(votes_df["provider"]) == {"claude", "codex", "agy", "opencode"}
+
+
+def test_run_batch_resume_rejects_changed_model_with_same_provider_names(tmp_path, monkeypatch):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    calls = {"n": 0}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    first = [sr.ProviderSpec(name, "model-v1") for name in ("claude", "codex", "agy")]
+    changed = [sr.ProviderSpec(name, "model-v2") for name in ("claude", "codex", "agy")]
+    sr.run_batch(batch_dir, panel=first)
+
+    calls["n"] = 0
+    votes, _ = sr.run_batch(batch_dir, panel=changed, resume=True)
+
+    assert calls["n"] == 3
+    assert set(votes["model"]) == {"model-v2"}
+
+
+def test_run_batch_resume_rejects_regenerated_menu_for_same_group_id(tmp_path, monkeypatch):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    group = make_group()
+    group["group_id"] = "g1"
+    group_dir = batch_dir / "g1"
+    generate_group_evidence(group, group_dir)
+    batch_payload = {
+        "schema_version": 2,
+        "dataset_id": "test",
+        "source_artifacts": {"status": "unavailable"},
+        "batch_generation_source": {"status": "unavailable"},
+        "groups": [group],
+    }
+    (batch_dir / "batch.json").write_text(json.dumps(batch_payload))
+    calls = {"n": 0}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    panel = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "agy")]
+    first_votes, _ = sr.run_batch(batch_dir, panel=panel)
+    old_evidence = first_votes.iloc[0]["evidence_id"]
+
+    # Same group id, but a different selectable menu and newly hashed pack.
+    group["alternatives"] = []
+    generate_group_evidence(group, group_dir)
+    batch_payload["groups"] = [group]
+    (batch_dir / "batch.json").write_text(json.dumps(batch_payload))
+    calls["n"] = 0
+    votes, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
+
+    assert calls["n"] == 3
+    assert votes.iloc[0]["evidence_id"] != old_evidence
+
+
+def test_run_batch_resume_rejects_choice_edge_set_mismatch(tmp_path, monkeypatch):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    calls = {"n": 0}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    panel = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "agy")]
+    sr.run_batch(batch_dir, panel=panel)
+
+    consensus = pd.read_csv(batch_dir / "consensus.partial.csv")
+    consensus.loc[0, "edge_set"] = json.dumps([[R1, T2]])
+    consensus.to_csv(batch_dir / "consensus.partial.csv", index=False)
+    calls["n"] = 0
+
+    sr.run_batch(batch_dir, panel=panel, resume=True)
+
+    assert calls["n"] == 3
+
+
+def test_run_batch_resume_rejects_incomplete_per_group_ballots(tmp_path, monkeypatch):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    calls = {"n": 0}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    panel = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "agy")]
+    sr.run_batch(batch_dir, panel=panel)
+    partial = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
+    partial[partial["provider"] != "agy"].to_csv(batch_dir / "votes.partial.csv", index=False)
+
+    calls["n"] = 0
+    votes, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
+
+    assert calls["n"] == 3
+    assert set(votes["provider"]) == {"claude", "codex", "agy"}
+
+
+def test_run_batch_resume_rejects_changed_consensus_policy(tmp_path, monkeypatch):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    calls = {"n": 0}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    panel = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "agy")]
+    sr.run_batch(batch_dir, panel=panel)
+    monkeypatch.setattr(
+        sr.settings,
+        "stitch_min_voter_confidence",
+        sr.settings.stitch_min_voter_confidence + 0.01,
+    )
+
+    calls["n"] = 0
+    sr.run_batch(batch_dir, panel=panel, resume=True)
+
+    assert calls["n"] == 3
 
 
 def test_run_batch_resume_respects_group_selection(tmp_path, monkeypatch):

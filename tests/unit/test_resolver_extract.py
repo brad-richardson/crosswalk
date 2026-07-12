@@ -593,6 +593,111 @@ def test_conflicting_duplicate_labels_quarantine_the_entire_current_group():
     assert stats["legacy_known_omission_unique_raw_keys"] == 1
     assert stats["legacy_known_omission_unique_retained_keys"] == 0
 
+    audit = df.attrs["build_audit"]
+    assert audit["schema_version"] == 1
+    assert audit["quarantined_groups"] == [
+        {
+            "case_id": "label_collision:ds:historical-a+historical-b",
+            "dataset_id": "ds",
+            "current_group_id": "g1",
+            "historical_human_group_ids": ["historical-a", "historical-b"],
+            "raw_row_occurrences": 6,
+            "conflicting_key_count": 2,
+            "conflicting_edges": [
+                {
+                    "ref_id": "A",
+                    "target_id": "T",
+                    "claims": [
+                        {"human_group_id": "historical-a", "provenance": "clean", "keep": 1},
+                        {"human_group_id": "historical-b", "provenance": "clean", "keep": 0},
+                    ],
+                },
+                {
+                    "ref_id": "B",
+                    "target_id": "T",
+                    "claims": [
+                        {"human_group_id": "historical-a", "provenance": "clean", "keep": 0},
+                        {"human_group_id": "historical-b", "provenance": "clean", "keep": 1},
+                    ],
+                },
+            ],
+            "historical_labels": [
+                {
+                    "human_group_id": "historical-a",
+                    "provenance": "clean",
+                    "labeler": "brad",
+                    "labeled_at": "2026-01-01",
+                    "label_semantics": "pair",
+                    "selected_edges": [
+                        {"ref_id": "A", "target_id": "T"},
+                        {"ref_id": "D", "target_id": "T"},
+                    ],
+                },
+                {
+                    "human_group_id": "historical-b",
+                    "provenance": "clean",
+                    "labeler": "brad",
+                    "labeled_at": "2026-01-01",
+                    "label_semantics": "pair",
+                    "selected_edges": [
+                        {"ref_id": "B", "target_id": "T"},
+                        {"ref_id": "D", "target_id": "T"},
+                    ],
+                },
+            ],
+        }
+    ]
+    assert audit["legacy_known_omissions"] == [
+        {
+            "case_id": "legacy_known_omission:ds:D:T:historical-a+historical-b",
+            "dataset_id": "ds",
+            "current_group_id": "g1",
+            "ref_id": "D",
+            "target_id": "T",
+            "ref_name": "",
+            "target_name": "",
+            "retained_after_quarantine": False,
+            "occurrence_count": 2,
+            "occurrences": [
+                {"human_group_id": "historical-a", "provenance": "clean"},
+                {"human_group_id": "historical-b", "provenance": "clean"},
+            ],
+        }
+    ]
+
+
+def test_build_audit_is_deterministic_across_input_order():
+    candidates = [
+        _cand("A", "T", 0.99, selected=True),
+        _cand("B", "T", 0.40, selected=False),
+        _cand("X", "T", 0.30, selected=False),
+    ]
+    unaffected = _group_cg(
+        "g2",
+        [_cand("C", "U", 0.95, selected=True)],
+        ref_ids=["C"],
+        target_ids=["U"],
+    )
+    labels = [
+        _label_row("historical-b", [("B", "T"), ("D", "T")]),
+        _label_row("historical-a", [("A", "T"), ("D", "T")]),
+        _label_row("historical-c", [("C", "U")]),
+    ]
+
+    first_group = _group_cg("g1", candidates, ref_ids=["A", "B", "X"], target_ids=["T"])
+    first_group["rejected_edges"] = [_edge("D", "T", 0.2, selected=False)]
+    first = build_edge_table([first_group, unaffected], _labels(labels), "ds")
+
+    reversed_group = _group_cg(
+        "g1", list(reversed(candidates)), ref_ids=["X", "B", "A"], target_ids=["T"]
+    )
+    reversed_group["rejected_edges"] = [_edge("D", "T", 0.2, selected=False)]
+    second = build_edge_table([unaffected, reversed_group], _labels(list(reversed(labels))), "ds")
+
+    assert json.dumps(first.attrs["build_audit"], sort_keys=True) == json.dumps(
+        second.attrs["build_audit"], sort_keys=True
+    )
+
 
 def test_candidate_graph_featurize_over_full_universe():
     """featurize runs over the fuller candidate universe and produces every
@@ -792,3 +897,20 @@ def test_legacy_known_omissions_separate_occurrences_from_unique_keys():
     assert stats["legacy_known_omission_occurrences"] == 2
     assert stats["legacy_known_omission_unique_raw_keys"] == 1
     assert stats["legacy_known_omission_unique_retained_keys"] == 1
+    assert df.attrs["build_audit"]["legacy_known_omissions"] == [
+        {
+            "case_id": "legacy_known_omission:ds:B:T:historical-1+historical-2",
+            "dataset_id": "ds",
+            "current_group_id": "g1",
+            "ref_id": "B",
+            "target_id": "T",
+            "ref_name": "",
+            "target_name": "",
+            "retained_after_quarantine": True,
+            "occurrence_count": 2,
+            "occurrences": [
+                {"human_group_id": "historical-1", "provenance": "clean"},
+                {"human_group_id": "historical-2", "provenance": "clean"},
+            ],
+        }
+    ]

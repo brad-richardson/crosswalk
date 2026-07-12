@@ -63,7 +63,10 @@ receives contradictory ``keep`` values, the entire current group is
 quarantined from training and evaluation. Each build logs a one-line stats
 summary (rows, label collisions, rule-5 drops, ``selected_elsewhere``
 exclusions, and legacy-known omission occurrences) and attaches the same dict
-as ``df.attrs["build_stats"]``.
+as ``df.attrs["build_stats"]``. The exact collision and omission identities are
+attached separately as the deterministic, JSON-serializable
+``df.attrs["build_audit"]`` so deferred adjudication does not require
+intercepting private helpers or reconstructing discarded intermediate frames.
 """
 
 from __future__ import annotations
@@ -340,7 +343,7 @@ def _enrich_with_candidate_parquet(
 def _resolve_duplicate_label_collisions(
     df: pd.DataFrame,
     stats: dict[str, int],
-) -> tuple[pd.DataFrame, set[tuple[str, str]]]:
+) -> tuple[pd.DataFrame, set[tuple[str, str]], list[dict]]:
     """Fail closed when historical labels disagree on a current group.
 
     Group-id churn can cause several historical labels to recover onto the same
@@ -367,7 +370,7 @@ def _resolve_duplicate_label_collisions(
     }
     stats.update(collision_defaults)
     if df.empty:
-        return df, set()
+        return df, set(), []
 
     key_columns = list(KEY_COLUMNS)
     source_columns = [*key_columns, "human_group_id"]
@@ -396,7 +399,7 @@ def _resolve_duplicate_label_collisions(
             lambda row: json.dumps(lineage_by_key[tuple(row[column] for column in key_columns)]),
             axis=1,
         )
-        return df, set()
+        return df, set(), []
 
     duplicate_sizes = df.loc[duplicated].groupby(key_columns, sort=False, dropna=False).size()
     stats["duplicate_keys"] = len(duplicate_sizes)
@@ -411,6 +414,7 @@ def _resolve_duplicate_label_collisions(
     stats["conflicting_keys"] = len(conflicting)
 
     quarantined_group_keys: set[tuple[str, str]] = set()
+    collision_audit: list[dict] = []
     if not conflicting.empty:
         group_columns = ["dataset_id", "group_id"]
         quarantined_groups = conflicting[group_columns].drop_duplicates()
@@ -423,6 +427,63 @@ def _resolve_duplicate_label_collisions(
         quarantine_mask = group_index.isin(quarantined_index)
         stats["quarantined_groups"] = len(quarantined_groups)
         stats["quarantined_rows"] = int(quarantine_mask.sum())
+
+        # Preserve the exact contradictory claims before removing the group.
+        # All values are converted to JSON-native scalars and every collection
+        # is sorted, so this audit is byte-stable across input row order.
+        for dataset_value, group_value in sorted(quarantined_group_keys):
+            group_rows = df.loc[
+                (df["dataset_id"].astype(str) == dataset_value)
+                & (df["group_id"].astype(str) == group_value)
+            ]
+            historical_ids = sorted({str(value) for value in group_rows["human_group_id"]})
+            group_conflicts = conflicting.loc[
+                (conflicting["dataset_id"].astype(str) == dataset_value)
+                & (conflicting["group_id"].astype(str) == group_value)
+            ]
+            conflict_records: list[dict] = []
+            for conflict_row in group_conflicts.sort_values(
+                ["ref_id", "target_id"], kind="stable"
+            ).itertuples(index=False):
+                ref_id = str(conflict_row.ref_id)
+                target_id = str(conflict_row.target_id)
+                claims_df = group_rows.loc[
+                    (group_rows["ref_id"].astype(str) == ref_id)
+                    & (group_rows["target_id"].astype(str) == target_id)
+                ]
+                claims = sorted(
+                    (
+                        {
+                            "human_group_id": str(claim.human_group_id),
+                            "provenance": str(claim.provenance),
+                            "keep": int(claim.keep),
+                        }
+                        for claim in claims_df.itertuples(index=False)
+                    ),
+                    key=lambda claim: (
+                        claim["human_group_id"],
+                        claim["provenance"],
+                        claim["keep"],
+                    ),
+                )
+                conflict_records.append(
+                    {
+                        "ref_id": ref_id,
+                        "target_id": target_id,
+                        "claims": claims,
+                    }
+                )
+            collision_audit.append(
+                {
+                    "case_id": (f"label_collision:{dataset_value}:" + "+".join(historical_ids)),
+                    "dataset_id": dataset_value,
+                    "current_group_id": group_value,
+                    "historical_human_group_ids": historical_ids,
+                    "raw_row_occurrences": int(len(group_rows)),
+                    "conflicting_key_count": int(len(conflict_records)),
+                    "conflicting_edges": conflict_records,
+                }
+            )
         df = df.loc[~quarantine_mask].copy()
         logger.warning(
             "build_edge_table: quarantined {} current group(s) / {} raw row(s) "
@@ -439,7 +500,100 @@ def _resolve_duplicate_label_collisions(
         lambda row: json.dumps(lineage_by_key[tuple(row[column] for column in key_columns)]),
         axis=1,
     )
-    return df, quarantined_group_keys
+    return df, quarantined_group_keys, collision_audit
+
+
+def _audit_text(value) -> str:
+    """Return a JSON-safe string for optional label/sidecar metadata."""
+    if value is None or (not isinstance(value, (list, dict)) and pd.isna(value)):
+        return ""
+    return str(value)
+
+
+def _complete_collision_audit(
+    collision_audit: list[dict],
+    human_by: dict[str, pd.Series],
+    mapped: list[tuple[str, str, str]],
+) -> list[dict]:
+    """Add stable historical-label metadata to collision records."""
+    provenance_by_mapping = {
+        (str(hgid), str(group_id)): provenance for hgid, group_id, provenance in mapped
+    }
+    completed: list[dict] = []
+    for record in collision_audit:
+        group_id = str(record["current_group_id"])
+        labels: list[dict] = []
+        for human_group_id in record["historical_human_group_ids"]:
+            hrow = human_by[str(human_group_id)]
+            selected_edges = [
+                {"ref_id": ref_id, "target_id": target_id}
+                for ref_id, target_id in sorted(_human_edge_set(hrow.get("selected_edges", "[]")))
+            ]
+            labels.append(
+                {
+                    "human_group_id": str(human_group_id),
+                    "provenance": str(
+                        provenance_by_mapping.get((str(human_group_id), group_id), "")
+                    ),
+                    "labeler": _audit_text(hrow.get("labeler", "")),
+                    "labeled_at": _audit_text(hrow.get("labeled_at", "")),
+                    "label_semantics": _audit_text(hrow.get("label_semantics", "pair")) or "pair",
+                    "selected_edges": selected_edges,
+                }
+            )
+        completed_record = dict(record)
+        completed_record["historical_labels"] = labels
+        completed.append(completed_record)
+    return completed
+
+
+def _build_legacy_known_omission_audit(
+    events: list[tuple[str, str, str, str, str]],
+    dataset_id: str,
+    quarantined_group_keys: set[tuple[str, str]],
+    groups_by_id: dict[str, dict],
+) -> list[dict]:
+    """Collapse omission occurrences to deterministic current-group/edge records."""
+    events_by_key: dict[tuple[str, str, str], list[tuple[str, str, str, str, str]]] = {}
+    for event in events:
+        events_by_key.setdefault((event[1], event[3], event[4]), []).append(event)
+
+    audit: list[dict] = []
+    for (group_id, ref_id, target_id), key_events in sorted(events_by_key.items()):
+        occurrences = sorted(
+            (
+                {
+                    "human_group_id": str(event[2]),
+                    "provenance": str(event[0]),
+                }
+                for event in key_events
+            ),
+            key=lambda occurrence: (
+                occurrence["human_group_id"],
+                occurrence["provenance"],
+            ),
+        )
+        historical_ids = sorted({occurrence["human_group_id"] for occurrence in occurrences})
+        group = groups_by_id.get(group_id, {})
+        audit.append(
+            {
+                "case_id": (
+                    f"legacy_known_omission:{dataset_id}:{ref_id}:{target_id}:"
+                    + "+".join(historical_ids)
+                ),
+                "dataset_id": str(dataset_id),
+                "current_group_id": str(group_id),
+                "ref_id": str(ref_id),
+                "target_id": str(target_id),
+                "ref_name": _audit_text(group.get("ref_names", {}).get(ref_id, "")),
+                "target_name": _audit_text(group.get("target_names", {}).get(target_id, "")),
+                "retained_after_quarantine": (str(dataset_id), str(group_id))
+                not in quarantined_group_keys,
+                "occurrence_count": int(len(key_events)),
+                "occurrences": occurrences,
+            }
+        )
+    return audit
 
 
 def _edge_row(
@@ -694,7 +848,9 @@ def build_edge_table(
     Returns:
         DataFrame with one row per (group, edge); empty if no labels map. The
         per-build counters, including duplicate-label collision quarantine, are
-        logged once and attached as ``df.attrs["build_stats"]``.
+        logged once and attached as ``df.attrs["build_stats"]``. Exact,
+        deterministically sorted collision and legacy-known omission identities
+        are attached as ``df.attrs["build_audit"]``.
     """
     # Resolve candidates parquet if a path was given but no df
     if candidates_df is None and candidates_path is not None:
@@ -783,7 +939,8 @@ def build_edge_table(
 
     df = pd.DataFrame(rows)
     stats["raw_rows"] = len(df)
-    df, quarantined_group_keys = _resolve_duplicate_label_collisions(df, stats)
+    df, quarantined_group_keys, collision_audit = _resolve_duplicate_label_collisions(df, stats)
+    collision_audit = _complete_collision_audit(collision_audit, human_by, mapped)
 
     # This is an audit of legacy-known omission events, not a universal recall
     # claim. An event is one historical-label occurrence. A unique key is scoped
@@ -808,6 +965,17 @@ def build_edge_table(
         stats[f"legacy_known_omission_unique_raw_keys{suffix}"] = len(raw_keys)
         stats[f"legacy_known_omission_unique_retained_keys{suffix}"] = len(retained_keys)
 
+    build_audit = {
+        "schema_version": 1,
+        "quarantined_groups": collision_audit,
+        "legacy_known_omissions": _build_legacy_known_omission_audit(
+            legacy_known_omissions,
+            dataset_id,
+            quarantined_group_keys,
+            gmap,
+        ),
+    }
+
     # Backward-compatible aliases for research scripts written before the
     # occurrence-vs-key distinction. New reports must use the accurately named
     # counters above.
@@ -828,6 +996,7 @@ def build_edge_table(
     # signed lateral offset, class/length, optimizer decision/reason, and authoritative
     # structural values. Keeps row count identical — only adds columns / fills defaults.
     df.attrs["build_stats"] = stats
+    df.attrs["build_audit"] = build_audit
     if candidates_df is not None:
         df = _enrich_with_candidate_parquet(df, candidates_df, stats)
     # Update row counts after enrichment (count unchanged, but recompute for safety if needed)
@@ -856,6 +1025,7 @@ def build_edge_table(
         )
     logger.info("build_edge_table[{}]: {}", dataset_id, stats)
     df.attrs["build_stats"] = stats
+    df.attrs["build_audit"] = build_audit
     return df
 
 
