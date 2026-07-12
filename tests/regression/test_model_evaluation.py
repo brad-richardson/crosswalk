@@ -6,15 +6,18 @@ that the F1 score is at least 0.90. This prevents model quality regressions.
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 from sklearn.metrics import f1_score
 
-from crosswalk.config import METRIC_AVERAGE
+from crosswalk.config import METRIC_AVERAGE, bundled_model_path, settings
 from crosswalk.labeling.label_store import LabelStore
 from crosswalk.matching.ml import MLMatcher, segment_aware_split
 
-# Minimum acceptable F1 score on held-out test set
-MIN_TEST_F1_SCORE = 0.90
+# Minimum acceptable F1 scores on the held-out test set. The production gate is
+# the important one; raw XGBoost classification remains visible for diagnosis.
+MIN_PRODUCTION_F1_SCORE = 0.90
+MIN_RAW_F1_SCORE = 0.90
 
 
 @pytest.fixture
@@ -32,7 +35,7 @@ def trained_model_path() -> Path:
 @pytest.fixture
 def labels_dir() -> Path:
     """Return path to labels directory."""
-    path = Path(__file__).parent.parent.parent / "labels" / "data"
+    path = Path(__file__).parent.parent.parent / "labels"
     if not path.exists():
         pytest.skip(f"Labels directory not found at {path}")
     return path
@@ -42,18 +45,24 @@ class TestModelEvaluation:
     """Test that model meets F1 score quality threshold on held-out test data."""
 
     def test_f1_score_meets_threshold(self, trained_model_path, labels_dir):
-        """Model should achieve F1 >= 0.90 on held-out test set.
+        """Calibrated deployment predictions should achieve F1 >= 0.90.
 
         This test loads all labels, splits into train/test using segment-aware
-        splitting (same as training), and evaluates the model's F1 score on the
-        held-out test set.
+        splitting (same as training), then evaluates both raw XGBoost classes
+        and the actual production path: calibrated probabilities thresholded at
+        ``settings.scoring_match_threshold``.
         """
-        # Load trained model
-        matcher = MLMatcher()
-        matcher.load_model(str(trained_model_path))
+        # CI trains one artifact from scratch; the second is the exact artifact
+        # shipped to fresh installs. Both must clear the deployment gate and
+        # agree on provenance and scores.
+        matchers = {
+            "ci-trained": MLMatcher(model_path=str(trained_model_path)),
+            "bundled": MLMatcher(model_path=str(bundled_model_path())),
+        }
+        matcher = matchers["ci-trained"]
 
         # Load all labels
-        all_labels = LabelStore.load_all(labels_dir)
+        all_labels = LabelStore.load_all(labels_dir, skip_errors=False)
 
         if len(all_labels) == 0:
             pytest.skip("No labels found for evaluation")
@@ -61,6 +70,8 @@ class TestModelEvaluation:
         # Filter to valid labels (match/no_match)
         valid_labels = {"match", "no_match"}
         df = all_labels[all_labels["label"].isin(valid_labels)].copy()
+        matcher._check_feature_versions(df, allow_stale_features=False)
+        df = matcher._validate_training_pairs(df, max_hausdorff_m=1000.0)
 
         if len(df) < 100:
             pytest.skip(f"Not enough labels for evaluation (found {len(df)}, need >= 100)")
@@ -74,14 +85,53 @@ class TestModelEvaluation:
         X_test, y_test = matcher._extract_features_and_labels(test_df, binary=True)
         X_test = matcher._cap_infinities(X_test)
 
-        # Predict on test set - use model.predict for class labels (0/1)
-        y_pred = matcher.model.predict(X_test)
+        feature_records = test_df.reindex(columns=matcher.feature_names).to_dict("records")
+        production_scores = {}
+        for artifact_name, artifact_matcher in matchers.items():
+            assert artifact_matcher.feature_names == matcher.feature_names
 
-        # Calculate F1 score (binary: positive class only)
-        test_f1 = f1_score(y_test, y_pred, average=METRIC_AVERAGE)
+            # Raw diagnostic: XGBoost's built-in class prediction.
+            y_pred_raw = artifact_matcher.model.predict(X_test)
+            raw_f1 = f1_score(y_test, y_pred_raw, average=METRIC_AVERAGE)
 
-        # Assert F1 meets threshold
-        assert test_f1 >= MIN_TEST_F1_SCORE, (
-            f"Test F1 score {test_f1:.3f} below threshold {MIN_TEST_F1_SCORE}. "
-            "Model quality has regressed."
+            # Deployment gate: exercise MLMatcher.predict(), which applies the
+            # loaded isotonic calibrator when production calibration is enabled.
+            assert artifact_matcher.calibration_active, (
+                f"{artifact_name} model regression must exercise calibrated "
+                "production predictions; the model has no active calibrator or "
+                "calibration was disabled."
+            )
+            production_probs = artifact_matcher.predict(feature_records)
+            production_scores[artifact_name] = production_probs
+            y_pred_production = (production_probs >= settings.scoring_match_threshold).astype(int)
+            production_f1 = f1_score(y_test, y_pred_production, average=METRIC_AVERAGE)
+
+            assert production_f1 >= MIN_PRODUCTION_F1_SCORE, (
+                f"{artifact_name} production F1 {production_f1:.3f} below threshold "
+                f"{MIN_PRODUCTION_F1_SCORE} at scoring_match_threshold="
+                f"{settings.scoring_match_threshold:.3f} (raw F1={raw_f1:.3f}). "
+                "Deployment-path model quality has regressed."
+            )
+            assert raw_f1 >= MIN_RAW_F1_SCORE, (
+                f"{artifact_name} raw XGBoost F1 {raw_f1:.3f} below diagnostic "
+                f"threshold {MIN_RAW_F1_SCORE} (production F1={production_f1:.3f})."
+            )
+
+        ci_metadata = matchers["ci-trained"].training_metadata or {}
+        bundled_metadata = matchers["bundled"].training_metadata or {}
+        assert ci_metadata.get("fingerprints") == bundled_metadata.get("fingerprints"), (
+            "The bundled model was not trained from the same labeled data and split "
+            "as CI's fresh artifact. Retrain and reship the bundled model."
+        )
+        np.testing.assert_allclose(
+            production_scores["ci-trained"],
+            production_scores["bundled"],
+            rtol=0,
+            atol=1e-5,
+            err_msg="Bundled deployment scores differ from CI's fresh training output",
+        )
+        np.testing.assert_array_equal(
+            production_scores["ci-trained"] >= settings.scoring_match_threshold,
+            production_scores["bundled"] >= settings.scoring_match_threshold,
+            err_msg="Bundled and freshly trained models make different decisions",
         )

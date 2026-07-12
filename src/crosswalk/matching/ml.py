@@ -19,7 +19,10 @@ Model Architecture:
 - Handles class imbalance via scale_pos_weight or class_weight
 """
 
+import hashlib
+import json
 import os
+import platform
 import time
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -712,16 +715,17 @@ def create_segment_groups(df: pd.DataFrame) -> pd.Series:
     Raises:
         ValueError: If gers_id or target_id columns contain null values
     """
-    from collections import defaultdict
-
     # Validate no null values in segment ID columns
     if df["gers_id"].isna().any() or df["target_id"].isna().any():
         raise ValueError("gers_id and target_id columns must not contain null values")
 
-    # Union-Find implementation
-    parent = {}
+    # Segment IDs live in different source namespaces. A target segment named
+    # ``123`` is not the same graph node as GERS segment ``123``. Namespacing
+    # here both fixes that collision and gives us stable node identities from
+    # which to derive component IDs.
+    parent: dict[tuple[str, str, str], tuple[str, str, str]] = {}
 
-    def find(x):
+    def find(x: tuple[str, str, str]) -> tuple[str, str, str]:
         if x not in parent:
             parent[x] = x
         # Find root iteratively
@@ -735,25 +739,45 @@ def create_segment_groups(df: pd.DataFrame) -> pd.Series:
             x = next_x
         return root
 
-    def union(x, y):
+    def union(x: tuple[str, str, str], y: tuple[str, str, str]) -> None:
         px, py = find(x), find(y)
         if px != py:
-            parent[px] = py
+            # Union direction does not affect the final component ID (which is
+            # based on all member nodes), but deterministic linking makes the
+            # intermediate structure reproducible too.
+            if px <= py:
+                parent[py] = px
+            else:
+                parent[px] = py
 
-    # Map segments to pairs (using DataFrame index)
-    segment_to_pairs = defaultdict(list)
-    for idx in df.index:
-        row = df.loc[idx]
-        segment_to_pairs[row["gers_id"]].append(idx)
-        segment_to_pairs[row["target_id"]].append(idx)
+    dataset_values = df["dataset"] if "dataset" in df.columns else pd.Series("", index=df.index)
+    row_nodes: list[tuple[tuple[str, str, str], tuple[str, str, str]]] = []
+    for dataset, gers_id, target_id in zip(
+        dataset_values, df["gers_id"], df["target_id"], strict=True
+    ):
+        # GERS IDs are global. Target IDs are only meaningful within their
+        # dataset, so include the dataset partition in that node's namespace.
+        nodes = (
+            ("gers", "", str(gers_id)),
+            ("target", str(dataset), str(target_id)),
+        )
+        row_nodes.append(nodes)
+        union(*nodes)
 
-    # Union pairs that share a segment
-    for _segment, pair_idxs in segment_to_pairs.items():
-        for i in range(1, len(pair_idxs)):
-            union(pair_idxs[0], pair_idxs[i])
+    # A Union-Find root depends on insertion/link order unless explicitly
+    # canonicalized. Hashing the sorted, namespaced membership instead gives
+    # every connected component a stable ID under arbitrary input reordering.
+    members_by_root: dict[tuple[str, str, str], list[tuple[str, str, str]]] = {}
+    for node in parent:
+        members_by_root.setdefault(find(node), []).append(node)
 
-    # Return group for each row
-    return pd.Series([find(idx) for idx in df.index], index=df.index)
+    component_ids: dict[tuple[str, str, str], str] = {}
+    for root, members in members_by_root.items():
+        payload = json.dumps(sorted(members), ensure_ascii=False, separators=(",", ":"))
+        component_ids[root] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    groups = [component_ids[find(gers_node)] for gers_node, _target_node in row_nodes]
+    return pd.Series(groups, index=df.index, dtype="string")
 
 
 def segment_aware_split(
@@ -830,6 +854,136 @@ def segment_aware_split(
     return train_idx, test_idx
 
 
+def _canonical_scalar(value: Any) -> str | int | float | bool | None:
+    """Convert a scalar to a deterministic, strict-JSON representation."""
+    if isinstance(value, np.generic):
+        value = value.item()
+    if value is None or value is pd.NA:
+        return None
+    if isinstance(value, float):
+        if np.isnan(value):
+            return None
+        if np.isposinf(value):
+            return "+Infinity"
+        if np.isneginf(value):
+            return "-Infinity"
+        return value
+    if isinstance(value, (str, int, bool)):
+        return value
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
+def _json_safe(value: Any) -> Any:
+    """Recursively normalize training settings for portable artifact metadata."""
+    if isinstance(value, dict):
+        return {str(key): _json_safe(value[key]) for key in sorted(value, key=str)}
+    if isinstance(value, (list, tuple, set)):
+        items = [_json_safe(item) for item in value]
+        return sorted(items, key=str) if isinstance(value, set) else items
+    if isinstance(value, Path):
+        return str(value)
+    return _canonical_scalar(value)
+
+
+_TRAINING_ROW_KEY = ["dataset", "gers_id", "target_id"]
+
+
+def _canonicalize_training_frame(df: pd.DataFrame, *, source: str) -> pd.DataFrame:
+    """Validate unique pair keys and impose a canonical training row order."""
+    missing = [column for column in _TRAINING_ROW_KEY if column not in df.columns]
+    if missing:
+        raise ValueError(
+            f"{source} training labels are missing deterministic row key columns: {missing}"
+        )
+    duplicate_mask = df.duplicated(_TRAINING_ROW_KEY, keep=False)
+    if duplicate_mask.any():
+        sample = (
+            df.loc[duplicate_mask, _TRAINING_ROW_KEY]
+            .sort_values(_TRAINING_ROW_KEY, kind="mergesort")
+            .head(5)
+            .to_dict("records")
+        )
+        raise ValueError(
+            f"{source} training labels contain {int(duplicate_mask.sum())} rows with "
+            f"duplicate (dataset, gers_id, target_id) keys; examples: {sample}. "
+            "Resolve duplicate labels before training."
+        )
+    return df.sort_values(_TRAINING_ROW_KEY, kind="mergesort").reset_index(drop=True)
+
+
+def _matrix_rows_sha256(
+    df: pd.DataFrame,
+    X: np.ndarray,
+    y: np.ndarray,
+    feature_names: list[str],
+    *,
+    partitions: list[str] | np.ndarray | None = None,
+    sources: list[str] | np.ndarray | None = None,
+    sample_weights: np.ndarray | None = None,
+) -> str:
+    """Fingerprint labeled feature rows independently of their input order.
+
+    The hash covers stable pair identity, encoded truth, the exact feature
+    matrix consumed by XGBoost, and optional split/source/weight annotations.
+    Rows are serialized individually and sorted before hashing, so loading the
+    same partitions in a different filesystem order produces the same digest.
+    """
+    X = np.asarray(X)
+    y = np.asarray(y)
+    n_rows = len(df)
+    if X.shape != (n_rows, len(feature_names)) or len(y) != n_rows:
+        raise ValueError("Fingerprint inputs must align row-for-row with the feature matrix")
+    for optional in (partitions, sources, sample_weights):
+        if optional is not None and len(optional) != n_rows:
+            raise ValueError("Fingerprint annotations must align with the feature matrix")
+
+    header = {
+        "schema": 1,
+        "identity_columns": ["dataset", "gers_id", "target_id"],
+        "feature_names": feature_names,
+        "has_partition": partitions is not None,
+        "has_source": sources is not None,
+        "has_sample_weight": sample_weights is not None,
+    }
+    serialized_rows: list[str] = []
+    for position, (_, row) in enumerate(df.iterrows()):
+        payload: dict[str, Any] = {
+            "identity": [
+                _canonical_scalar(row.get("dataset")),
+                _canonical_scalar(row.get("gers_id")),
+                _canonical_scalar(row.get("target_id")),
+            ],
+            "label": _canonical_scalar(y[position]),
+            "features": [_canonical_scalar(value) for value in X[position]],
+        }
+        if partitions is not None:
+            payload["partition"] = _canonical_scalar(partitions[position])
+        if sources is not None:
+            payload["source"] = _canonical_scalar(sources[position])
+        if sample_weights is not None:
+            payload["sample_weight"] = _canonical_scalar(sample_weights[position])
+        serialized_rows.append(
+            json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        )
+
+    digest = hashlib.sha256()
+    digest.update(
+        json.dumps(header, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    )
+    digest.update(b"\n")
+    for row in sorted(serialized_rows):
+        digest.update(row.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
 class MLMatcher:
     """Machine learning-based matcher using gradient boosted trees."""
 
@@ -858,6 +1012,9 @@ class MLMatcher:
         # Isotonic probability calibrator (fit on out-of-fold train predictions
         # in train()). None => predict() returns raw XGBoost probabilities.
         self.calibrator: IsotonicCalibrator | None = None
+        # Deterministic provenance for trained artifacts. Legacy artifacts do
+        # not carry it, so None remains a supported load state.
+        self.training_metadata: dict[str, Any] | None = None
         self._auto_select = auto_select
         # Remembered so deferred loads (auto_select) honor the caller's choice too.
         self._allow_version_mismatch = allow_version_mismatch
@@ -896,6 +1053,7 @@ class MLMatcher:
         self.label_decoder = data.get("label_decoder", self.label_decoder)
         self.is_binary = data.get("is_binary", True)
         self.feature_version = data.get("feature_version")
+        self.training_metadata = data.get("training_metadata")
         # Calibrator is optional (absent in pre-calibration models => raw scores)
         calib_knots = data.get("calibration")
         self.calibrator = (
@@ -925,7 +1083,11 @@ class MLMatcher:
                 logger.warning(msg)
             else:
                 raise ValueError(msg)
-        logger.info(f"Loaded model from {path}")
+        fingerprint = (
+            (self.training_metadata or {}).get("fingerprints", {}).get("training_data_sha256")
+        )
+        provenance = f" (training_data_sha256={fingerprint})" if fingerprint else ""
+        logger.info(f"Loaded model from {path}{provenance}")
 
     def save_model(self, path: str) -> None:
         """Save the trained model to disk.
@@ -948,6 +1110,7 @@ class MLMatcher:
             "feature_version": self.feature_version,
             # Portable isotonic knots (None when uncalibrated); see calibration.py
             "calibration": self.calibrator.to_knots() if self.calibrator is not None else None,
+            "training_metadata": self.training_metadata,
         }
         joblib.dump(data, path)
         logger.info(f"Saved model to {path}")
@@ -964,6 +1127,7 @@ class MLMatcher:
         min_agent_confidence: float = 0.0,
         max_hausdorff_m: float = 1000.0,
         allow_stale_features: bool = False,
+        seed: int = 42,
         **kwargs,
     ) -> dict[str, Any]:
         """Train the model on labeled data.
@@ -1002,6 +1166,8 @@ class MLMatcher:
                                  current FEATURE_VERSION (run `crosswalk backfill`
                                  to fix). If True, downgrade to a warning and
                                  train anyway (features may have mixed semantics).
+            seed: Random seed shared by the grouped holdout split and every
+                  XGBoost model fit.
             **kwargs: Additional XGBoost parameters
 
         Returns:
@@ -1022,6 +1188,20 @@ class MLMatcher:
         from ..labeling.label_store import LabelStore
 
         self.is_binary = binary
+        self.calibrator = None
+        self.training_metadata = None
+        if "random_state" in kwargs:
+            legacy_seed = int(kwargs.pop("random_state"))
+            if seed != 42 and seed != legacy_seed:
+                raise ValueError(
+                    f"Conflicting seed={seed} and random_state={legacy_seed}. Pass only "
+                    "seed=... so the holdout split and XGBoost fits stay aligned."
+                )
+            logger.warning(
+                "MLMatcher.train(random_state=...) is deprecated; treating it as "
+                "seed=... so the holdout split and every XGBoost fit use one seed"
+            )
+            seed = legacy_seed
 
         # Set feature columns based on exclude_semantic
         if exclude_semantic:
@@ -1050,7 +1230,11 @@ class MLMatcher:
             )
 
         # Load all partitions using LabelStore
-        df = LabelStore.load_all(Path(labels_dir))
+        df = LabelStore.load_all(
+            Path(labels_dir),
+            skip_errors=False,
+            exclude_datasets=exclude_datasets,
+        )
         logger.info(
             f"Loaded {len(df)} labeled pairs from {df['dataset'].nunique() if 'dataset' in df.columns else 1} datasets"
         )
@@ -1058,12 +1242,10 @@ class MLMatcher:
         # Set feature_version for this trained model
         self.feature_version = FEATURE_VERSION
 
-        # Exclude specified datasets (for leave-one-out evaluation)
+        # Excluded partitions were omitted before strict feature loading, so a
+        # deliberately out-of-universe LOO dataset cannot block training.
         if exclude_datasets:
-            before_count = len(df)
-            df = df[~df["dataset"].isin(exclude_datasets)].copy()
-            excluded_count = before_count - len(df)
-            logger.info(f"Excluded {excluded_count} labels from datasets: {exclude_datasets}")
+            logger.info(f"Excluded datasets before loading: {exclude_datasets}")
             logger.info(f"Training on {len(df)} labels from {df['dataset'].nunique()} datasets")
 
         # Filter to only valid labels (exclude unsure, skip, and any unexpected values)
@@ -1085,6 +1267,7 @@ class MLMatcher:
             df,
             max_hausdorff_m=max_hausdorff_m,
         )
+        df = _canonicalize_training_frame(df, source="Human")
 
         # Load agent labels if agent_weight > 0. They are intentionally NOT
         # merged into the human label DataFrame: the train/test split below is
@@ -1102,7 +1285,11 @@ class MLMatcher:
             # Load agent labels from normalized format
             agent_dir = Path(labels_dir) / "agent"
             if agent_dir.exists():
-                agent_labels = LabelStore.load_agent_labels(agent_dir)
+                agent_labels = LabelStore.load_agent_labels(
+                    agent_dir,
+                    skip_errors=False,
+                    exclude_datasets=exclude_datasets,
+                )
             else:
                 agent_labels = pd.DataFrame()
 
@@ -1131,13 +1318,51 @@ class MLMatcher:
                     # Load features for agent labels
                     features_dir = Path(labels_dir) / "features"
                     if features_dir.exists():
-                        all_features = FeatureStore.load_all(features_dir)
+                        agent_datasets = set(agent_labels["dataset"].dropna().astype(str))
+                        all_features = FeatureStore.load_all(
+                            features_dir,
+                            skip_errors=False,
+                            required_datasets=agent_datasets,
+                        )
 
                         if len(all_features) > 0:
+                            join_columns = ["gers_id", "target_id", "dataset"]
+                            duplicate_feature_mask = all_features.duplicated(
+                                join_columns, keep=False
+                            )
+                            if duplicate_feature_mask.any():
+                                sample = (
+                                    all_features.loc[duplicate_feature_mask, join_columns]
+                                    .sort_values(join_columns, kind="mergesort")
+                                    .head(5)
+                                    .to_dict("records")
+                                )
+                                raise ValueError(
+                                    f"{int(duplicate_feature_mask.sum())} agent feature rows "
+                                    f"have duplicate training join keys; sample: {sample}"
+                                )
+
+                            feature_keys = all_features[join_columns].drop_duplicates()
+                            missing_agent_keys = agent_labels[join_columns].merge(
+                                feature_keys,
+                                on=join_columns,
+                                how="left",
+                                indicator=True,
+                            )
+                            missing_agent_keys = missing_agent_keys[
+                                missing_agent_keys["_merge"] == "left_only"
+                            ]
+                            if not missing_agent_keys.empty:
+                                sample = missing_agent_keys[join_columns].head(5).to_dict("records")
+                                raise ValueError(
+                                    f"{len(missing_agent_keys)} agent labels are missing "
+                                    f"feature join keys; sample: {sample}"
+                                )
+
                             # Join agent labels with features
                             agent_with_features = agent_labels.merge(
                                 all_features,
-                                on=["gers_id", "target_id", "dataset"],
+                                on=join_columns,
                                 how="inner",
                             )
 
@@ -1160,7 +1385,9 @@ class MLMatcher:
                                     allow_stale_features=allow_stale_features,
                                 )
 
-                                agent_df = agent_with_features
+                                agent_df = _canonicalize_training_frame(
+                                    agent_with_features, source="Agent"
+                                )
                                 logger.info(
                                     f"Loaded {len(agent_df)} agent labels "
                                     f"(weight={agent_weight}) for training only"
@@ -1170,12 +1397,13 @@ class MLMatcher:
                                     "No agent labels have features - skipping agent labels"
                                 )
                         else:
-                            logger.warning(
-                                "No features found in feature store - skipping agent labels"
+                            raise ValueError(
+                                "No feature rows found for the requested agent-label datasets"
                             )
                     else:
-                        logger.warning(
-                            f"Features directory not found: {features_dir} - skipping agent labels"
+                        raise FileNotFoundError(
+                            f"Features directory not found for requested agent labels: "
+                            f"{features_dir}"
                         )
                 else:
                     logger.info("No valid agent labels after filtering")
@@ -1192,7 +1420,7 @@ class MLMatcher:
         # Segment-aware train/test split on HUMAN labels to prevent data leakage
         # Also get groups for reuse in cross-validation
         train_idx, test_idx, groups = segment_aware_split(
-            df, test_size=test_size, random_state=42, return_groups=True
+            df, test_size=test_size, random_state=seed, return_groups=True
         )
 
         X_train, X_test = X[train_idx], X[test_idx]
@@ -1239,6 +1467,10 @@ class MLMatcher:
             X_train, X_test = X[train_idx], X[test_idx]
             self.feature_names = list(self.feature_names) + pending_missing
 
+        training_rows_df = df.iloc[train_idx].copy().reset_index(drop=True)
+        training_sources = ["human"] * len(training_rows_df)
+        n_agent_train = 0
+
         # Append agent labels to the TRAINING portion only (never the test set).
         # Agent pairs sharing a segment with any test pair are dropped so the
         # model cannot train on segments it is evaluated on.
@@ -1254,7 +1486,7 @@ class MLMatcher:
                         f"Dropped {int(overlap_mask.sum())} agent labels sharing "
                         "segments with the holdout test set (leakage prevention)"
                     )
-                    agent_df = agent_df[~overlap_mask]
+                    agent_df = agent_df[~overlap_mask].copy()
             if len(agent_df) > 0:
                 # Reindex to the (already finalized) feature columns so missing
                 # columns become NaN and ordering matches the human matrix
@@ -1268,6 +1500,11 @@ class MLMatcher:
                 weights_train = np.concatenate(
                     [weights_train, np.full(len(agent_df), agent_weight, dtype=np.float32)]
                 )
+                n_agent_train = len(agent_df)
+                training_rows_df = pd.concat(
+                    [training_rows_df, agent_df], ignore_index=True, sort=False
+                )
+                training_sources.extend(["agent"] * n_agent_train)
                 logger.info(
                     f"Training data: {len(train_idx)} human (weight=1.0) + "
                     f"{len(agent_df)} agent (weight={agent_weight}); "
@@ -1293,7 +1530,7 @@ class MLMatcher:
             **DEFAULT_XGB_PARAMS,
             "objective": "binary:logistic" if binary else "multi:softprob",
             "eval_metric": "logloss" if binary else "mlogloss",
-            "random_state": 42,
+            "random_state": seed,
             "n_jobs": -1,
         }
         if scale_pos_weight and binary:
@@ -1304,6 +1541,80 @@ class MLMatcher:
 
         # Override with user params
         params = {**default_params, **kwargs}
+
+        split_partitions = np.full(len(df), "train", dtype=object)
+        split_partitions[test_idx] = "test"
+        capped_human_X = self._cap_infinities(X)
+        training_label_counts = {
+            str(label): int(count)
+            for label, count in sorted(
+                zip(*np.unique(y_train, return_counts=True), strict=True),
+                key=lambda item: str(item[0]),
+            )
+        }
+        dataset_counts = {
+            str(dataset): int(count)
+            for dataset, count in training_rows_df["dataset"].value_counts().sort_index().items()
+        }
+        self.training_metadata = {
+            "schema_version": 1,
+            "feature_version": self.feature_version,
+            "feature_names": list(self.feature_names),
+            "fingerprints": {
+                "labeled_data_sha256": _matrix_rows_sha256(
+                    df, capped_human_X, y, self.feature_names
+                ),
+                "split_sha256": _matrix_rows_sha256(
+                    df,
+                    capped_human_X,
+                    y,
+                    self.feature_names,
+                    partitions=split_partitions,
+                ),
+                "training_data_sha256": _matrix_rows_sha256(
+                    training_rows_df,
+                    X_train,
+                    y_train,
+                    self.feature_names,
+                    sources=training_sources,
+                    sample_weights=weights_train,
+                ),
+            },
+            "split": {
+                "method": "namespaced-segment-component-group-shuffle",
+                "random_state": seed,
+                "test_size": float(test_size),
+                "n_groups": int(groups.nunique()),
+            },
+            "counts": {
+                "human_labeled": len(df),
+                "human_train": len(train_idx),
+                "human_test": len(test_idx),
+                "agent_train": n_agent_train,
+                "training_total": len(X_train),
+                "training_labels": training_label_counts,
+                "training_datasets": dataset_counts,
+            },
+            "training_options": {
+                "binary": binary,
+                "exclude_semantic": exclude_semantic,
+                "exclude_datasets": sorted(exclude_datasets or []),
+                "exclude_features": sorted(exclude_features or []),
+                "agent_weight": float(agent_weight),
+                "min_agent_confidence": float(min_agent_confidence),
+                "max_hausdorff_m": float(max_hausdorff_m),
+                "allow_stale_features": allow_stale_features,
+            },
+            "model_params": _json_safe(params),
+            "runtime_versions": {
+                "crosswalk": __import__("crosswalk").__version__,
+                "python": platform.python_version(),
+                "numpy": np.__version__,
+                "pandas": pd.__version__,
+                "scikit_learn": __import__("sklearn").__version__,
+                "xgboost": xgb.__version__,
+            },
+        }
 
         # Train
         logger.info(f"Training XGBoost with params: {params}")
@@ -1336,6 +1647,7 @@ class MLMatcher:
             "n_train": len(X_train),
             "n_test": len(X_test),
             "feature_importance": dict(zip(self.feature_names, self.model.feature_importances_)),
+            "training_metadata": self.training_metadata,
         }
 
         # Evaluate on test set if we have one
@@ -1414,6 +1726,42 @@ class MLMatcher:
                 results["calibrated"] = False
                 logger.info("Multiclass model: probability calibration skipped")
 
+            production_y_pred = y_pred
+            if binary:
+                from ..config import settings
+
+                production_test_probs = raw_test_probs
+                if self.calibrator is not None and settings.enable_calibration:
+                    production_test_probs = self.calibrator.transform(raw_test_probs)
+                production_y_pred = (
+                    production_test_probs >= settings.scoring_match_threshold
+                ).astype(int)
+                results.update(
+                    {
+                        "test_f1_raw": f1_score(
+                            y_test, y_pred, average=METRIC_AVERAGE, zero_division=0
+                        ),
+                        "test_f1_production": f1_score(
+                            y_test,
+                            production_y_pred,
+                            average=METRIC_AVERAGE,
+                            zero_division=0,
+                        ),
+                        "test_accuracy_production": (production_y_pred == y_test).mean(),
+                        "production_scoring_match_threshold": settings.scoring_match_threshold,
+                        "production_calibrated": self.calibration_active,
+                        "production_classification_report": classification_report(
+                            y_test,
+                            production_y_pred,
+                            target_names=target_names,
+                            output_dict=True,
+                        ),
+                        "production_confusion_matrix": sklearn_confusion_matrix(
+                            y_test, production_y_pred
+                        ).tolist(),
+                    }
+                )
+
             results.update(
                 {
                     "test_accuracy": (y_pred == y_test).mean(),
@@ -1436,6 +1784,13 @@ class MLMatcher:
             print(f"Training samples: {results['n_train']}")
             print(f"Test samples: {results['n_test']}")
             print(f"Test accuracy: {results['test_accuracy']:.3f}")
+            if binary:
+                print(
+                    f"Holdout F1: {results['test_f1_raw']:.3f} raw -> "
+                    f"{results['test_f1_production']:.3f} production "
+                    f"(threshold={results['production_scoring_match_threshold']:.3f}, "
+                    f"calibrated={results['production_calibrated']})"
+                )
             print(f"CV F1 (5-fold): {results['cv_f1_mean']:.3f} ± {results['cv_f1_std']:.3f}")
             if results.get("calibrated"):
                 print(
@@ -1541,8 +1896,12 @@ class MLMatcher:
         return X, y
 
     @staticmethod
-    def _check_feature_versions(df: pd.DataFrame, allow_stale_features: bool = False) -> None:
-        """Verify that label features were computed with the current FEATURE_VERSION.
+    def _check_feature_versions(
+        df: pd.DataFrame,
+        allow_stale_features: bool = False,
+        expected_version: str | None = FEATURE_VERSION,
+    ) -> None:
+        """Verify that label features match the expected feature contract.
 
         Training on features computed with older code silently mixes feature
         semantics, so stale (or missing) feature versions raise an error by
@@ -1551,6 +1910,9 @@ class MLMatcher:
         Args:
             df: Labels DataFrame (may or may not have a feature_version column)
             allow_stale_features: If True, warn instead of raising
+            expected_version: Feature contract the consumer expects. Defaults
+                              to the current code's ``FEATURE_VERSION``; model
+                              evaluation passes the artifact's stored version.
 
         Raises:
             ValueError: If any labels have stale/missing feature_version and
@@ -1559,6 +1921,11 @@ class MLMatcher:
         if len(df) == 0:
             # Nothing to check — downstream code raises a clearer error
             return
+        if expected_version is None:
+            raise ValueError(
+                "Cannot validate feature semantics because the model has no "
+                "feature_version. Use a versioned model artifact."
+            )
         if "feature_version" in df.columns:
             version_counts = df["feature_version"].value_counts(dropna=False)
             n_versions = len(version_counts)
@@ -1569,16 +1936,16 @@ class MLMatcher:
                 )
             # NaN feature_version counts as stale (unknown feature semantics)
             n_total = len(df)
-            n_current = int((df["feature_version"] == FEATURE_VERSION).sum())
-            n_stale = n_total - n_current
+            n_expected = int((df["feature_version"] == expected_version).sum())
+            n_stale = n_total - n_expected
             logger.info(
-                f"Label feature versions: {n_current}/{n_total} match current "
-                f"FEATURE_VERSION={FEATURE_VERSION}"
+                f"Label feature versions: {n_expected}/{n_total} match expected "
+                f"feature_version={expected_version}"
             )
             if n_stale > 0:
                 msg = (
                     f"{n_stale}/{n_total} labeled pairs have a stale feature_version "
-                    f"(current FEATURE_VERSION={FEATURE_VERSION}, "
+                    f"(expected feature_version={expected_version}, "
                     f"found: {version_counts.to_dict()}). Training on stale features "
                     f"silently mixes feature semantics. Run `crosswalk backfill` to "
                     f"recompute features, or pass allow_stale_features=True to override."
@@ -1590,7 +1957,7 @@ class MLMatcher:
         else:
             msg = (
                 "Labels have no feature_version column (pre-versioning labels). "
-                f"Current code uses FEATURE_VERSION={FEATURE_VERSION}. "
+                f"The consumer expects feature_version={expected_version}. "
                 "Run `crosswalk backfill` to recompute features, or pass "
                 "allow_stale_features=True to override."
             )
@@ -2135,6 +2502,7 @@ def evaluate_by_dataset(
         recall_score,
     )
 
+    from ..config import settings
     from ..labeling.label_store import LabelStore
 
     # Load model
@@ -2142,12 +2510,30 @@ def evaluate_by_dataset(
     # version mismatch warns rather than blocking the evaluation.
     matcher = MLMatcher(model_path, allow_version_mismatch=True)
 
-    # Load all labels using LabelStore
-    all_labels = LabelStore.load_all(Path(labels_dir))
+    # Evaluation is a quality gate too: fail closed on missing partitions or
+    # joins, while limiting strictness to an explicitly requested dataset set.
+    all_labels = LabelStore.load_all(
+        Path(labels_dir),
+        skip_errors=False,
+        required_datasets=filter_datasets,
+    )
 
     if len(all_labels) == 0:
         logger.warning(f"No labels found in {labels_dir}")
         return {}
+
+    valid_labels = {"match", "no_match"}
+    all_labels = all_labels[all_labels["label"].isin(valid_labels)].copy()
+    matcher._check_feature_versions(
+        all_labels,
+        allow_stale_features=False,
+        expected_version=matcher.feature_version,
+    )
+    all_labels = matcher._validate_training_pairs(
+        all_labels,
+        max_hausdorff_m=1000.0,
+    )
+    all_labels = _canonicalize_training_frame(all_labels, source="Evaluation")
 
     # Get unique datasets
     if "dataset" not in all_labels.columns:
@@ -2164,8 +2550,7 @@ def evaluate_by_dataset(
 
     # If holdout requested, split the data first using segment-aware splitting
     if holdout:
-        valid_labels = {"match", "no_match"}
-        eval_df = all_labels[all_labels["label"].isin(valid_labels)].copy()
+        eval_df = all_labels
         _, test_idx = segment_aware_split(eval_df, test_size=holdout_pct, random_state=seed)
         all_labels = eval_df.iloc[test_idx]
         print(
@@ -2177,6 +2562,7 @@ def evaluate_by_dataset(
     results = {}
     all_y_true = []
     all_y_pred = []
+    all_y_pred_production = []
 
     if show_by_dataset:
         print("\n" + "=" * 60)
@@ -2201,14 +2587,30 @@ def evaluate_by_dataset(
         # Cap infinities (XGBoost handles NaN natively)
         X = matcher._cap_infinities(X)
 
-        # Predict
+        # Preserve the historical raw classifier metrics, and separately score
+        # the exact deployment path: calibrated MLMatcher.predict probabilities
+        # thresholded at settings.scoring_match_threshold.
         y_pred = matcher.model.predict(X)
+        if binary:
+            feature_records = df.reindex(columns=matcher.feature_names).to_dict("records")
+            production_probs = matcher.predict(feature_records)
+            y_pred_production = (production_probs >= settings.scoring_match_threshold).astype(int)
+        else:
+            y_pred_production = y_pred
 
         # Compute metrics
         accuracy = accuracy_score(y, y_pred)
         f1 = f1_score(y, y_pred, average=METRIC_AVERAGE, zero_division=0)
         precision = precision_score(y, y_pred, average=METRIC_AVERAGE, zero_division=0)
         recall = recall_score(y, y_pred, average=METRIC_AVERAGE, zero_division=0)
+        production_accuracy = accuracy_score(y, y_pred_production)
+        production_f1 = f1_score(y, y_pred_production, average=METRIC_AVERAGE, zero_division=0)
+        production_precision = precision_score(
+            y, y_pred_production, average=METRIC_AVERAGE, zero_division=0
+        )
+        production_recall = recall_score(
+            y, y_pred_production, average=METRIC_AVERAGE, zero_division=0
+        )
 
         # Count labels
         n_match = (y == 1).sum() if binary else (df["label"] == "match").sum()
@@ -2223,11 +2625,26 @@ def evaluate_by_dataset(
             "precision": precision,
             "recall": recall,
             "confusion_matrix": confusion_matrix(y, y_pred).tolist(),
+            "raw_accuracy": accuracy,
+            "raw_f1": f1,
+            "raw_precision": precision,
+            "raw_recall": recall,
+            "raw_confusion_matrix": confusion_matrix(y, y_pred).tolist(),
+            "production_accuracy": production_accuracy,
+            "production_f1": production_f1,
+            "production_precision": production_precision,
+            "production_recall": production_recall,
+            "production_confusion_matrix": confusion_matrix(y, y_pred_production).tolist(),
+            "production_scoring_match_threshold": (
+                settings.scoring_match_threshold if binary else None
+            ),
+            "production_calibrated": matcher.calibration_active if binary else False,
         }
 
         # Accumulate for overall
         all_y_true.extend(y)
         all_y_pred.extend(y_pred)
+        all_y_pred_production.extend(y_pred_production)
 
         # Print summary (only if showing by dataset)
         if show_by_dataset:
@@ -2237,11 +2654,25 @@ def evaluate_by_dataset(
             print(f"  F1: {f1:.3f}")
             print(f"  Precision: {precision:.3f}")
             print(f"  Recall: {recall:.3f}")
+            if binary:
+                print(
+                    f"  Production (threshold={settings.scoring_match_threshold:.3f}, "
+                    f"calibrated={matcher.calibration_active}): "
+                    f"F1={production_f1:.3f}, precision={production_precision:.3f}, "
+                    f"recall={production_recall:.3f}"
+                )
 
     # Overall metrics
     if all_y_true:
         overall_accuracy = accuracy_score(all_y_true, all_y_pred)
         overall_f1 = f1_score(all_y_true, all_y_pred, average=METRIC_AVERAGE, zero_division=0)
+        overall_production_accuracy = accuracy_score(all_y_true, all_y_pred_production)
+        overall_production_f1 = f1_score(
+            all_y_true,
+            all_y_pred_production,
+            average=METRIC_AVERAGE,
+            zero_division=0,
+        )
 
         if show_by_dataset:
             print("\n" + "-" * 60)
@@ -2251,11 +2682,21 @@ def evaluate_by_dataset(
         print(f"  Total samples: {len(all_y_true)}")
         print(f"  Accuracy: {overall_accuracy:.3f}")
         print(f"  F1: {overall_f1:.3f}")
+        if binary:
+            print(f"  Production F1: {overall_production_f1:.3f}")
 
         results["_overall"] = {
             "n_samples": len(all_y_true),
             "accuracy": overall_accuracy,
             "f1": overall_f1,
+            "raw_accuracy": overall_accuracy,
+            "raw_f1": overall_f1,
+            "production_accuracy": overall_production_accuracy,
+            "production_f1": overall_production_f1,
+            "production_scoring_match_threshold": (
+                settings.scoring_match_threshold if binary else None
+            ),
+            "production_calibrated": matcher.calibration_active if binary else False,
         }
 
     return results
