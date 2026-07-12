@@ -146,7 +146,10 @@ def get_cached_matcher() -> MLMatcher | None:
     if _matcher_loaded:
         return _cached_matcher
 
-    model_path = settings.model_path
+    # The labeling UI remains a local experimentation workflow. Production
+    # stitch/factory inference uses settings.model_path, which defaults to the
+    # reproducible bundled artifact and changes only through explicit opt-in.
+    model_path = settings.local_model_path
     if not model_path.exists():
         logger.warning(f"ML model not found at {model_path}")
         _matcher_loaded = True

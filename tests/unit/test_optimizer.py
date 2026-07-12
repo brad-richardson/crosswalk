@@ -5,16 +5,25 @@ contiguous ID grouping, and the M:N grouping entry point.
 """
 
 import math
+from dataclasses import replace
 
+import numpy as np
 import pytest
 from shapely import LineString
 
 from crosswalk.matching.optimizer import (
+    DECOMPOSED_SINGLETON_REVIEW_FLAG,
+    LOW_CONFIDENCE_ADDITION_REVIEW_FLAG,
     PARALLEL_SIBLING_REVIEW_FLAG,
+    PRUNED_SINGLETON_REVIEW_FLAG,
     _contested_small_span_review_pairs,
     _create_group_results,
     _endpoints_are_collinear,
+    _expand_greedy_matches,
     _find_contiguous_id_groups,
+    _normalized_names,
+    _normalized_names_for_range,
+    _validate_assignment_coverage,
     apply_confidence_drop_prune,
     build_contiguity_adjacency,
     find_match_components,
@@ -96,6 +105,39 @@ class TestOptimizeMatchesGreedy:
         assert len(ref_1_matches) == 1
         assert ref_1_matches[0].target_id == "t_1"
         assert ref_1_matches[0].confidence == 0.9
+
+    def test_exact_tie_prefers_aligned_meters_over_fraction(self):
+        """Fractional coverage cannot make a short sliver beat a longer match."""
+        results = [
+            MatchResult(
+                "ref_a",
+                "target",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {"aligned_length_m": 9.0},
+                gers_start_frac=0.0,
+                gers_end_frac=0.9,
+                local_start_frac=0.0,
+                local_end_frac=0.9,
+            ),
+            MatchResult(
+                "ref_b",
+                "target",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {"aligned_length_m": 50.0},
+                gers_start_frac=0.0,
+                gers_end_frac=0.5,
+                local_start_frac=0.0,
+                local_end_frac=0.5,
+            ),
+        ]
+
+        optimized = optimize_matches_greedy(results, min_confidence=0.5)
+
+        assert [(result.ref_id, result.target_id) for result in optimized] == [("ref_b", "target")]
 
 
 class TestDuplicateCandidates:
@@ -277,6 +319,137 @@ class TestOptimizeMatchesWithGrouping:
             assert r.features["group_ref_count"] == 2
             assert r.features["group_target_count"] == 1
 
+    def test_one_to_n_disconnected_chains_stay_separate(self):
+        """One shared ref must not flatten two distant target chains into one group."""
+        ref_geoms = {"r0": LineString([(0, 5), (300, 5)])}
+        target_geoms = {
+            "t1": LineString([(0, 0), (50, 0)]),
+            "t2": LineString([(50, 0), (100, 0)]),
+            "t3": LineString([(200, 0), (250, 0)]),
+            "t4": LineString([(250, 0), (300, 0)]),
+        }
+        results = [
+            MatchResult("r0", target_id, MatchDecision.MATCH, 0.9, {}, {})
+            for target_id in target_geoms
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            contiguity_tolerance=5.0,
+            corridor_aware=True,
+        )
+
+        groups: dict[str, set[str]] = {}
+        for result in optimized:
+            assert result.features["match_type"] == "1:N"
+            assert result.features["group_size"] == 2
+            groups.setdefault(result.features["group_id"], set()).add(result.target_id)
+        assert set(map(frozenset, groups.values())) == {
+            frozenset({"t1", "t2"}),
+            frozenset({"t3", "t4"}),
+        }
+
+    def test_n_to_one_disconnected_chains_stay_separate(self):
+        """One shared target must not flatten two distant ref chains into one group."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(50, 0), (100, 0)]),
+            "r3": LineString([(200, 0), (250, 0)]),
+            "r4": LineString([(250, 0), (300, 0)]),
+        }
+        target_geoms = {"t0": LineString([(0, 5), (300, 5)])}
+        results = [
+            MatchResult(ref_id, "t0", MatchDecision.MATCH, 0.9, {}, {}) for ref_id in ref_geoms
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            contiguity_tolerance=5.0,
+            corridor_aware=True,
+        )
+
+        groups: dict[str, set[str]] = {}
+        for result in optimized:
+            assert result.features["match_type"] == "N:1"
+            assert result.features["group_size"] == 2
+            groups.setdefault(result.features["group_id"], set()).add(result.ref_id)
+        assert set(map(frozenset, groups.values())) == {
+            frozenset({"r1", "r2"}),
+            frozenset({"r3", "r4"}),
+        }
+
+    def test_low_confidence_singleton_from_group_decomposition_stays_review(self):
+        """Splitting a multi-node component cannot promote its weak winner to MATCH."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(200, 0), (250, 0)]),
+        }
+        target_geoms = {"t0": LineString([(0, 5), (250, 5)])}
+        results = [
+            MatchResult("r1", "t0", MatchDecision.MATCH, 0.68, {}, {}),
+            MatchResult("r2", "t0", MatchDecision.MATCH, 0.65, {}, {}),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            corridor_aware=True,
+        )
+
+        assert [(result.ref_id, result.target_id) for result in optimized] == [("r1", "t0")]
+        assert optimized[0].decision == MatchDecision.REVIEW
+        assert optimized[0].features[DECOMPOSED_SINGLETON_REVIEW_FLAG] == 1.0
+
+    def test_low_confidence_singleton_with_unattached_weak_siblings_stays_review(self):
+        """Glue pruning cannot hide the multi-node provenance of a singleton."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(200, 0), (250, 0)]),
+            "r3": LineString([(400, 0), (450, 0)]),
+        }
+        target_geoms = {"t0": LineString([(0, 5), (450, 5)])}
+        results = [
+            MatchResult("r1", "t0", MatchDecision.MATCH, 0.682759, {}, {}),
+            MatchResult("r2", "t0", MatchDecision.REVIEW, 0.1875, {}, {}),
+            MatchResult("r3", "t0", MatchDecision.REVIEW, 0.1875, {}, {}),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.1,
+            glue_min_confidence=0.575,
+            corridor_aware=True,
+        )
+
+        assert [(result.ref_id, result.target_id) for result in optimized] == [("r1", "t0")]
+        assert optimized[0].decision == MatchDecision.REVIEW
+        assert optimized[0].features[DECOMPOSED_SINGLETON_REVIEW_FLAG] == 1.0
+
+    def test_native_low_confidence_one_to_one_keeps_scorer_decision(self):
+        """The decomposition guard does not redefine ordinary 1:1 scoring."""
+        result = MatchResult("r1", "t1", MatchDecision.MATCH, 0.68, {}, {})
+
+        optimized = optimize_matches_with_grouping(
+            [result],
+            self._make_gdf("id", {"r1": LineString([(0, 0), (50, 0)])}),
+            self._make_gdf("local_id", {"t1": LineString([(0, 5), (50, 5)])}),
+            min_confidence=0.5,
+            corridor_aware=True,
+        )
+
+        assert optimized == [result]
+        assert DECOMPOSED_SINGLETON_REVIEW_FLAG not in optimized[0].features
+
     def test_m_to_n_both_contiguous(self):
         """M:N where both sides are fully contiguous."""
         ref_geoms = {
@@ -451,6 +624,1089 @@ class TestOptimizeMatchesWithGrouping:
         r3_matches = [r for r in optimized if r.ref_id == "r3"]
         assert len(r3_matches) == 1
         assert r3_matches[0].target_id == "t2"
+
+    def test_cross_linked_post_expansion_emits_each_pair_once(self):
+        """One edge shared by ref/target expansion recomposes into one M:N group."""
+        greedy = [
+            MatchResult("r1", "t1", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r2", "t2", MatchDecision.MATCH, 0.8, {}, {}),
+        ]
+        cross_link = MatchResult("r1", "t2", MatchDecision.MATCH, 0.85, {}, {})
+
+        expanded = _expand_greedy_matches(
+            greedy,
+            [*greedy, cross_link],
+            {
+                "r1": LineString([(0, 0), (50, 0)]),
+                "r2": LineString([(50, 0), (100, 0)]),
+            },
+            {
+                "t1": LineString([(0, 5), (50, 5)]),
+                "t2": LineString([(50, 5), (100, 5)]),
+            },
+            tolerance=5.0,
+            min_confidence=0.5,
+            glue_min_confidence=0.575,
+        )
+
+        pairs = [(result.ref_id, result.target_id) for result in expanded]
+        assert len(pairs) == len(set(pairs)) == 3
+        assert {result.features["match_type"] for result in expanded} == {"M:N"}
+        assert len({result.features["group_id"] for result in expanded}) == 1
+
+    def test_low_confidence_post_expansion_addition_stays_review(self):
+        """Group averaging cannot auto-accept a weak edge added after greedy."""
+        anchor = MatchResult("r1", "t1", MatchDecision.MATCH, 0.95, {}, {})
+        weak_addition = MatchResult("r1", "t2", MatchDecision.REVIEW, 0.6, {}, {})
+
+        expanded = _expand_greedy_matches(
+            [anchor],
+            [anchor, weak_addition],
+            {"r1": LineString([(0, 0), (100, 0)])},
+            {
+                "t1": LineString([(0, 5), (50, 5)]),
+                "t2": LineString([(50, 5), (100, 5)]),
+            },
+            tolerance=5.0,
+            min_confidence=0.5,
+            glue_min_confidence=0.575,
+        )
+        by_target = {result.target_id: result for result in expanded}
+
+        assert by_target["t1"].decision == MatchDecision.MATCH
+        assert by_target["t2"].decision == MatchDecision.REVIEW
+        assert by_target["t2"].features[LOW_CONFIDENCE_ADDITION_REVIEW_FLAG] == 1.0
+
+    @pytest.mark.parametrize(
+        "duplicate_order",
+        [(0.6, 0.9), (0.9, 0.6), (float("nan"), 0.9)],
+    )
+    def test_post_expansion_duplicate_pair_uses_highest_confidence(self, duplicate_order):
+        """Raw duplicate order cannot make a weaker row claim an expanded pair."""
+        anchor = MatchResult("r1", "t1", MatchDecision.MATCH, 0.95, {}, {})
+        duplicates = [
+            MatchResult("r1", "t2", MatchDecision.MATCH, confidence, {}, {})
+            for confidence in duplicate_order
+        ]
+
+        expanded = _expand_greedy_matches(
+            [anchor],
+            [anchor, *duplicates],
+            {"r1": LineString([(0, 0), (100, 0)])},
+            {
+                "t1": LineString([(0, 5), (50, 5)]),
+                "t2": LineString([(50, 5), (100, 5)]),
+            },
+            tolerance=5.0,
+            min_confidence=0.5,
+        )
+        by_target = {result.target_id: result for result in expanded}
+
+        assert by_target["t2"].confidence == 0.9
+        assert by_target["t2"].decision == MatchDecision.MATCH
+        assert LOW_CONFIDENCE_ADDITION_REVIEW_FLAG not in by_target["t2"].features
+
+    def test_two_cross_links_recompose_to_four_unique_edges(self):
+        """Bidirectional expansion emits a complete 2x2 once, as one M:N group."""
+        anchors = [
+            MatchResult("r1", "t1", MatchDecision.MATCH, 0.95, {}, {}),
+            MatchResult("r2", "t2", MatchDecision.MATCH, 0.94, {}, {}),
+        ]
+        cross_links = [
+            MatchResult("r1", "t2", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r2", "t1", MatchDecision.MATCH, 0.89, {}, {}),
+        ]
+
+        expanded = _expand_greedy_matches(
+            anchors,
+            [*anchors, *cross_links],
+            {
+                "r1": LineString([(0, 0), (50, 0)]),
+                "r2": LineString([(50, 0), (100, 0)]),
+            },
+            {
+                "t1": LineString([(0, 5), (50, 5)]),
+                "t2": LineString([(50, 5), (100, 5)]),
+            },
+            tolerance=5.0,
+            min_confidence=0.5,
+        )
+        pairs = [(result.ref_id, result.target_id) for result in expanded]
+
+        assert len(pairs) == len(set(pairs)) == 4
+        assert set(pairs) == {("r1", "t1"), ("r1", "t2"), ("r2", "t1"), ("r2", "t2")}
+        assert {result.features["match_type"] for result in expanded} == {"M:N"}
+        assert len({result.features["group_id"] for result in expanded}) == 1
+
+    def test_below_glue_cross_links_cannot_weld_greedy_anchors(self):
+        """The grouping-only floor also governs post-greedy expansion."""
+        anchors = [
+            MatchResult("r1", "t1", MatchDecision.MATCH, 0.95, {}, {}),
+            MatchResult("r2", "t2", MatchDecision.MATCH, 0.94, {}, {}),
+        ]
+        weak_cross_links = [
+            MatchResult("r1", "t2", MatchDecision.REVIEW, 0.55, {}, {}),
+            MatchResult("r2", "t1", MatchDecision.REVIEW, 0.54, {}, {}),
+        ]
+
+        expanded = _expand_greedy_matches(
+            anchors,
+            [*anchors, *weak_cross_links],
+            {
+                "r1": LineString([(0, 0), (50, 0)]),
+                "r2": LineString([(50, 0), (100, 0)]),
+            },
+            {
+                "t1": LineString([(0, 5), (50, 5)]),
+                "t2": LineString([(50, 5), (100, 5)]),
+            },
+            tolerance=5.0,
+            min_confidence=0.5,
+            glue_min_confidence=0.575,
+        )
+
+        assert {(result.ref_id, result.target_id) for result in expanded} == {
+            ("r1", "t1"),
+            ("r2", "t2"),
+        }
+        assert all("group_id" not in result.features for result in expanded)
+
+    def test_corridor_gate_blocks_perpendicular_one_to_n_expansion(self):
+        """A junction touch cannot become 1:N without aligned-name evidence."""
+        ref_geoms = {"r0": LineString([(0, 2), (50, 2)])}
+        target_geoms = {
+            "t1": LineString([(0, 0), (50, 0)]),
+            "t2": LineString([(50, 0), (50, 50)]),
+        }
+        results = [
+            MatchResult("r0", "t1", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r0", "t2", MatchDecision.MATCH, 0.8, {}, {}),
+        ]
+
+        gated = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            contiguity_tolerance=1.0,
+            corridor_aware=True,
+        )
+
+        assert [(result.ref_id, result.target_id) for result in gated] == [("r0", "t1")]
+
+    def test_corridor_gate_blocks_perpendicular_n_to_one_expansion(self):
+        """The same sharp-turn rule applies symmetrically on the ref side."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(50, 0), (50, 50)]),
+        }
+        target_geoms = {"t0": LineString([(0, 2), (50, 2)])}
+        results = [
+            MatchResult("r1", "t0", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r2", "t0", MatchDecision.MATCH, 0.8, {}, {}),
+        ]
+
+        gated = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            contiguity_tolerance=1.0,
+            corridor_aware=True,
+        )
+
+        assert [(result.ref_id, result.target_id) for result in gated] == [("r1", "t0")]
+
+    def test_range_names_require_positive_rule_overlap(self):
+        """Touching a name-rule boundary provides no evidence for the prior name."""
+        names = {
+            "primary": "Main Street",
+            "rules": [
+                {"between": [0.0, 0.5], "value": "Main Street"},
+                {"between": [0.5, 1.0], "value": "Other Street"},
+            ],
+        }
+
+        assert _normalized_names_for_range(names, (0.5, 0.8)) == {"other street"}
+        assert _normalized_names_for_range(names, (0.49, 0.51)) == {
+            "main street",
+            "other street",
+        }
+
+    def test_common_names_parse_values_without_admitting_language_codes(self):
+        """Target dicts and Overture arrays share aliases, never language tags."""
+        target_names = {
+            "primary": "Rue Principale",
+            "common": {"en": "Main Street", "fr": "Rue Principale"},
+        }
+        overture_names = {
+            "primary": "Rue Principale",
+            "common": np.array(
+                [["en", "Main Street"], ["fr", "Rue Principale"]],
+                dtype=object,
+            ),
+        }
+
+        expected = {"rue principale", "main street"}
+        assert _normalized_names(target_names) == expected
+        assert _normalized_names(overture_names) == expected
+        assert "en" not in _normalized_names(overture_names)
+        assert "fr" not in _normalized_names(overture_names)
+
+    def test_range_name_rescue_uses_common_alias_only_on_primary_span(self):
+        """A primary translation is valid on its span, not another LR name's span."""
+        names = {
+            "primary": "Rue Principale",
+            "common": np.array([["en", "Main Street"]], dtype=object),
+            "rules": np.array(
+                [
+                    {"between": [0.0, 0.5], "value": "Rue Principale"},
+                    {"between": [0.5, 1.0], "value": "Rue Secondaire"},
+                ],
+                dtype=object,
+            ),
+        }
+
+        assert _normalized_names_for_range(names, (0.0, 0.4)) == {
+            "rue principale",
+            "main street",
+        }
+        assert _normalized_names_for_range(names, (0.6, 1.0)) == {"rue secondaire"}
+
+    def test_alignment_rescue_accepts_common_name_translation(self):
+        """A scoped Overture common alias can join complementary target spans."""
+        import geopandas as gpd
+
+        reference = gpd.GeoDataFrame(
+            {
+                "id": ["r1", "r2", "connector"],
+                "names": [
+                    {
+                        "primary": "Rue Principale",
+                        "common": np.array([["en", "Main Street"]], dtype=object),
+                        "rules": np.array(
+                            [{"between": [0.0, 1.0], "value": "Rue Principale"}],
+                            dtype=object,
+                        ),
+                    },
+                    {"primary": "Main Street"},
+                    {"primary": "Cross Street"},
+                ],
+                "geometry": [
+                    LineString([(0, 0), (40, 0)]),
+                    LineString([(50, 0), (100, 0)]),
+                    LineString([(40, 0), (50, 0)]),
+                ],
+            },
+            crs="EPSG:32619",
+        )
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t"],
+                "names": [{"primary": "Main Street"}],
+                "geometry": [LineString([(0, 2), (100, 2)])],
+            },
+            crs="EPSG:32619",
+        )
+        candidates = [
+            MatchResult(
+                "r1",
+                "t",
+                MatchDecision.MATCH,
+                0.95,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=0.0,
+                local_end_frac=0.4,
+            ),
+            MatchResult(
+                "r2",
+                "t",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=0.5,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            candidates,
+            reference,
+            target,
+            min_confidence=0.5,
+            contiguity_tolerance=1.0,
+            corridor_aware=True,
+        )
+
+        assert {result.ref_id for result in optimized} == {"r1", "r2"}
+        assert {result.features["match_type"] for result in optimized} == {"N:1"}
+
+    def test_rescue_uses_multi_side_name_for_candidate_range(self):
+        """A name that only touches the target span boundary cannot justify rescue."""
+        import geopandas as gpd
+
+        reference = gpd.GeoDataFrame(
+            {
+                "id": ["r"],
+                "names": [{"primary": "Main Street"}],
+                "geometry": [LineString([(0, 2), (100, 2)])],
+            },
+            crs="EPSG:32619",
+        )
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t1", "t2"],
+                "names": [
+                    {"primary": "Main Street"},
+                    {
+                        "primary": "Other Street",
+                        "rules": [
+                            {"between": [0.0, 0.5], "value": "Main Street"},
+                            {"between": [0.5, 1.0], "value": "Other Street"},
+                        ],
+                    },
+                ],
+                "geometry": [
+                    LineString([(0, 0), (50, 0)]),
+                    LineString([(50, 0), (50, 50)]),
+                ],
+            },
+            crs="EPSG:32619",
+        )
+        candidates = [
+            MatchResult(
+                "r",
+                "t1",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=0.45,
+                local_start_frac=0.0,
+                local_end_frac=1.0,
+            ),
+            MatchResult(
+                "r",
+                "t2",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                gers_start_frac=0.55,
+                gers_end_frac=1.0,
+                local_start_frac=0.5,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            candidates,
+            reference,
+            target,
+            min_confidence=0.5,
+            corridor_aware=True,
+        )
+
+        assert [(result.ref_id, result.target_id) for result in optimized] == [("r", "t1")]
+
+    def test_equal_score_duplicate_alignment_is_order_invariant(self):
+        """A conflicting duplicate row cannot change whether rescue succeeds."""
+        import geopandas as gpd
+
+        reference = gpd.GeoDataFrame(
+            {
+                "id": ["r"],
+                "names": [{"primary": "Main Street"}],
+                "geometry": [LineString([(0, 2), (100, 2)])],
+            },
+            crs="EPSG:32619",
+        )
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t1", "t2", "connector"],
+                "names": [
+                    {"primary": "Main Street"},
+                    {"primary": "Main Street"},
+                    {"primary": "Cross Street"},
+                ],
+                "geometry": [
+                    LineString([(0, 0), (40, 0)]),
+                    LineString([(50, 0), (100, 0)]),
+                    LineString([(40, 0), (50, 0)]),
+                ],
+            },
+            crs="EPSG:32619",
+        )
+        t1 = MatchResult(
+            "r",
+            "t1",
+            MatchDecision.MATCH,
+            0.9,
+            {},
+            {},
+            gers_start_frac=0.0,
+            gers_end_frac=0.4,
+            local_start_frac=0.0,
+            local_end_frac=1.0,
+        )
+        good_t2 = replace(
+            t1,
+            target_id="t2",
+            gers_start_frac=0.5,
+            gers_end_frac=1.0,
+        )
+        conflicting_t2 = replace(t1, target_id="t2")
+
+        outputs = []
+        for duplicates in ((good_t2, conflicting_t2), (conflicting_t2, good_t2)):
+            optimized = optimize_matches_with_grouping(
+                [t1, *duplicates],
+                reference,
+                target,
+                min_confidence=0.5,
+                contiguity_tolerance=1.0,
+                corridor_aware=True,
+            )
+            outputs.append(
+                [
+                    (
+                        result.ref_id,
+                        result.target_id,
+                        result.gers_start_frac,
+                        result.gers_end_frac,
+                    )
+                    for result in optimized
+                ]
+            )
+
+        assert outputs[0] == outputs[1]
+        assert {(ref_id, target_id) for ref_id, target_id, _, _ in outputs[0]} == {
+            ("r", "t1"),
+            ("r", "t2"),
+        }
+        assert next(row for row in outputs[0] if row[1] == "t2")[2:] == (0.5, 1.0)
+
+    def test_alignment_rescue_is_gap_bounded_and_requires_match_confidence(self):
+        """Only strong complementary same-name spans can bridge a short gap."""
+        import geopandas as gpd
+
+        reference = gpd.GeoDataFrame(
+            {
+                "id": ["r1", "r2", "connector"],
+                "names": [
+                    {"primary": "Main Street"},
+                    {"primary": "Main Street"},
+                    {"primary": "Cross Street"},
+                ],
+                "geometry": [
+                    LineString([(0, 0), (40, 0)]),
+                    LineString([(60, 0), (100, 0)]),
+                    LineString([(40, 0), (60, 0)]),
+                ],
+            },
+            crs="EPSG:32619",
+        )
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t0"],
+                "names": [{"primary": "MAIN STREET"}],
+                "geometry": [LineString([(0, 2), (100, 2)])],
+            },
+            crs="EPSG:32619",
+        )
+        results = [
+            MatchResult(
+                "r1",
+                "t0",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=0.0,
+                local_end_frac=0.4,
+            ),
+            MatchResult(
+                "r2",
+                "t0",
+                MatchDecision.MATCH,
+                0.8,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=0.5,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        rescued = optimize_matches_with_grouping(
+            results,
+            reference,
+            target,
+            min_confidence=0.5,
+            corridor_aware=True,
+            alignment_rescue_max_gap_m=15.0,
+        )
+        by_ref = {result.ref_id: result for result in rescued}
+        assert set(by_ref) == {"r1", "r2"}
+        assert all(result.decision == MatchDecision.MATCH for result in rescued)
+
+        not_rescued = optimize_matches_with_grouping(
+            results,
+            reference,
+            target,
+            min_confidence=0.5,
+            corridor_aware=True,
+            alignment_rescue_max_gap_m=5.0,
+        )
+        assert [(result.ref_id, result.target_id) for result in not_rescued] == [("r1", "t0")]
+
+        far_reference = reference.copy()
+        far_reference.loc[far_reference["id"] == "r2", "geometry"] = [
+            LineString([(100, 0), (140, 0)])
+        ]
+        far_not_rescued = optimize_matches_with_grouping(
+            results,
+            far_reference,
+            target,
+            min_confidence=0.5,
+            corridor_aware=True,
+            alignment_rescue_max_gap_m=15.0,
+        )
+        assert [(result.ref_id, result.target_id) for result in far_not_rescued] == [("r1", "t0")]
+
+        weak_results = [results[0], replace(results[1], confidence=0.7)]
+        weak_not_rescued = optimize_matches_with_grouping(
+            weak_results,
+            reference,
+            target,
+            min_confidence=0.5,
+            corridor_aware=True,
+            alignment_rescue_max_gap_m=15.0,
+        )
+        assert [(result.ref_id, result.target_id) for result in weak_not_rescued] == [("r1", "t0")]
+
+    def test_alignment_rescue_long_gap_requires_collinear_continuation(self):
+        """A nearby same-name branch cannot use alignment alone across a long gap."""
+        import geopandas as gpd
+
+        reference = gpd.GeoDataFrame(
+            {
+                "id": ["r1", "r2", "connector"],
+                "names": [
+                    {"primary": "Main Street"},
+                    {"primary": "Main Street"},
+                    {"primary": "Cross Street"},
+                ],
+                "geometry": [
+                    LineString([(0, 0), (40, 0)]),
+                    LineString([(60, 0), (60, 40)]),
+                    LineString([(40, 0), (60, 0)]),
+                ],
+            },
+            crs="EPSG:32619",
+        )
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t0"],
+                "names": [{"primary": "MAIN STREET"}],
+                "geometry": [LineString([(0, 2), (100, 2)])],
+            },
+            crs="EPSG:32619",
+        )
+        results = [
+            MatchResult(
+                "r1",
+                "t0",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=0.0,
+                local_end_frac=0.4,
+            ),
+            MatchResult(
+                "r2",
+                "t0",
+                MatchDecision.MATCH,
+                0.85,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=0.5,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            reference,
+            target,
+            min_confidence=0.5,
+            corridor_aware=True,
+        )
+
+        assert [(result.ref_id, result.target_id) for result in optimized] == [("r1", "t0")]
+
+    def test_alignment_rescue_long_gap_requires_real_connector(self):
+        """Parallel streets cannot bridge a lateral step without intervening topology."""
+        import geopandas as gpd
+
+        reference = gpd.GeoDataFrame(
+            {
+                "id": ["r1", "r2"],
+                "names": [{"primary": "Main Street"}, {"primary": "Main Street"}],
+                "geometry": [
+                    LineString([(0, 0), (40, 0)]),
+                    LineString([(80, 20), (40, 20)]),
+                ],
+            },
+            crs="EPSG:32619",
+        )
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t0"],
+                "names": [{"primary": "MAIN STREET"}],
+                "geometry": [LineString([(0, 2), (100, 2)])],
+            },
+            crs="EPSG:32619",
+        )
+        results = [
+            MatchResult(
+                "r1",
+                "t0",
+                MatchDecision.MATCH,
+                0.95,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=0.0,
+                local_end_frac=0.4,
+            ),
+            MatchResult(
+                "r2",
+                "t0",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=0.5,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            reference,
+            target,
+            min_confidence=0.5,
+            contiguity_tolerance=1.0,
+            corridor_aware=True,
+        )
+
+        assert [(result.ref_id, result.target_id) for result in optimized] == [("r1", "t0")]
+
+    def test_alignment_rescue_rejects_ambiguous_transitive_attachment(self):
+        """Two duplicate tail spans must not attach to a prefix by ID order."""
+        import geopandas as gpd
+
+        reference = gpd.GeoDataFrame(
+            {
+                "id": ["r1", "r2", "r3", "connector_2", "connector_3"],
+                "names": [
+                    {"primary": "Main Street"},
+                    {"primary": "Main Street"},
+                    {"primary": "Main Street"},
+                    {"primary": "Cross Street"},
+                    {"primary": "Cross Street"},
+                ],
+                "geometry": [
+                    LineString([(0, 0), (40, 0)]),
+                    LineString([(60, 10), (100, 10)]),
+                    LineString([(60, -10), (100, -10)]),
+                    LineString([(40, 0), (60, 10)]),
+                    LineString([(40, 0), (60, -10)]),
+                ],
+            },
+            crs="EPSG:32619",
+        )
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t0"],
+                "names": [{"primary": "MAIN STREET"}],
+                "geometry": [LineString([(0, 2), (100, 2)])],
+            },
+            crs="EPSG:32619",
+        )
+        results = [
+            MatchResult(
+                ref_id,
+                "t0",
+                MatchDecision.MATCH,
+                confidence,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=span[0],
+                local_end_frac=span[1],
+            )
+            for ref_id, confidence, span in (
+                ("r1", 0.95, (0.0, 0.4)),
+                ("r2", 0.9, (0.5, 1.0)),
+                ("r3", 0.85, (0.5, 1.0)),
+            )
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            reference,
+            target,
+            min_confidence=0.5,
+            corridor_aware=True,
+        )
+
+        assert [(result.ref_id, result.target_id) for result in optimized] == [("r1", "t0")]
+
+    def test_alignment_rescue_accepts_valid_transitive_corridor(self):
+        """Whole-component validation still permits a complementary A-B-C chain."""
+        import geopandas as gpd
+
+        reference = gpd.GeoDataFrame(
+            {
+                "id": ["r1", "r2", "r3", "connector_12", "connector_23"],
+                "names": [
+                    {"primary": "Main Street"},
+                    {"primary": "Main Street"},
+                    {"primary": "Main Street"},
+                    {"primary": "Cross Street"},
+                    {"primary": "Cross Street"},
+                ],
+                "geometry": [
+                    LineString([(0, 0), (30, 0)]),
+                    LineString([(40, 0), (70, 0)]),
+                    LineString([(80, 0), (110, 0)]),
+                    LineString([(30, 0), (40, 0)]),
+                    LineString([(70, 0), (80, 0)]),
+                ],
+            },
+            crs="EPSG:32619",
+        )
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["t0"],
+                "names": [{"primary": "MAIN STREET"}],
+                "geometry": [LineString([(0, 2), (100, 2)])],
+            },
+            crs="EPSG:32619",
+        )
+        results = [
+            MatchResult(
+                ref_id,
+                "t0",
+                MatchDecision.MATCH,
+                confidence,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=span[0],
+                local_end_frac=span[1],
+            )
+            for ref_id, confidence, span in (
+                ("r1", 0.95, (0.0, 0.3)),
+                ("r2", 0.9, (0.4, 0.7)),
+                ("r3", 0.85, (0.8, 1.0)),
+            )
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            reference,
+            target,
+            min_confidence=0.5,
+            corridor_aware=True,
+        )
+
+        assert {result.ref_id for result in optimized} == {"r1", "r2", "r3"}
+        assert {result.features["match_type"] for result in optimized} == {"N:1"}
+        assert len({result.features["group_id"] for result in optimized}) == 1
+
+    def test_detached_alignment_singleton_is_not_added_without_rescue_evidence(self):
+        """Non-overlap alone cannot attach a detached, unnamed singleton."""
+        ref_geoms = {"r0": LineString([(0, 5), (100, 5)])}
+        target_geoms = {
+            "t1": LineString([(0, 0), (30, 0)]),
+            "t2": LineString([(30, 0), (60, 0)]),
+            "t3": LineString([(80, 0), (100, 0)]),
+        }
+        results = [
+            MatchResult(
+                "r0",
+                target_id,
+                MatchDecision.MATCH,
+                confidence,
+                {},
+                {},
+                gers_start_frac=span[0],
+                gers_end_frac=span[1],
+            )
+            for target_id, confidence, span in (
+                ("t1", 0.95, (0.0, 0.3)),
+                ("t2", 0.9, (0.3, 0.6)),
+                ("t3", 0.6, (0.8, 1.0)),
+            )
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            corridor_aware=True,
+        )
+        by_target = {result.target_id: result for result in optimized}
+
+        assert set(by_target) == {"t1", "t2"}
+
+    def test_target_side_coverage_overlap_demotes_lower_confidence(self):
+        """Two refs cannot both claim the same portion of one target."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(50, 0), (100, 0)]),
+        }
+        target_geoms = {"t0": LineString([(0, 5), (100, 5)])}
+        results = [
+            MatchResult(
+                "r1",
+                "t0",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                local_start_frac=0.0,
+                local_end_frac=0.75,
+            ),
+            MatchResult(
+                "r2",
+                "t0",
+                MatchDecision.MATCH,
+                0.8,
+                {},
+                {},
+                local_start_frac=0.25,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+        )
+        by_ref = {result.ref_id: result for result in optimized}
+        assert by_ref["r1"].decision == MatchDecision.MATCH
+        assert by_ref["r2"].decision == MatchDecision.REVIEW
+        assert by_ref["r2"].features["target_coverage_conflict"] == 1.0
+
+    @pytest.mark.parametrize("side", ["ref", "target"])
+    def test_coverage_review_does_not_cascade_into_compatible_match(self, side):
+        """A demoted middle span cannot block a compatible lower-ranked tail."""
+        spans = (("a", 0.9, 0.0, 0.4), ("b", 0.8, 0.3, 0.7), ("c", 0.7, 0.6, 1.0))
+        if side == "target":
+            results = [
+                MatchResult(
+                    name,
+                    "shared",
+                    MatchDecision.MATCH,
+                    confidence,
+                    {},
+                    {},
+                    local_start_frac=start,
+                    local_end_frac=end,
+                )
+                for name, confidence, start, end in spans
+            ]
+            ref_geoms = {
+                name: LineString([(0, index), (100, index)])
+                for index, (name, _, _, _) in enumerate(spans)
+            }
+            target_geoms = {"shared": LineString([(0, 0), (100, 0)])}
+            key_attr = "ref_id"
+        else:
+            results = [
+                MatchResult(
+                    "shared",
+                    name,
+                    MatchDecision.MATCH,
+                    confidence,
+                    {},
+                    {},
+                    gers_start_frac=start,
+                    gers_end_frac=end,
+                )
+                for name, confidence, start, end in spans
+            ]
+            ref_geoms = {"shared": LineString([(0, 0), (100, 0)])}
+            target_geoms = {
+                name: LineString([(0, index), (100, index)])
+                for index, (name, _, _, _) in enumerate(spans)
+            }
+            key_attr = "target_id"
+
+        validated = _validate_assignment_coverage(results, ref_geoms, target_geoms)
+        decisions = {getattr(result, key_attr): result.decision for result in validated}
+
+        assert decisions == {
+            "a": MatchDecision.MATCH,
+            "b": MatchDecision.REVIEW,
+            "c": MatchDecision.MATCH,
+        }
+        middle = next(result for result in validated if getattr(result, key_attr) == "b")
+        assert middle.features[f"{side}_coverage_conflict"] == 1.0
+
+    def test_equal_confidence_ref_coverage_tie_is_input_order_invariant(self):
+        """Canonical target ID, not row order, wins an equal-score ref conflict."""
+        ref_geoms = {"r0": LineString([(0, 0), (100, 0)])}
+        target_geoms = {
+            "t_a": LineString([(0, 5), (75, 5)]),
+            "t_b": LineString([(25, 5), (100, 5)]),
+        }
+        candidates = [
+            MatchResult(
+                "r0",
+                "t_a",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=0.75,
+            ),
+            MatchResult(
+                "r0",
+                "t_b",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                gers_start_frac=0.25,
+                gers_end_frac=1.0,
+            ),
+        ]
+
+        outcomes = []
+        for ordered in (candidates, list(reversed(candidates))):
+            validated = _validate_assignment_coverage(ordered, ref_geoms, target_geoms)
+            outcomes.append({result.target_id: result.decision for result in validated})
+
+        assert (
+            outcomes[0]
+            == outcomes[1]
+            == {
+                "t_a": MatchDecision.MATCH,
+                "t_b": MatchDecision.REVIEW,
+            }
+        )
+
+    def test_equal_confidence_target_coverage_tie_is_input_order_invariant(self):
+        """Canonical ref ID, not row order, wins an equal-score target conflict."""
+        ref_geoms = {
+            "r_a": LineString([(0, 0), (75, 0)]),
+            "r_b": LineString([(25, 0), (100, 0)]),
+        }
+        target_geoms = {"t0": LineString([(0, 5), (100, 5)])}
+        candidates = [
+            MatchResult(
+                "r_a",
+                "t0",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                local_start_frac=0.0,
+                local_end_frac=0.75,
+            ),
+            MatchResult(
+                "r_b",
+                "t0",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                local_start_frac=0.25,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        outcomes = []
+        for ordered in (candidates, list(reversed(candidates))):
+            validated = _validate_assignment_coverage(ordered, ref_geoms, target_geoms)
+            outcomes.append({result.ref_id: result.decision for result in validated})
+
+        assert (
+            outcomes[0]
+            == outcomes[1]
+            == {
+                "r_a": MatchDecision.MATCH,
+                "r_b": MatchDecision.REVIEW,
+            }
+        )
+
+    def test_target_side_touching_coverage_is_not_a_conflict(self):
+        """Adjacent target intervals that only touch remain valid N:1 assignments."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(50, 0), (100, 0)]),
+        }
+        target_geoms = {"t0": LineString([(0, 5), (100, 5)])}
+        results = [
+            MatchResult(
+                "r1",
+                "t0",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                local_start_frac=0.0,
+                local_end_frac=0.5,
+            ),
+            MatchResult(
+                "r2",
+                "t0",
+                MatchDecision.MATCH,
+                0.8,
+                {},
+                {},
+                local_start_frac=0.5,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+        )
+        assert len(optimized) == 2
+        assert all(result.decision == MatchDecision.MATCH for result in optimized)
 
     def test_preserves_alignment_fractions(self):
         """Group results should preserve original alignment fractions."""
@@ -1137,6 +2393,114 @@ class TestConfidenceDropPrune:
         assert {(r.ref_id, r.target_id) for r in kept} == {("r1", "t1")}
         assert pruned == {("r1", "t2")}
 
+    def test_low_confidence_top_left_as_singleton_is_review(self):
+        """The never-empty backstop retains a weak survivor without auto-accepting it."""
+        rs = [_grp("r1", "t1", 0.68, "g1"), _grp("r1", "t2", 0.51, "g1")]
+
+        kept, pruned = apply_confidence_drop_prune(rs, 0.96)
+
+        assert pruned == {("r1", "t2")}
+        assert len(kept) == 1
+        assert kept[0].decision == MatchDecision.REVIEW
+        assert kept[0].features[PRUNED_SINGLETON_REVIEW_FLAG] == 1.0
+
+    def test_exact_name_orphan_in_review_band_survives_as_review(self):
+        """Pruning preserves the human-labeled Carver-shaped orphan, not its cross-link."""
+        exact_name_features = {
+            "group_id": "g1",
+            "has_name_ref": 1.0,
+            "has_name_target": 1.0,
+            "name_is_generic": 0.0,
+            "name_levenshtein": 1.0,
+            "name_jaro_winkler": 1.0,
+            "name_token_sort": 1.0,
+            "name_soundex": 1.0,
+            "name_metaphone": 1.0,
+        }
+        correct = MatchResult(
+            "carver_ref",
+            "carver_target",
+            MatchDecision.MATCH,
+            0.515528,
+            {},
+            exact_name_features,
+            gers_start_frac=0.27,
+            gers_end_frac=0.997,
+            local_start_frac=0.0,
+            local_end_frac=1.0,
+        )
+        wrong_cross_link = MatchResult(
+            "carver_ref",
+            "townsend_target",
+            MatchDecision.MATCH,
+            0.682759,
+            {},
+            {
+                **exact_name_features,
+                "name_levenshtein": 0.22,
+                "name_jaro_winkler": 0.45,
+                "name_token_sort": 0.37,
+                "name_soundex": 0.0,
+                "name_metaphone": 0.22,
+            },
+            gers_start_frac=0.0,
+            gers_end_frac=0.30,
+            local_start_frac=0.42,
+            local_end_frac=1.0,
+        )
+        service_survivor = _grp("service_ref", "townsend_target", 0.730994, "g1")
+
+        kept, pruned = apply_confidence_drop_prune(
+            [correct, wrong_cross_link, service_survivor],
+            0.96,
+        )
+        by_pair = {(result.ref_id, result.target_id): result for result in kept}
+
+        assert set(by_pair) == {
+            ("carver_ref", "carver_target"),
+            ("service_ref", "townsend_target"),
+        }
+        assert pruned == {("carver_ref", "townsend_target")}
+        assert all(result.decision == MatchDecision.REVIEW for result in kept)
+        assert (
+            by_pair[("carver_ref", "carver_target")].features[PRUNED_SINGLETON_REVIEW_FLAG] == 1.0
+        )
+        assert (
+            by_pair[("service_ref", "townsend_target")].features[PRUNED_SINGLETON_REVIEW_FLAG]
+            == 1.0
+        )
+
+    def test_orphan_rescue_does_not_override_match_band_prune_policy(self):
+        """Exact-name orphan edges above the REVIEW band remain ordinary prunes."""
+        orphan = MatchResult(
+            "r_orphan",
+            "t_orphan",
+            MatchDecision.MATCH,
+            0.85,
+            {},
+            {
+                "group_id": "g1",
+                "has_name_ref": 1.0,
+                "has_name_target": 1.0,
+                "name_is_generic": 0.0,
+                "name_levenshtein": 1.0,
+                "name_jaro_winkler": 1.0,
+                "name_token_sort": 1.0,
+                "name_soundex": 1.0,
+                "name_metaphone": 1.0,
+            },
+            gers_start_frac=0.0,
+            gers_end_frac=1.0,
+            local_start_frac=0.0,
+            local_end_frac=1.0,
+        )
+        survivor = _grp("r_kept", "t_kept", 0.9, "g1")
+
+        kept, pruned = apply_confidence_drop_prune([orphan, survivor], 0.96)
+
+        assert {(result.ref_id, result.target_id) for result in kept} == {("r_kept", "t_kept")}
+        assert pruned == {("r_orphan", "t_orphan")}
+
     def test_never_touches_1to1_matches(self):
         """1:1 matches (no group_id) are outside the prune's scope."""
         rs = [
@@ -1259,6 +2623,62 @@ class TestOptimizerDeterminism:
             )
             digests.add(_canonical_digest(out))
         assert len(digests) == 1, f"input-order sensitive: {len(digests)} distinct outputs"
+
+    def test_independent_group_component_order_is_canonical(self):
+        """Independent group outputs cannot inherit first-candidate order."""
+        import geopandas as gpd
+
+        reference = gpd.GeoDataFrame(
+            {
+                "id": ["r_a", "r_b"],
+                "geometry": [
+                    LineString([(0, 5), (20, 5)]),
+                    LineString([(100, 5), (120, 5)]),
+                ],
+            },
+            crs="EPSG:32619",
+        )
+        target = gpd.GeoDataFrame(
+            {
+                "local_id": ["a1", "a2", "b1", "b2"],
+                "geometry": [
+                    LineString([(0, 0), (10, 0)]),
+                    LineString([(10, 0), (20, 0)]),
+                    LineString([(100, 0), (110, 0)]),
+                    LineString([(110, 0), (120, 0)]),
+                ],
+            },
+            crs="EPSG:32619",
+        )
+        candidates = [
+            MatchResult("r_a", "a1", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r_a", "a2", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r_b", "b1", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r_b", "b2", MatchDecision.MATCH, 0.9, {}, {}),
+        ]
+
+        outputs = []
+        for ordered in (candidates, list(reversed(candidates))):
+            optimized = optimize_matches_with_grouping(
+                ordered,
+                reference,
+                target,
+                min_confidence=0.5,
+                contiguity_tolerance=1.0,
+                corridor_aware=False,
+            )
+            outputs.append([(result.ref_id, result.target_id) for result in optimized])
+
+        assert (
+            outputs[0]
+            == outputs[1]
+            == [
+                ("r_a", "a1"),
+                ("r_a", "a2"),
+                ("r_b", "b1"),
+                ("r_b", "b2"),
+            ]
+        )
 
     @pytest.mark.slow
     def test_grouping_invariant_to_pythonhashseed(self):

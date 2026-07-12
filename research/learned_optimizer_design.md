@@ -102,14 +102,16 @@ Three label sources, in decreasing trust order:
 1. **Curated stitching labels** — `labels/stitching/dataset=*/data.csv`
    (`group_id, dataset_id, selected_edges (JSON list of {ref_id, target_id}),
    match_type, num_refs, num_targets, labeler, labeled_at, session_id,
-   label_semantics, ref_ids, target_ids`). On file today: 183 rows across 9
-   datasets — Boston 117 (35 `brad`, 82 `panel_unanimous_v1`; 112 pair / 5 set),
-   Seattle 46, plus 2–5 each on Bogotá bike, Tunis, Missoula, Singapore roads /
-   footpaths, Flathead, Berlin (the #291-era `panel_unanimous_v3` waves). Of
-   these, ~140 map to current sidecar groups (113 Boston / 27 Seattle per the
-   roadmap; mapping is by edge overlap via
+   label_semantics, ref_ids, target_ids`). On file today: 226 rows across 13
+   datasets (178 pair / 48 set) — Boston 119 (36 `brad`, 82
+   `panel_unanimous_v1`, 1 `panel_unanimous_v3`; 113 pair / 6 set), Seattle 49
+   (22 pair / 27 set), plus 2–9 each across 11 other datasets. The 2026-07-12
+   resolver run emits 953 raw edge-row occurrences from recovered pair labels
+   and retains 821 unique edge rows across 147 adjudication-clean current
+   groups after collision quarantine/deduplication. Mapping is by edge overlap
+   via
    `agent_labeling/stitch_eval.recover_labeled_groups`, robust to `group_id`
-   churn). Only `label_semantics == "pair"` rows produce per-edge keep/drop
+   churn. Only `label_semantics == "pair"` rows produce per-edge keep/drop
    truth; `set` rows (membership-only, #295/#298) contribute membership
    constraints but no edge labels and are excluded from the edge table, as the
    gate already does.
@@ -562,7 +564,7 @@ the eval instrument, extended with LODO splits (§2.5) and the de-anchored slice
 group bootstrap (2000 resamples) for the production comparison. The external
 check is `mbench run crosswalk <ds> --gate` against `mbench/datasets.toml`
 floors (Boston armed: filtered F1 ≥ 0.83, exact ≥ 0.50; decomposition-aware
-baseline 0.9142 / 0.5893 at 112 mapped pair labels; Seattle arms at 30 mapped).
+baseline 0.9120 / 0.5714 at 112 mapped pair labels; Seattle arms at 30 mapped).
 
 ### 6.2 The bar (promotion criterion)
 
@@ -630,7 +632,7 @@ Dependencies flow downward; R1–R3 can interleave with L1–L2.
 
 | # | PR | Depends on | Acceptance criteria |
 |---|---|---|---|
-| **P1** | Candidate parquet sidecar (`<dataset>_candidates.parquet`, §3.2) — stage 2 following #344's `candidate_edges` | — | Schema per §3.2 (uncapped group rows, 83 typed feature cols + §5.5 derivability extras, keys); groups.json byte-identical; stitch gate PASS unchanged; size within estimate on Seattle; flag default-on. **Implemented and Seattle-validated 2026-07-11: 33,246 rows / 18,416 groups / 13.67 MiB.** |
+| **P1** | Candidate parquet sidecar (`<dataset>_candidates.parquet`, §3.2) — stage 2 following #344's `candidate_edges` | — | Schema per §3.2 (uncapped group rows, 83 typed feature cols + §5.5 derivability extras, keys); groups.json byte-identical; stitch gate PASS unchanged; size within estimate on Seattle; flag default-on. **Implemented and revalidated after #424 on 2026-07-12: 18,236 candidate rows / 6,644 groups / 7.42 MiB.** |
 | **L1** | Empty-set label export (unanimous-NONE → `selected_edges=[]`, §2.4a) + eval support for empty truth sets | — | Round-trips through `labels/stitching/` + `stitch_eval` mapping; gate metrics well-defined for empty labels; the 4 known cross-mode groups exported after human confirm |
 | **L2** | De-anchored review mode + 30–50-group unbiased slice (§2.4b) | P1 (UI reads full candidate set) | Slice committed with `deanchored` provenance; render_review_diffs cross-product check clean |
 | **L3** | Targeted cross-mode panel waves (Bogotá bike, SG footpaths) to ≥ 20 reject groups | L1 | ≥ 20 labeled cross-mode groups, held out of training by construction |

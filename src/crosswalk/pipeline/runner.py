@@ -24,7 +24,7 @@ from ..config import (
 from ..filenames import candidates_sidecar_path, extract_version_from_filename, groups_sidecar_path
 from ..matching import MatchDecision, optimize_matches_with_grouping
 from ..matching.optimizer import compute_sliver_candidate_edges
-from ..matching.types import MatchType
+from ..matching.types import MatchResult, MatchType
 from ..resolution import generate_bridge_file, generate_unmatched_report
 from ..utils import ensure_projected_crs
 from ..utils.crs import ProjectionResult
@@ -37,28 +37,64 @@ class PipelineError(Exception):
     pass
 
 
-def _default_model_path() -> Path:
-    """Resolve the model the pipeline scores with when no explicit path is given.
+def _partition_target_decision_ids(
+    matches: list[MatchResult],
+) -> tuple[set[Any], set[Any]]:
+    """Return mutually exclusive MATCH and REVIEW target-id sets.
 
-    A locally trained model (``settings.model_path``) takes precedence; otherwise
-    fall back to the pretrained model shipped inside the package (so a fresh
-    clone / pip install can stitch with zero training). Must stay in lockstep
-    with the fallback in ``score_candidates_from_geodataframes`` — the
-    calibration probe below inspects whichever model actually scores.
+    Optimizer decisions are edge-level, so one target can legitimately have a
+    MATCH edge and a separate REVIEW edge. At target-summary level MATCH takes
+    precedence: that target is published and must not also inflate the review
+    count or reduce the unmatched count.
     """
+    matched = {match.target_id for match in matches if match.decision == MatchDecision.MATCH}
+    review = {
+        match.target_id for match in matches if match.decision == MatchDecision.REVIEW
+    } - matched
+    return matched, review
+
+
+def _default_model_path() -> Path:
+    """Return the configured production model path.
+
+    ``settings.model_path`` defaults to the artifact bundled with the package.
+    ``MATCHER_MODEL_PATH`` is an explicit process-wide override; callers may also
+    pass a per-run path to :func:`_resolve_model_path`.
+    """
+    return Path(settings.model_path)
+
+
+def _resolve_model_path(model_path: str | Path | None = None) -> Path:
+    """Resolve and validate the one model artifact used for a production run.
+
+    There is deliberately no missing-local fallback: the configured default is
+    already the bundled model, so a different ``MATCHER_MODEL_PATH`` or explicit
+    argument is an opt-in whose mistakes must fail loudly instead of silently
+    reverting to another artifact.
+    """
+    active = _default_model_path() if model_path is None else Path(model_path).expanduser()
+    if not active.is_file():
+        raise FileNotFoundError(
+            f"Active ML model not found: {active}. Production defaults to the bundled "
+            "artifact; remove an invalid MATCHER_MODEL_PATH override or pass a valid "
+            "--model-path."
+        )
+    return active
+
+
+def _is_bundled_model_path(model_path: Path) -> bool:
+    """Whether ``model_path`` names the package's lockstep-tested artifact."""
     from ..config import bundled_model_path
 
-    local = settings.model_path
-    return local if local.exists() else bundled_model_path()
+    return model_path.resolve() == bundled_model_path().resolve()
 
 
-def _calibration_active() -> bool:
+def _calibration_active(model_path: str | Path | None = None) -> bool:
     """Whether the pipeline's active model applies isotonic calibration.
 
-    Inspects the same model the default scoring path resolves
-    (``_default_model_path()``: local ``settings.model_path``, else the bundled
-    pretrained model). Short-circuits without loading the model when calibration
-    is globally disabled (``MLMatcher.calibration_active`` can never be True then).
+    Inspects the exact resolved model used by scoring. Short-circuits without
+    loading it when calibration is globally disabled
+    (``MLMatcher.calibration_active`` can never be True then).
     """
     # Short-circuit when calibration is globally disabled: skip the model load
     # (and its I/O) entirely — the answer is unconditionally False.
@@ -67,16 +103,17 @@ def _calibration_active() -> bool:
 
     from ..matching.ml import MLMatcher
 
+    active_model_path = _resolve_model_path(model_path)
     try:
         return MLMatcher(
-            model_path=str(_default_model_path()), allow_version_mismatch=True
+            model_path=str(active_model_path), allow_version_mismatch=True
         ).calibration_active
     except Exception as exc:  # pragma: no cover - defensive; scorer surfaces load errors
         logger.warning(f"Could not determine calibration state: {exc}")
         return False
 
 
-def _effective_glue_min_confidence() -> float:
+def _effective_glue_min_confidence(model_path: str | Path | None = None) -> float:
     """Select the grouping-only glue prune for the pipeline's active model.
 
     The prune (``optimizer_glue_min_confidence``) was validated by #267 against
@@ -85,15 +122,18 @@ def _effective_glue_min_confidence() -> float:
     P(match), so the equivalent operating point is the calibrated image of raw
     0.5 (``settings.optimizer_glue_min_confidence``, ~0.575). An uncalibrated
     model keeps the raw-0.5 point (``settings.optimizer_glue_min_confidence_raw``)
-    so it never silently over-prunes. ``run_pipeline`` always scores with
-    ``settings.model_path``, so that is the model inspected here.
+    so it never silently over-prunes. ``model_path`` is the same resolved
+    artifact that scored the candidates.
     """
-    if _calibration_active():
+    if _calibration_active(model_path):
         return settings.optimizer_glue_min_confidence
     return settings.optimizer_glue_min_confidence_raw
 
 
-def _effective_prune_threshold(dataset_key: str | None) -> float:
+def _effective_prune_threshold(
+    dataset_key: str | None,
+    model_path: str | Path | None = None,
+) -> float:
     """Resolve the confidence-drop prune floor for this run (0 = disabled).
 
     The prune is PER-DATASET OPT-IN via an allowlist: it applies ONLY to datasets
@@ -169,7 +209,7 @@ def _effective_prune_threshold(dataset_key: str | None) -> float:
         )
         return 0.0
 
-    if not _calibration_active():
+    if not _calibration_active(model_path):
         logger.warning(
             "Resolver confidence-drop prune skipped: its operating points are "
             "calibrated-only, but the active model applies no calibration "
@@ -196,7 +236,7 @@ def score_candidates_from_geodataframes(
     ref_class_column: str = CLASS_COLUMN,
     target_class_column: str = CLASS_COLUMN,
     n_jobs: int = -1,
-    model_path: str | None = None,
+    model_path: str | Path | None = None,
     auto_select: bool = False,
     allow_version_mismatch: bool = False,
 ) -> tuple[list, ProjectionResult]:
@@ -217,7 +257,9 @@ def score_candidates_from_geodataframes(
         ref_class_column: Class column in reference
         target_class_column: Class column in target
         n_jobs: Number of parallel jobs (-1 for all cores)
-        model_path: Explicit model path (if None, uses settings.model_path)
+        model_path: Explicit production model path. If None, uses
+            ``settings.model_path`` (bundled by default; ``MATCHER_MODEL_PATH``
+            is the explicit environment override).
         auto_select: If True, auto-select model based on target dataset
 
     Returns:
@@ -226,6 +268,14 @@ def score_candidates_from_geodataframes(
         - projection_result: ProjectionResult with CRS info
     """
     from ..matching.ml import MLMatcher
+
+    # The labeling UI's auto-select flow intentionally resolves its local full /
+    # geometry-only models later from dataset name coverage. Every production
+    # path resolves its artifact exactly once here and fails before doing work if
+    # an explicit override is missing.
+    active_model_path = (
+        None if auto_select and model_path is None else _resolve_model_path(model_path)
+    )
 
     # Project to metric CRS for accurate distances
     projection_result = ensure_projected_crs(reference, target)
@@ -248,32 +298,17 @@ def score_candidates_from_geodataframes(
         return [], projection_result
 
     # Score candidates using ML
-    if model_path:
-        matcher = MLMatcher(model_path=model_path, allow_version_mismatch=allow_version_mismatch)
-    elif auto_select:
+    if active_model_path is None:
         matcher = MLMatcher(auto_select=True)
     else:
-        from ..config import settings as _settings
-
-        # Local trained model takes precedence; else the pretrained model shipped
-        # in the package (fresh clone / pip install stitches with zero training).
-        # Keep this resolution in lockstep with _default_model_path().
-        _model_path = _default_model_path()
-        if _model_path == _settings.model_path:
-            matcher = MLMatcher(
-                model_path=str(_model_path), allow_version_mismatch=allow_version_mismatch
-            )
-        else:
-            if not _model_path.exists():
-                raise FileNotFoundError(
-                    f"ML model not found at {_settings.model_path} and no bundled "
-                    f"model at {_model_path}. Run 'crosswalk train' to train on "
-                    "labeled data."
-                )
-            # The bundled artifact's version lockstep with FEATURE_VERSION is
-            # enforced by CI (tests/unit/test_shipped_model.py), so it is trusted.
-            logger.info(f"Using pretrained model shipped with crosswalk: {_model_path}")
-            matcher = MLMatcher(model_path=str(_model_path), allow_version_mismatch=True)
+        bundled = _is_bundled_model_path(active_model_path)
+        source = "bundled" if bundled else "explicit override"
+        logger.info(f"Using {source} production model: {active_model_path}")
+        matcher = MLMatcher(
+            model_path=str(active_model_path),
+            # The bundled artifact's feature-version lockstep is enforced by CI.
+            allow_version_mismatch=allow_version_mismatch or bundled,
+        )
 
     results = matcher.score_candidates(
         candidates,
@@ -434,7 +469,7 @@ def _compute_candidate_graph_by_group(
         Mapping of ``group_id`` -> candidate edge dicts, each list sorted by
         (ref_id, target_id) for deterministic output.
     """
-    from ..matching.optimizer import find_match_components
+    from ..matching.optimizer import _match_result_rank, find_match_components
 
     pruned_gid_by_pair = pruned_gid_by_pair or {}
     pruned_pairs_to_restore = set(pruned_gid_by_pair)
@@ -466,7 +501,7 @@ def _compute_candidate_graph_by_group(
             continue
         pair = (str(r.ref_id), str(r.target_id))
         prev = best_result_by_pair.get(pair)
-        if prev is None or r.confidence > prev.confidence:
+        if prev is None or _match_result_rank(r) < _match_result_rank(prev):
             best_result_by_pair[pair] = r
 
     missing_owners = sorted(
@@ -503,7 +538,7 @@ def _compute_candidate_graph_by_group(
         for r in comp:
             pair = (str(r.ref_id), str(r.target_id))
             prev = best.get(pair)
-            if prev is None or r.confidence > prev.confidence:
+            if prev is None or _match_result_rank(r) < _match_result_rank(prev):
                 best[pair] = r
         comp_best.append(best)
         for rid, tid in best:
@@ -618,9 +653,9 @@ def _signed_lateral_offset_m(ref_geom, target_geom) -> float:
     return float(sum(signed) / len(signed))
 
 
-def _active_model_hash() -> str:
-    """SHA-256 of the model used by the default stitch scoring path."""
-    path = _default_model_path()
+def _active_model_hash(model_path: str | Path | None = None) -> str:
+    """SHA-256 of the exact model used by this stitch scoring path."""
+    path = _resolve_model_path(model_path)
     digest = hashlib.sha256()
     with path.open("rb") as model_file:
         for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
@@ -633,6 +668,7 @@ def _export_candidates_sidecar(
     groups: list[dict],
     candidate_graph_by_gid: dict[str, list[dict]],
     best_by_pair: dict[tuple[str, str], Any],
+    optimized_by_pair: dict[tuple[str, str], Any],
     output_path: Path,
     reference_proj: gpd.GeoDataFrame,
     target_proj: gpd.GeoDataFrame,
@@ -641,6 +677,7 @@ def _export_candidates_sidecar(
     sliver_pairs_str: set[tuple[str, str]],
     pruned_gid_by_pair: dict[tuple[str, str], str],
     dataset_id: str | None,
+    model_path: str | Path | None = None,
 ) -> Path | None:
     """Persist one typed parquet row for every stage-1 resolver candidate."""
     path = candidates_sidecar_path(output_path)
@@ -651,7 +688,7 @@ def _export_candidates_sidecar(
         return None
 
     from ..features.alignment import create_subline
-    from ..matching.optimizer import PARALLEL_SIBLING_REVIEW_FLAG, compute_group_structure
+    from ..matching.optimizer import compute_group_structure, optimizer_review_reason
 
     ref_geoms = reference_proj.geometry.to_numpy()
     target_geoms = target_proj.geometry.to_numpy()
@@ -703,8 +740,9 @@ def _export_candidates_sidecar(
         return subline if subline is not None else geom
 
     group_by_gid = {str(group["group_id"]): group for group in groups}
-    model_hash = _active_model_hash()
-    calibration_active = _calibration_active()
+    active_model_path = _resolve_model_path(model_path)
+    model_hash = _active_model_hash(active_model_path)
+    calibration_active = _calibration_active(active_model_path)
     rows: list[dict[str, Any]] = []
     for gid in sorted(candidate_graph_by_gid):
         group = group_by_gid.get(gid)
@@ -761,9 +799,14 @@ def _export_candidates_sidecar(
                 optimizer_decision = "pruned"
                 decision_reason = "confidence_drop_prune"
             elif selected:
-                is_demoted = bool(features.get(PARALLEL_SIBLING_REVIEW_FLAG))
-                optimizer_decision = "review" if is_demoted else "selected"
-                decision_reason = "parallel_sibling" if is_demoted else "optimizer_assignment"
+                optimized_result = optimized_by_pair.get(pair)
+                review_reason = (
+                    optimizer_review_reason(optimized_result)
+                    if optimized_result is not None
+                    else None
+                )
+                optimizer_decision = "review" if review_reason else "selected"
+                decision_reason = review_reason or "optimizer_assignment"
             elif selected_elsewhere:
                 optimizer_decision = "selected_elsewhere"
                 decision_reason = "assigned_to_other_group"
@@ -913,6 +956,7 @@ def _export_groups_sidecar(
     pruned_group_ids: dict[tuple[Any, Any], Any] | None = None,
     glue_min_confidence: float | None = None,
     dataset_id: str | None = None,
+    model_path: str | Path | None = None,
 ) -> Path | None:
     """Export a groups sidecar JSON alongside the bridge file.
 
@@ -948,11 +992,12 @@ def _export_groups_sidecar(
     from shapely import to_geojson
 
     from ..matching.optimizer import (
-        PARALLEL_SIBLING_REVIEW_FLAG,
         _geom_lookup,
+        _match_result_rank,
         _name_lookup,
         compute_group_structure,
         group_is_structurally_simple,
+        optimizer_review_reason,
     )
 
     # Structure/corridor analysis needs metric geometry; fall back to the
@@ -976,7 +1021,12 @@ def _export_groups_sidecar(
     # restricted to that sub-group's ref x target id product (so cross-corridor
     # alternatives, which belong to a different sub-group, are not shown here).
     assignment_by_gid: dict[str, list] = defaultdict(list)
+    optimized_by_pair: dict[tuple[str, str], Any] = {}
     for r in optimized:
+        pair = (str(r.ref_id), str(r.target_id))
+        previous = optimized_by_pair.get(pair)
+        if previous is None or _match_result_rank(r) < _match_result_rank(previous):
+            optimized_by_pair[pair] = r
         gid = r.features.get("group_id")
         if gid:
             assignment_by_gid[str(gid)].append(r)
@@ -996,7 +1046,7 @@ def _export_groups_sidecar(
             continue
         pair = (str(r.ref_id), str(r.target_id))
         prev = best_by_pair.get(pair)
-        if prev is None or r.confidence > prev.confidence:
+        if prev is None or _match_result_rank(r) < _match_result_rank(prev):
             best_by_pair[pair] = r
     cands_by_ref: dict[str, list] = defaultdict(list)
     cands_by_tgt: dict[str, list] = defaultdict(list)
@@ -1060,6 +1110,18 @@ def _export_groups_sidecar(
             glue_min_confidence=glue_min_confidence,
             pruned_gid_by_pair=pruned_gid_by_pair,
         )
+        for candidate_edges in candidate_graph_by_gid.values():
+            for edge in candidate_edges:
+                if not edge.get("selected"):
+                    continue
+                pair = (str(edge["ref_id"]), str(edge["target_id"]))
+                optimized_result = optimized_by_pair.get(pair)
+                if optimized_result is None:
+                    continue
+                edge["decision"] = optimized_result.decision.value
+                review_reason = optimizer_review_reason(optimized_result)
+                if review_reason:
+                    edge["review_reason"] = review_reason
 
     # Projected (metric) geometry + name lookups for corridor/structure analysis
     # (contiguity tolerance is in meters, so WGS84 geoms cannot be used here).
@@ -1139,13 +1201,11 @@ def _export_groups_sidecar(
     # closure; it is re-bound at the top of each group iteration below.
     group_owned_pruned: set[tuple[str, str]] = set()
 
-    # Set (per group) of assignment pairs the optimizer demoted MATCH -> REVIEW
-    # (#367 Mode A: contested small-span stub edges, see
-    # ``_contested_small_span_review_pairs`` /
-    # ``optimizer.PARALLEL_SIBLING_REVIEW_FLAG``). Re-bound at the top of each
-    # group iteration below; ``_serialize_edge`` reads it via closure like
-    # ``group_owned_pruned``.
-    group_demoted_pairs: set[tuple[str, str]] = set()
+    # Per-group optimizer REVIEW provenance, keyed by selected assignment pair.
+    # Re-bound at the top of each group iteration; ``_serialize_edge`` reads it
+    # via closure like ``group_owned_pruned``.
+    group_review_reasons: dict[tuple[str, str], str] = {}
+    group_assignment_decisions: dict[tuple[str, str], str] = {}
 
     def _serialize_edge(pair: tuple[str, str], r: Any, struct: dict | None) -> dict:
         """Serialize one candidate edge (selected or rejected) to a sidecar dict.
@@ -1154,9 +1214,8 @@ def _export_groups_sidecar(
         per-edge structure block, and marks ``pruned`` when the pair was dropped
         by the confidence-drop prune AND this group owns it (Task B). ``selected``
         comes from ``struct`` (True iff the pair is in the group's assignment).
-        Sets ``review_reason`` when the optimizer demoted this pair's decision to
-        REVIEW (currently only ``"parallel_sibling"``; additive and absent on
-        every other edge — see #371/#367 Mode A).
+        Sets ``review_reason`` when the optimizer retained this selected pair as
+        REVIEW. The field is additive and absent from non-review edges.
         """
         edge = {
             "ref_id": pair[0],
@@ -1173,8 +1232,10 @@ def _export_groups_sidecar(
             edge.update(struct)
         if pair in group_owned_pruned:
             edge["pruned"] = True
-        if pair in group_demoted_pairs:
-            edge["review_reason"] = "parallel_sibling"
+        if pair in group_assignment_decisions:
+            edge["decision"] = group_assignment_decisions[pair]
+        if pair in group_review_reasons:
+            edge["review_reason"] = group_review_reasons[pair]
         return edge
 
     groups = []
@@ -1189,12 +1250,13 @@ def _export_groups_sidecar(
             group_owned_pruned = pruned_pairs_by_gid.get(str(group_id), set())
         else:
             group_owned_pruned = pruned_pairs_str
-        # Pairs in THIS group's assignment that the optimizer flagged as a
-        # demoted parallel-sibling stub (see ``_serialize_edge`` docstring).
-        group_demoted_pairs = {
-            (str(r.ref_id), str(r.target_id))
+        group_review_reasons = {
+            (str(r.ref_id), str(r.target_id)): reason
             for r in assign
-            if r.features.get(PARALLEL_SIBLING_REVIEW_FLAG)
+            if (reason := optimizer_review_reason(r)) is not None
+        }
+        group_assignment_decisions = {
+            (str(r.ref_id), str(r.target_id)): r.decision.value for r in assign
         }
         ref_ids = sorted({str(r.ref_id) for r in assign})
         target_ids = sorted({str(r.target_id) for r in assign})
@@ -1301,7 +1363,7 @@ def _export_groups_sidecar(
                 if pair in cand_by_pair or pair in all_selected_pairs:
                     continue
                 prev = rej_best.get(pair)
-                if prev is None or r.confidence > prev.confidence:
+                if prev is None or _match_result_rank(r) < _match_result_rank(prev):
                     rej_best[pair] = r
 
             n_rejected_total = len(rej_best)
@@ -1372,14 +1434,18 @@ def _export_groups_sidecar(
                     rejected_edges.append(_serialize_edge(pair, r, {"selected": False}))
                     n_rejected_total += 1
 
-        optimizer_assignment = [
-            {
+        optimizer_assignment = []
+        for r in assign:
+            assignment_edge = {
                 "ref_id": str(r.ref_id),
                 "target_id": str(r.target_id),
                 "confidence": round(float(r.confidence), 4),
+                "decision": r.decision.value,
             }
-            for r in assign
-        ]
+            review_reason = optimizer_review_reason(r)
+            if review_reason:
+                assignment_edge["review_reason"] = review_reason
+            optimizer_assignment.append(assignment_edge)
 
         ref_geometries = {}
         for rid in ref_ids:
@@ -1517,6 +1583,7 @@ def _export_groups_sidecar(
         groups=groups,
         candidate_graph_by_gid=candidate_graph_by_gid,
         best_by_pair=best_by_pair,
+        optimized_by_pair=optimized_by_pair,
         output_path=output_path,
         reference_proj=reference_proj,
         target_proj=target_proj,
@@ -1525,6 +1592,7 @@ def _export_groups_sidecar(
         sliver_pairs_str=sliver_pairs_str,
         pruned_gid_by_pair=pruned_gid_by_pair,
         dataset_id=dataset_id,
+        model_path=model_path,
     )
     sidecar_path.write_text(json.dumps(sidecar, indent=2))
     logger.info(f"Exported {len(groups)} match groups to {sidecar_path}")
@@ -1613,6 +1681,7 @@ def optimize_and_export(
     target_id_column: str = "id",
     progress_callback: Callable[[int], None] | None = None,
     prune_dataset_key: str | None = None,
+    model_path: str | Path | None = None,
 ) -> PipelineResult:
     """Optimize scored candidates, prune, export sidecar, and write outputs.
 
@@ -1640,10 +1709,14 @@ def optimize_and_export(
             name the caller already knows (``crosswalk stitch`` dataset argument,
             factory pair name). NEVER derived from ``output_path`` (#348). None
             means the run has no dataset identity, so the prune is off (logged).
+        model_path: Exact model that produced ``results``. Defaults to the active
+            production setting (bundled unless explicitly overridden) and is
+            reused for calibration-dependent thresholds and sidecar provenance.
 
     Returns:
         PipelineResult with statistics.
     """
+    active_model_path = _resolve_model_path(model_path)
     logger.info(f"  Generated and scored {len(results)} candidates")
 
     if not results:
@@ -1698,7 +1771,7 @@ def optimize_and_export(
     # Step 4: Optimize matches with M:N grouping (resolve conflicts)
     # Grouping allows multiple contiguous segments and supports 1:1, 1:N, N:1, and M:N match types
     # This handles different segmentation schemes and overlapping relationships between datasets
-    glue_min_confidence = _effective_glue_min_confidence()
+    glue_min_confidence = _effective_glue_min_confidence(active_model_path)
     logger.info(
         f"Step 4: Optimizing matches with M:N grouping "
         f"(min_confidence={min_confidence}, glue_min_confidence={glue_min_confidence})..."
@@ -1726,7 +1799,7 @@ def optimize_and_export(
     # sidecar attribute every pruned edge to its group so ``n_pruned`` is exact
     # even for pendant edges whose both endpoints leave the surviving group.
     pruned_group_ids: dict[tuple[Any, Any], Any] = {}
-    prune_threshold = _effective_prune_threshold(prune_dataset_key)
+    prune_threshold = _effective_prune_threshold(prune_dataset_key, active_model_path)
     if prune_threshold > 0:
         from ..matching.optimizer import apply_confidence_drop_prune
 
@@ -1763,6 +1836,7 @@ def optimize_and_export(
         pruned_group_ids=pruned_group_ids,
         glue_min_confidence=glue_min_confidence,
         dataset_id=prune_dataset_key,
+        model_path=active_model_path,
     )
 
     if progress_callback:
@@ -1782,8 +1856,7 @@ def optimize_and_export(
     # Unmatched report
     # Only MATCH decisions count as matched. REVIEW decisions are low-confidence
     # and should appear in unmatched.parquet so they can be labeled/reviewed.
-    matched_target_ids = {m.target_id for m in optimized if m.decision == MatchDecision.MATCH}
-    review_target_ids = {m.target_id for m in optimized if m.decision == MatchDecision.REVIEW}
+    matched_target_ids, review_target_ids = _partition_target_decision_ids(optimized)
     unmatched_path = output_path.parent / "unmatched.parquet"
     generate_unmatched_report(
         target=target,
@@ -1839,6 +1912,7 @@ def run_pipeline(
     screen_tests: list[str] | None = None,
     allow_version_mismatch: bool = False,
     prune_dataset_key: str | None = None,
+    model_path: str | Path | None = None,
 ) -> PipelineResult:
     """Run the full matching pipeline.
 
@@ -1860,10 +1934,14 @@ def run_pipeline(
         prune_dataset_key: Dataset identity for the resolver-prune allowlist
             (see :func:`_effective_prune_threshold`). NEVER derived from
             ``output_path`` (#348). None = no dataset identity, prune off.
+        model_path: Explicit production model artifact. None uses
+            ``settings.model_path`` (bundled by default; ``MATCHER_MODEL_PATH``
+            is the environment override).
 
     Returns:
         PipelineResult with statistics
     """
+    active_model_path = _resolve_model_path(model_path)
     logger.info("=" * 60)
     logger.info("Starting matching pipeline")
     logger.info("=" * 60)
@@ -1896,6 +1974,7 @@ def run_pipeline(
         ref_class_column=ref_class_column,
         target_class_column=target_class_column,
         n_jobs=n_jobs,
+        model_path=active_model_path,
         allow_version_mismatch=allow_version_mismatch,
     )
     # Ensure WGS84 GeoDataFrames for sidecar export (web map needs EPSG:4326).
@@ -1922,6 +2001,7 @@ def run_pipeline(
         target_id_column=target_id_column,
         progress_callback=progress_callback,
         prune_dataset_key=prune_dataset_key,
+        model_path=active_model_path,
     )
 
 

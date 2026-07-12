@@ -87,18 +87,17 @@ def test_shipped_model_loads_via_mlmatcher():
     assert matcher.calibrator is not None
 
 
-def test_pipeline_calibration_probe_sees_bundled_model(tmp_path, monkeypatch):
-    """The calibration probe must inspect the bundled model when no local model exists.
+def test_pipeline_calibration_probe_sees_default_bundled_model(monkeypatch):
+    """The calibration probe must inspect the default bundled model.
 
     Regression guard: the optimizer's glue operating point depends on
-    _calibration_active(). If the probe only looked at settings.model_path, the
-    fresh-clone path (bundled fallback) would score with calibrated confidences
-    but prune at the raw operating point.
+    _calibration_active(). Production now defaults directly to the bundled model
+    rather than silently changing when a local training artifact appears.
     """
     from crosswalk.config import settings
     from crosswalk.pipeline.runner import _calibration_active, _default_model_path
 
-    monkeypatch.setattr(settings, "model_path", tmp_path / "nonexistent.joblib")
+    monkeypatch.setattr(settings, "model_path", bundled_model_path())
     assert _default_model_path() == bundled_model_path()
     if settings.enable_calibration:
         assert _calibration_active() is True

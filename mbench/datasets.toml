@@ -25,8 +25,8 @@ stitch_labels_dir = "../labels/stitching"
 #
 # us_boston_streets baseline (2026-07-12, decomposition-aware pair recovery;
 # 112/113 eligible PAIR labels mapped, with SET labels scored separately):
-# filtered edge-F1 0.9142, filtered exact-match 0.5893, 0 sliver-affected.
-# Floors: F1 0.9142-0.0842 -> 0.83; exact 0.5893-0.0893 -> 0.50 (wider
+# filtered edge-F1 0.9120, filtered exact-match 0.5714, 0 sliver-affected.
+# Floors: F1 0.9120-0.0820 -> 0.83; exact 0.5714-0.0714 -> 0.50 (wider
 # margin: per-group exact-match is the noisier metric). Set labels are scored
 # separately (membership/boundary/coverage) and are NOT gated: only 6 mapped set
 # labels exist, far below any sensible arming base — no set floor is invented

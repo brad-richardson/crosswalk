@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 
 import pandas as pd
+import pytest
 
 from crosswalk.resolver.extract import (
     KEY_COLUMNS,
@@ -487,6 +488,112 @@ def test_key_columns_stable_across_paths():
     assert list(KEY_COLUMNS) == ["dataset_id", "group_id", "ref_id", "target_id"]
 
 
+def test_identical_duplicate_label_truth_is_deduplicated_before_parquet_enrichment():
+    """Historical labels recovering to one current group may repeat its entire
+    candidate universe. Equal truth is safe to dedupe, and collision attrs must
+    survive the stage-2 parquet merges."""
+    grp = _group_cg(
+        "g1",
+        [
+            _cand("A", "T", 0.99, selected=True),
+            _cand("B", "T", 0.40, selected=False),
+        ],
+        ref_ids=["A", "B"],
+        target_ids=["T"],
+    )
+    human = _labels(
+        [
+            _label_row("historical-1", [("A", "T")]),
+            _label_row("historical-2", [("A", "T")]),
+        ]
+    )
+    candidates = pd.DataFrame(
+        [
+            {"group_id": "g1", "ref_id": "A", "target_id": "T", "typed_value": 1.0},
+            {"group_id": "g1", "ref_id": "B", "target_id": "T", "typed_value": 2.0},
+        ]
+    )
+
+    df = build_edge_table([grp], human, "ds", candidates_df=candidates)
+
+    assert len(df) == 2
+    assert not df.duplicated(subset=list(KEY_COLUMNS)).any()
+    assert list(df.sort_values("ref_id")["typed_value"]) == [1.0, 2.0]
+    assert set(df["historical_human_group_ids"]) == {'["historical-1", "historical-2"]'}
+    stats = df.attrs["build_stats"]
+    assert stats["raw_rows"] == 4
+    assert stats["duplicate_rows"] == 2
+    assert stats["duplicate_keys"] == 2
+    assert stats["conflicting_keys"] == 0
+    assert stats["deduplicated_rows"] == 2
+    assert stats["quarantined_groups"] == 0
+    assert stats["quarantined_rows"] == 0
+    assert stats["candidate_parquet_enriched"] == 2
+
+
+def test_duplicate_candidate_within_one_historical_label_fails_closed():
+    """A sidecar duplicate is not cross-label consensus and must not disappear."""
+    grp = _group_cg(
+        "g1",
+        [
+            _cand("A", "T", 0.99, selected=True),
+            _cand("A", "T", 0.99, selected=True),
+        ],
+        ref_ids=["A"],
+        target_ids=["T"],
+    )
+    human = _labels([_label_row("historical-1", [("A", "T")])])
+
+    with pytest.raises(ValueError, match="repeat within one historical human_group_id"):
+        build_edge_table([grp], human, "ds")
+
+
+def test_conflicting_duplicate_labels_quarantine_the_entire_current_group():
+    """Contradictory truth on any repeated candidate key makes every row from
+    that current group ineligible; an unrelated group remains evaluable."""
+    conflicting_group = _group_cg(
+        "g1",
+        [
+            _cand("A", "T", 0.99, selected=True),
+            _cand("B", "T", 0.40, selected=False),
+            _cand("X", "T", 0.30, selected=False),
+        ],
+        ref_ids=["A", "B", "X"],
+        target_ids=["T"],
+    )
+    unaffected_group = _group_cg(
+        "g2",
+        [_cand("C", "U", 0.95, selected=True)],
+        ref_ids=["C"],
+        target_ids=["U"],
+    )
+    conflicting_group["rejected_edges"] = [_edge("D", "T", 0.2, selected=False)]
+    human = _labels(
+        [
+            _label_row("historical-a", [("A", "T"), ("D", "T")]),
+            _label_row("historical-b", [("B", "T"), ("D", "T")]),
+            _label_row("historical-c", [("C", "U")]),
+        ]
+    )
+
+    df = build_edge_table([conflicting_group, unaffected_group], human, "ds")
+
+    assert set(df["group_id"]) == {"g2"}
+    assert list(df["keep"]) == [1]
+    stats = df.attrs["build_stats"]
+    assert stats["raw_rows"] == 7
+    assert stats["duplicate_rows"] == 3
+    assert stats["duplicate_keys"] == 3
+    assert stats["conflicting_keys"] == 2
+    assert stats["quarantined_groups"] == 1
+    assert stats["quarantined_rows"] == 6
+    assert stats["deduplicated_rows"] == 0
+    assert stats["rows"] == 1
+    assert stats["legacy_known_omission_occurrences"] == 2
+    assert stats["legacy_known_omission_unique_raw_keys"] == 1
+    assert stats["legacy_known_omission_unique_retained_keys"] == 0
+
+
 def test_candidate_graph_featurize_over_full_universe():
     """featurize runs over the fuller candidate universe and produces every
     declared feature column, with the non-selected competitor as the group min."""
@@ -627,6 +734,10 @@ def test_human_selected_outside_candidate_graph_counted():
     assert stats["human_selected_outside_candidate_graph"] == 1
     assert stats["human_selected_outside_candidate_graph_clean"] == 1
     assert stats["human_selected_outside_candidate_graph_split"] == 0
+    assert stats["legacy_known_omission_occurrences"] == 1
+    assert stats["legacy_known_omission_unique_raw_keys"] == 1
+    assert stats["legacy_known_omission_unique_retained_keys"] == 1
+    assert stats["legacy_known_omission_occurrences_clean"] == 1
 
 
 def test_human_selected_outside_candidate_graph_split_counted_separately():
@@ -654,3 +765,30 @@ def test_human_selected_outside_candidate_graph_split_counted_separately():
     assert stats["human_selected_outside_candidate_graph"] == 1
     assert stats["human_selected_outside_candidate_graph_clean"] == 0
     assert stats["human_selected_outside_candidate_graph_split"] == 1
+    assert stats["legacy_known_omission_occurrences_split"] == 1
+    assert stats["legacy_known_omission_unique_raw_keys_split"] == 1
+    assert stats["legacy_known_omission_unique_retained_keys_split"] == 1
+
+
+def test_legacy_known_omissions_separate_occurrences_from_unique_keys():
+    grp = _group_cg(
+        "g1",
+        [_cand("A", "T", 0.99, selected=True)],
+        ref_ids=["A"],
+        target_ids=["T"],
+        edges=[_edge("A", "T", 0.99)],
+    )
+    grp["rejected_edges"] = [_edge("B", "T", 0.2, selected=False)]
+    human = _labels(
+        [
+            _label_row("historical-1", [("A", "T"), ("B", "T")]),
+            _label_row("historical-2", [("A", "T"), ("B", "T")]),
+        ]
+    )
+
+    df = build_edge_table([grp], human, "ds")
+
+    stats = df.attrs["build_stats"]
+    assert stats["legacy_known_omission_occurrences"] == 2
+    assert stats["legacy_known_omission_unique_raw_keys"] == 1
+    assert stats["legacy_known_omission_unique_retained_keys"] == 1

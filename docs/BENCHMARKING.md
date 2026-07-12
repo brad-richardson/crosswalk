@@ -69,8 +69,9 @@ as the directory containing `src/crosswalk`). Running via `uv run` from the repo
 root means:
 
 - matcher does not need to be on your `PATH`, and
-- matcher's relative model path (`data/models/matcher_model_combined.joblib`)
-  resolves correctly regardless of where you launched `mbench`.
+- dataset/config discovery has a stable project root regardless of where you
+  launched `mbench`. Production scoring itself uses the packaged bundled model
+  unless an explicit model override is configured.
 
 The adapter passes the **dataset name** as the positional argument (alongside the
 explicit `-r`/`-t` paths mbench resolved). This matters for the gate: crosswalk's
@@ -166,7 +167,10 @@ expected, and non-integer counts are config errors, and the retention floors
 (`min_mapping_rate` / `min_labels_total`) require `armed = true` since they
 protect an established baseline. Sidecars are schema-checked before use: the
 root must contain a nonempty `groups` list with unique nonblank `group_id`
-values and nonempty, structurally valid `edges` lists. Stitch labels
+values and nonempty, structurally valid `edges` lists. Optional recovery
+sources are strict too: when `candidate_edges` or `rejected_edges` fields are
+present, they must be lists of structurally valid edges (an explicit empty list
+is valid; malformed falsey values are not treated as missing). Stitch labels
 are also strict: only literal JSON `[]` means reject-all; null, blank,
 malformed, wrong-shape, or incomplete `selected_edges` values fail evaluation,
 with the offending row identified by index, `group_id`, and labeler.
@@ -215,7 +219,7 @@ baseline and `min_labels_total = 106` (~89% retention of its 119 curated
 labels: 113 pair + 6 set). As of
 2026-07-12, `us_boston_streets`
 is armed (112 mapped pair labels, floors F1 0.83 / exact 0.50, baseline
-F1 0.9142 / exact 0.5893; its 6 set labels are reported separately and not
+F1 0.9120 / exact 0.5714; its 6 set labels are reported separately and not
 gated); `us_seattle_sidewalks` (20 mapped pair groups, all panel-labeled) has no
 gate block configured yet.
 

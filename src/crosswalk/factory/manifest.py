@@ -34,27 +34,44 @@ MONSTER_EDGE_THRESHOLD = 20
 
 
 def file_fingerprint(path: Path) -> dict[str, Any]:
-    """Cheap, deterministic fingerprint of an input file (size + mtime).
+    """Content-addressed fingerprint of one factory input file.
 
-    Mirrors the labeling cache's model-fingerprint philosophy: fast (no content
-    hash of large parquets) and stable on a given box, where raw data is fetched
-    rather than git-tracked. Returns a dict so it is human-readable in the manifest.
+    Size/mtime remain useful human-readable provenance, but SHA-256 prevents a
+    metadata-preserving replacement (for example ``cp -p`` or ``rsync -t``)
+    from reusing scored candidates produced from different geometry bytes.
     """
     st = path.stat()
-    return {"name": path.name, "size": st.st_size, "mtime_ns": st.st_mtime_ns}
-
-
-def model_fingerprint() -> dict[str, Any]:
-    """Fingerprint the active ML model file (``settings.model_path``)."""
-    model_path = Path(settings.model_path)
-    if not model_path.exists():
-        return {"name": str(model_path), "present": False}
-    st = model_path.stat()
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
     return {
-        "name": model_path.name,
+        "name": path.name,
+        "size": st.st_size,
+        "mtime_ns": st.st_mtime_ns,
+        "sha256": digest.hexdigest(),
+    }
+
+
+def model_fingerprint(model_path: str | Path | None = None) -> dict[str, Any]:
+    """Fingerprint the exact production model used for factory scoring.
+
+    ``sha256`` is the cache identity and joins directly to the typed candidate
+    sidecar's ``model_hash``. Path/stat fields remain useful provenance, but are
+    deliberately excluded from :func:`compute_score_key`: moving identical
+    model bytes between checkouts must not invalidate a reusable score cache.
+    """
+    from ..pipeline.runner import _active_model_hash, _resolve_model_path
+
+    active_model_path = _resolve_model_path(model_path)
+    st = active_model_path.stat()
+    return {
+        "name": active_model_path.name,
+        "path": str(active_model_path.resolve()),
         "present": True,
         "size": st.st_size,
         "mtime_ns": st.st_mtime_ns,
+        "sha256": _active_model_hash(active_model_path),
     }
 
 
@@ -63,23 +80,56 @@ def settings_snapshot() -> dict[str, Any]:
 
     This is recorded in the manifest for provenance AND hashed into
     ``optimize_key``. Includes the resolver-prune allowlist STATE so a change to
-    the tuned thresholds re-triggers a run. ``model_path`` / FEATURE_VERSION are
-    tracked separately (they belong to ``score_key``).
+    the tuned thresholds re-triggers a run. The resolved production model and
+    FEATURE_VERSION are tracked separately (they belong to ``score_key``).
     """
-    from ..config import DEFAULT_SNAP_TOLERANCE_M
+    from ..config import (
+        DEFAULT_SNAP_TOLERANCE_M,
+        MAX_ALIGNMENT_OVERLAP_M,
+        OPTIMIZER_ALIGNMENT_RESCUE_MAX_ENDPOINT_GAP_M,
+        OPTIMIZER_ALIGNMENT_RESCUE_MAX_GAP_M,
+        OPTIMIZER_VERSION,
+        SLIVER_ABS_OVERLAP_M,
+        SLIVER_SPAN_THRESHOLD,
+    )
 
     return {
+        # Algorithm token: settings below capture runtime knobs, while this
+        # invalidates caches for code-path/selection changes with no knob.
+        "optimizer_version": OPTIMIZER_VERSION,
+        # Scoring settings are recorded here for one complete decision snapshot.
+        # ``build_keys`` additionally folds the score-shaping subset into
+        # ``score_key`` so reoptimize cannot reuse probabilities/decisions made
+        # under another calibration or scoring threshold.
+        "scoring_match_threshold": settings.scoring_match_threshold,
+        "scoring_review_threshold": settings.scoring_review_threshold,
         "bridge_min_confidence": settings.bridge_min_confidence,
         "enable_calibration": settings.enable_calibration,
         "enable_score_propagation": settings.enable_score_propagation,
+        "score_propagation_rounds": settings.score_propagation_rounds,
+        "score_propagation_alpha": settings.score_propagation_alpha,
+        "score_propagation_beta": settings.score_propagation_beta,
+        "score_propagation_damping": settings.score_propagation_damping,
+        "score_propagation_delta_cap": settings.score_propagation_delta_cap,
+        "score_propagation_junction_m": settings.score_propagation_junction_m,
+        "score_propagation_boost_only": settings.score_propagation_boost_only,
+        "optimizer_match_threshold": settings.optimizer_match_threshold,
+        "optimizer_review_threshold": settings.optimizer_review_threshold,
+        "optimizer_memory_limit_gb": settings.optimizer_memory_limit_gb,
         "optimizer_corridor_aware": settings.optimizer_corridor_aware,
         "optimizer_corridor_max_turn_deg": settings.optimizer_corridor_max_turn_deg,
         "optimizer_glue_min_confidence": settings.optimizer_glue_min_confidence,
         "optimizer_glue_min_confidence_raw": settings.optimizer_glue_min_confidence_raw,
-        "optimizer_review_threshold": settings.optimizer_review_threshold,
         # The optimizer's contiguity tolerance is the module constant, not the
         # settings.snap_tolerance_m field — snapshot what the optimizer reads.
         "contiguity_tolerance_m": DEFAULT_SNAP_TOLERANCE_M,
+        "optimizer_alignment_rescue_max_gap_m": OPTIMIZER_ALIGNMENT_RESCUE_MAX_GAP_M,
+        "optimizer_alignment_rescue_max_endpoint_gap_m": (
+            OPTIMIZER_ALIGNMENT_RESCUE_MAX_ENDPOINT_GAP_M
+        ),
+        "optimizer_max_alignment_overlap_m": MAX_ALIGNMENT_OVERLAP_M,
+        "optimizer_sliver_span_threshold": SLIVER_SPAN_THRESHOLD,
+        "optimizer_sliver_abs_overlap_m": SLIVER_ABS_OVERLAP_M,
         "stitch_export_max_assignment_components": settings.stitch_export_max_assignment_components,
         "stitch_export_soft_max_edges": settings.stitch_export_soft_max_edges,
         "stitch_export_backstop_max_edges": settings.stitch_export_backstop_max_edges,
@@ -105,6 +155,7 @@ def compute_score_key(
     buffer_distance_m: float,
     method: str = "xgboost",
     cache_schema_version: int | None = None,
+    scoring_settings: dict[str, Any] | None = None,
 ) -> str:
     """Hash of everything that changes the scored candidates (or their on-disk form).
 
@@ -114,15 +165,30 @@ def compute_score_key(
     """
     from .scored_cache import SCORED_CACHE_SCHEMA_VERSION
 
+    input_hashes: dict[str, str] = {}
+    for role, fingerprint in (("reference", ref_fp), ("target", target_fp)):
+        sha256 = fingerprint.get("sha256")
+        if not sha256:
+            raise ValueError(f"{role} fingerprint must include a nonblank sha256")
+        input_hashes[role] = str(sha256)
+    model_sha256 = model_fp.get("sha256")
+    if not model_sha256:
+        raise ValueError("model fingerprint must include a nonblank sha256")
+
     return _stable_hash(
         {
-            "ref": ref_fp,
-            "target": target_fp,
-            "model": model_fp,
+            # Content identity only: input paths/stat metadata remain manifest
+            # provenance and do not make an identical copied dataset stale.
+            "inputs": input_hashes,
+            # Content-address the model. ``path``/size/mtime are manifest
+            # provenance only and must not make caches checkout-local or allow
+            # same-size/restored-mtime replacements to masquerade as identical.
+            "model": {"sha256": str(model_sha256)},
             "feature_version": FEATURE_VERSION,
             "data_version": DATA_VERSION,
             "buffer_distance_m": buffer_distance_m,
             "method": method,
+            "scoring_settings": dict(scoring_settings or {}),
             "cache_schema_version": (
                 cache_schema_version
                 if cache_schema_version is not None

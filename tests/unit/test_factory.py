@@ -8,11 +8,14 @@ and deterministic.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 
 import pandas as pd
 import pytest
 
+from crosswalk.config import bundled_model_path, settings
 from crosswalk.factory import discover_pairs, resolve_release
 from crosswalk.factory.delta import compute_delta
 from crosswalk.factory.discovery import DatasetPair, read_release_from_meta
@@ -22,10 +25,13 @@ from crosswalk.factory.manifest import (
     compute_optimize_key,
     compute_score_key,
     file_fingerprint,
+    model_fingerprint,
+    settings_snapshot,
 )
 from crosswalk.factory.runner import FactoryPaths, _normalize_outputs, build_keys, is_up_to_date
 from crosswalk.factory.scored_cache import read_scored_cache, write_scored_cache
 from crosswalk.matching.types import MatchDecision, MatchResult
+from crosswalk.pipeline import runner
 
 
 # --------------------------------------------------------------------------
@@ -106,9 +112,9 @@ def test_resolve_release_precedence(tmp_path):
 # --------------------------------------------------------------------------
 def test_score_key_ignores_optimize_settings(tmp_path):
     """score_key must change with inputs/model/buffer, not optimize settings."""
-    ref_fp = {"name": "r", "size": 1, "mtime_ns": 10}
-    tgt_fp = {"name": "t", "size": 2, "mtime_ns": 20}
-    model_fp = {"name": "m", "size": 3, "mtime_ns": 30}
+    ref_fp = {"name": "r", "size": 1, "mtime_ns": 10, "sha256": "r" * 64}
+    tgt_fp = {"name": "t", "size": 2, "mtime_ns": 20, "sha256": "t" * 64}
+    model_fp = {"name": "m", "size": 3, "mtime_ns": 30, "sha256": "a" * 64}
 
     k1 = compute_score_key(ref_fp, tgt_fp, model_fp, 75.0)
     k2 = compute_score_key(ref_fp, tgt_fp, model_fp, 75.0)
@@ -117,11 +123,26 @@ def test_score_key_ignores_optimize_settings(tmp_path):
     # Different buffer -> different score_key
     assert compute_score_key(ref_fp, tgt_fp, model_fp, 50.0) != k1
     # Different input fingerprint -> different score_key
-    assert compute_score_key({**ref_fp, "size": 999}, tgt_fp, model_fp, 75.0) != k1
+    assert compute_score_key({**ref_fp, "sha256": "x" * 64}, tgt_fp, model_fp, 75.0) != k1
     # Different method -> different score_key
     assert compute_score_key(ref_fp, tgt_fp, model_fp, 75.0, method="other") != k1
     # Different cache schema version -> different score_key (layout invalidation)
     assert compute_score_key(ref_fp, tgt_fp, model_fp, 75.0, cache_schema_version=999) != k1
+
+    # Model location/stat fields are provenance, not cache identity.
+    relocated_model_fp = {
+        **model_fp,
+        "path": "/another/checkout/model.joblib",
+        "size": 999,
+        "mtime_ns": 999,
+    }
+    assert compute_score_key(ref_fp, tgt_fp, relocated_model_fp, 75.0) == k1
+    assert compute_score_key(ref_fp, tgt_fp, {**model_fp, "sha256": "b" * 64}, 75.0) != k1
+
+    with pytest.raises(ValueError, match="sha256"):
+        compute_score_key(ref_fp, tgt_fp, {"name": "unverifiable"}, 75.0)
+    with pytest.raises(ValueError, match="reference fingerprint"):
+        compute_score_key({"name": "unverifiable"}, tgt_fp, model_fp, 75.0)
 
 
 def test_optimize_and_full_key(tmp_path):
@@ -145,20 +166,83 @@ def test_settings_snapshot_covers_decision_knobs():
     """Every optimize-phase decision knob must be in the snapshot (else a change
     to it would wrongly skip via full_key). optimizer_review_threshold is the one
     the adversarial review caught missing."""
-    from crosswalk.factory.manifest import settings_snapshot
-
     snap = settings_snapshot()
     for knob in (
+        "optimizer_version",
+        "scoring_match_threshold",
+        "scoring_review_threshold",
+        "enable_calibration",
+        "enable_score_propagation",
+        "score_propagation_rounds",
+        "score_propagation_alpha",
+        "score_propagation_beta",
+        "score_propagation_damping",
+        "score_propagation_delta_cap",
+        "score_propagation_junction_m",
+        "score_propagation_boost_only",
+        "optimizer_match_threshold",
         "optimizer_review_threshold",
+        "optimizer_memory_limit_gb",
+        "optimizer_corridor_aware",
+        "optimizer_corridor_max_turn_deg",
         "bridge_min_confidence",
         "optimizer_glue_min_confidence",
+        "optimizer_glue_min_confidence_raw",
+        "optimizer_alignment_rescue_max_gap_m",
+        "optimizer_alignment_rescue_max_endpoint_gap_m",
+        "optimizer_max_alignment_overlap_m",
+        "optimizer_sliver_span_threshold",
+        "optimizer_sliver_abs_overlap_m",
         "resolver_prune_enabled",
         "resolver_prune_overrides",
         "contiguity_tolerance_m",
+        "stitch_export_max_assignment_components",
+        "stitch_export_soft_max_edges",
+        "stitch_export_backstop_max_edges",
+        "stitch_persist_rejected_edges",
+        "stitch_rejected_edges_max_per_group",
         "stitch_persist_candidate_graph",
         "stitch_persist_candidates",
     ):
         assert knob in snap, f"{knob} missing from settings_snapshot()"
+
+
+@pytest.mark.parametrize(
+    ("setting_name", "replacement"),
+    [
+        ("optimizer_match_threshold", 0.999),
+        ("optimizer_memory_limit_gb", 0.125),
+        ("score_propagation_alpha", 0.123),
+    ],
+)
+def test_optimize_key_changes_with_runtime_decision_settings(
+    monkeypatch,
+    setting_name,
+    replacement,
+):
+    before = compute_optimize_key(settings_snapshot())
+    monkeypatch.setattr(settings, setting_name, replacement)
+    assert compute_optimize_key(settings_snapshot()) != before
+
+
+@pytest.mark.parametrize(
+    ("constant_name", "replacement"),
+    [
+        ("OPTIMIZER_VERSION", "test-version"),
+        ("OPTIMIZER_ALIGNMENT_RESCUE_MAX_GAP_M", 14.25),
+        ("OPTIMIZER_ALIGNMENT_RESCUE_MAX_ENDPOINT_GAP_M", 24.25),
+    ],
+)
+def test_optimize_key_changes_with_algorithm_contract_constants(
+    monkeypatch,
+    constant_name,
+    replacement,
+):
+    import crosswalk.config as config_module
+
+    before = compute_optimize_key(settings_snapshot())
+    monkeypatch.setattr(config_module, constant_name, replacement)
+    assert compute_optimize_key(settings_snapshot()) != before
 
 
 def test_is_up_to_date(tmp_path):
@@ -416,6 +500,76 @@ def test_file_fingerprint(tmp_path):
     assert fp["name"] == "x.parquet"
     assert fp["size"] == 5
     assert "mtime_ns" in fp
+    assert fp["sha256"] == hashlib.sha256(b"hello").hexdigest()
+
+
+def test_input_content_replacement_invalidates_factory_fingerprint(tmp_path):
+    """Same-size input bytes with restored mtime must not reuse scored candidates."""
+    input_path = tmp_path / "input.parquet"
+    input_path.write_bytes(b"AAAA")
+    original_stat = input_path.stat()
+    first = file_fingerprint(input_path)
+
+    input_path.write_bytes(b"BBBB")
+    os.utime(input_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    second = file_fingerprint(input_path)
+
+    assert first["size"] == second["size"]
+    assert first["mtime_ns"] == second["mtime_ns"]
+    assert first["sha256"] != second["sha256"]
+
+
+def test_factory_build_keys_fingerprints_explicit_active_model(tmp_path):
+    pair = _make_triple(tmp_path, "xx_test_roads")
+    model = tmp_path / "custom_model.joblib"
+    model.write_bytes(b"custom")
+
+    keys = build_keys(pair, 75.0, model_path=model)
+
+    assert keys["model"]["path"] == str(model.resolve())
+    assert keys["model"]["name"] == model.name
+    assert keys["model"]["present"] is True
+    assert keys["model"]["sha256"] == runner._active_model_hash(model)
+
+
+def test_model_content_replacement_invalidates_factory_score_key(tmp_path):
+    """Same-size bytes with a restored mtime must not reuse scored candidates."""
+    model = tmp_path / "model.joblib"
+    model.write_bytes(b"AAAA")
+    original_stat = model.stat()
+    first = model_fingerprint(model)
+    first_key = compute_score_key(
+        {"name": "ref", "size": 1, "mtime_ns": 1, "sha256": "r" * 64},
+        {"name": "target", "size": 1, "mtime_ns": 1, "sha256": "t" * 64},
+        first,
+        75.0,
+    )
+
+    model.write_bytes(b"BBBB")
+    os.utime(model, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    second = model_fingerprint(model)
+    second_key = compute_score_key(
+        {"name": "ref", "size": 1, "mtime_ns": 1, "sha256": "r" * 64},
+        {"name": "target", "size": 1, "mtime_ns": 1, "sha256": "t" * 64},
+        second,
+        75.0,
+    )
+
+    assert first["size"] == second["size"]
+    assert first["mtime_ns"] == second["mtime_ns"]
+    assert first["sha256"] != second["sha256"]
+    assert first_key != second_key
+
+
+def test_scoring_settings_invalidate_scored_cache_key(tmp_path, monkeypatch):
+    pair = _make_triple(tmp_path, "xx_test_roads")
+    model = tmp_path / "model.joblib"
+    model.write_bytes(b"model")
+    before = build_keys(pair, 75.0, model_path=model)["score_key"]
+
+    monkeypatch.setattr(settings, "scoring_match_threshold", 0.987)
+
+    assert build_keys(pair, 75.0, model_path=model)["score_key"] != before
 
 
 def test_run_dataset_wires_prune_dataset_key(tmp_path, monkeypatch):
@@ -462,3 +616,4 @@ def test_run_dataset_wires_prune_dataset_key(tmp_path, monkeypatch):
     # dataset name reached optimize_and_export before we short-circuited.
     assert result["status"] == "failed"
     assert captured["prune_dataset_key"] == "us_boston_streets"
+    assert captured["model_path"] == bundled_model_path()

@@ -133,13 +133,15 @@ The Overture release identifier is read from the segments file's `.meta.yaml`
   "method": "xgboost",
 
   // Provenance / staleness inputs
-  "inputs": { "reference": {name,size,mtime_ns}, "target": {...}, "connectors": {...} },
-  "model":  { "name", "present", "size", "mtime_ns" },
+  "inputs": { "reference": {name,size,mtime_ns,sha256}, "target": {...}, "connectors": {...} },
+  "model":  { "name", "path", "present", "size", "mtime_ns", "sha256" },
   "settings_snapshot": {              // optimizer/prune/export settings + prune allowlist STATE
-    "bridge_min_confidence", "enable_calibration", "enable_score_propagation",
+    "optimizer_version", "bridge_min_confidence", "enable_calibration",
+    "enable_score_propagation", "score_propagation_*",
+    "optimizer_match_threshold", "optimizer_review_threshold",
     "optimizer_corridor_aware", "optimizer_corridor_max_turn_deg",
     "optimizer_glue_min_confidence", "optimizer_glue_min_confidence_raw",
-    "optimizer_review_threshold", "contiguity_tolerance_m",
+    "optimizer_alignment_rescue_*", "contiguity_tolerance_m",
     "stitch_export_*", "stitch_persist_rejected_edges",
     "stitch_rejected_edges_max_per_group",
     "resolver_prune_enabled", "resolver_prune_overrides"   // the tuned allowlist
@@ -166,17 +168,25 @@ The Overture release identifier is read from the segments file's `.meta.yaml`
 }
 ```
 
+The model path/stat fields are diagnostic provenance. `score_key` uses the
+model's `sha256`, so identical bytes remain reusable after relocation and a
+same-size replacement with a preserved timestamp still invalidates the cache.
+`optimizer_version` covers algorithmic changes without a runtime knob; every
+decision knob is also snapshotted independently for auditability.
+
 ### Staleness keys — how incremental/resume works
 
 - **`score_key`** = hash of everything that changes the *scores* (or their
-  on-disk form): input file fingerprints (size + mtime), model fingerprint,
-  `FEATURE_VERSION`, `DATA_VERSION`, buffer distance, method, and the scored-cache
-  schema version. The `scored_candidates.parquet` cache is valid iff its
-  manifest's `score_key` still matches — this is what `reoptimize` checks.
+  on-disk form): content-addressed input fingerprints (size + mtime + SHA-256), model content SHA-256,
+  calibration/scoring thresholds, `FEATURE_VERSION`, `DATA_VERSION`, buffer
+  distance, method, and the scored-cache schema version. The
+  `scored_candidates.parquet` cache is valid iff its manifest's `score_key`
+  still matches — this is what `reoptimize` checks.
 - **`optimize_key`** = hash of the optimizer/prune/export settings snapshot
-  (including the resolver-prune allowlist and `optimizer_review_threshold`) plus
-  the optimizer `min_confidence` argument. These can change *without* invalidating
-  the scores.
+  (including `optimizer_version`, alignment rescue bounds, decision thresholds,
+  score-propagation settings, and the resolver-prune allowlist) plus the
+  optimizer `min_confidence` argument. These can change *without* invalidating
+  the scores unless also listed above as score-shaping settings.
 - **`full_key`** = hash of both. `factory run` **skips** a dataset whose existing
   manifest has the same `full_key` (unless `--force`).
 

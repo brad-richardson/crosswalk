@@ -213,6 +213,32 @@ def test_build_combined_table_empty_handling_and_stats(tmp_path):
     assert "build_empty_rows" in stats[0]
 
 
+def test_build_combined_table_surfaces_duplicate_label_audit_stats(tmp_path):
+    from crosswalk.resolver.train import _build_combined_table
+
+    edges = [_edge("A", "T", 0.99), _edge("B", "T", 0.4, selected=False)]
+    groups = [_group("g1", edges, candidate_edges=edges)]
+    groups_path = tmp_path / "g.json"
+    groups_path.write_text(json.dumps({"groups": groups}))
+    labels_path = tmp_path / "labels.csv"
+    _labels(
+        [
+            _label_row("historical-1", [("A", "T")]),
+            _label_row("historical-2", [("A", "T")]),
+        ]
+    ).to_csv(labels_path, index=False)
+
+    df, per_dataset, _ = _build_combined_table([("ds", groups_path, labels_path)])
+
+    assert len(df) == 2
+    assert per_dataset[0]["build_raw_rows"] == 4
+    assert per_dataset[0]["build_duplicate_rows"] == 2
+    assert per_dataset[0]["build_duplicate_keys"] == 2
+    assert per_dataset[0]["build_conflicting_keys"] == 0
+    assert per_dataset[0]["build_quarantined_groups"] == 0
+    assert per_dataset[0]["build_quarantined_rows"] == 0
+
+
 def test_build_combined_table_legacy_empty_skipped(tmp_path):
     """Reject-all label on a legacy group (no candidate_edges) emits zero rows
     but counts empty_legacy_skipped — honest test for cross-mode."""

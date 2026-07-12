@@ -825,6 +825,12 @@ def register_commands(app: typer.Typer) -> None:
             "--profile",
             help="Enable per-feature timing breakdown (sets MATCHER_PROFILE=1)",
         ),
+        model_path: Path | None = typer.Option(
+            None,
+            "--model-path",
+            help="Explicit ML model artifact. Defaults to the bundled model; "
+            "MATCHER_MODEL_PATH provides the process-wide override.",
+        ),
         allow_version_mismatch: bool = typer.Option(
             False,
             "--allow-version-mismatch",
@@ -840,11 +846,13 @@ def register_commands(app: typer.Typer) -> None:
             crosswalk stitch us_boston_streets -p recall
             crosswalk stitch -r ref.parquet -t target.parquet -o bridge.parquet
             crosswalk stitch us_boston_streets -r ref.parquet -t target.parquet
+            crosswalk stitch us_boston_streets --model-path data/models/my_model.joblib
         """
         from ..config import STITCH_PROFILES, settings
         from ..datasets.loader import DatasetLoader
         from ..filenames import PROJECT_ROOT, bridge_filename
         from ..pipeline import run_pipeline
+        from ..pipeline.runner import _resolve_model_path
 
         if stitch_profile is not None:
             if stitch_profile not in STITCH_PROFILES:
@@ -857,6 +865,12 @@ def register_commands(app: typer.Typer) -> None:
 
         if profile:
             os.environ["MATCHER_PROFILE"] = "1"
+
+        try:
+            active_model_path = _resolve_model_path(model_path)
+        except (FileNotFoundError, OSError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
 
         output_dir = PROJECT_ROOT / "data" / "output"
         loader = DatasetLoader()
@@ -917,6 +931,7 @@ def register_commands(app: typer.Typer) -> None:
             console.print(f"  Reference: {ref_path}")
             console.print(f"  Target: {tgt_path}")
             console.print(f"  Method: {method}")
+            console.print(f"  Model: {active_model_path}")
             console.print(f"  Buffer: {buffer_distance_m}m")
             br_conf = settings.bridge_min_confidence
             if stitch_profile is not None:
@@ -951,6 +966,7 @@ def register_commands(app: typer.Typer) -> None:
                 method=method,
                 buffer_distance_m=buffer_distance_m,
                 n_jobs=workers,
+                model_path=active_model_path,
                 allow_version_mismatch=allow_version_mismatch,
                 prune_dataset_key=ds_identity,
             )
@@ -1284,6 +1300,7 @@ def register_commands(app: typer.Typer) -> None:
             SPARK_PORTABLE_XGB_PARAMS,
         )
         from ..matching.ml import MLMatcher
+        from ..model_export import build_spark_model_manifest
 
         if not labels_dir.exists():
             console.print(f"[red]Labels directory not found: {labels_dir}[/red]")
@@ -1317,41 +1334,9 @@ def register_commands(app: typer.Typer) -> None:
         matcher.model.get_booster().save_model(str(model_out))
         model_size_kb = os.path.getsize(model_out) / 1024
 
-        # Extract all JSON-serializable hyperparams for reproducibility
-        xgb_params = matcher.model.get_params()
-        hyperparams = {}
-        for k, v in xgb_params.items():
-            if v is None or callable(v):
-                continue
-            # Skip NaN (not valid JSON)
-            if isinstance(v, float) and np.isnan(v):
-                continue
-            try:
-                json.dumps(v)
-                hyperparams[k] = v
-            except (TypeError, ValueError):
-                hyperparams[k] = str(v)
-
-        manifest = {
-            "features": matcher.feature_names,
-            "n_features": len(matcher.feature_names),
-            "n_estimators": xgb_params.get("n_estimators"),
-            "threshold": 0.5,
-            "is_binary": matcher.is_binary,
-            "feature_version": matcher.feature_version,
-            "label_encoder": matcher.label_encoder,
-            "hyperparams": hyperparams,
-            "training_metadata": matcher.training_metadata,
-        }
-        # Isotonic calibration knots (piecewise-linear P(match) remap). Portable
-        # by construction: the Spark scorer can apply it as interp(score, xs, ys)
-        # with endpoint clipping. NOTE: emitting the table makes the artifact
-        # calibration-ready; wiring the Spark MatchLayerToNetworkV2 job to
-        # consume it (and re-fit its thresholds on calibrated scores) is a
-        # tf-data-platform follow-up — see docs/EVAL_ROADMAP.md.
-        if matcher.calibrator is not None:
-            manifest["calibration"] = matcher.calibrator.to_knots()
-            manifest["calibration"]["applied"] = False  # consumer wiring is follow-up
+        # Isotonic calibration knots make the artifact calibration-ready. The
+        # consumer still owns applying them and fitting calibrated thresholds.
+        manifest = build_spark_model_manifest(matcher)
         manifest_out = output_dir / "manifest.json"
         with open(manifest_out, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)

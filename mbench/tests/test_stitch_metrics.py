@@ -453,6 +453,85 @@ def test_pair_label_maps_through_full_recovery_footprint(recovery_source):
     assert result.pair_labels_mapped_clean == 1
 
 
+@pytest.mark.parametrize("recovery_source", ["candidate_edges", "rejected_edges"])
+@pytest.mark.parametrize("bad_value", [None, {}, "", 0, False])
+def test_present_falsey_malformed_recovery_source_fails_closed(recovery_source, bad_value):
+    group = {
+        "group_id": "g1",
+        "edges": [{"ref_id": "selected", "target_id": "t1"}],
+        recovery_source: bad_value,
+    }
+    bridge = pd.DataFrame({"ref_id": ["selected"], "target_id": ["t1"]})
+    labels = pd.DataFrame(
+        {
+            "group_id": ["g1"],
+            "selected_edges": [json.dumps([{"ref_id": "selected", "target_id": "t1"}])],
+        }
+    )
+
+    with pytest.raises(ValueError, match=rf"{recovery_source} must be a list"):
+        evaluate_stitch_groups(bridge, labels, groups=[group])
+
+
+@pytest.mark.parametrize("source", ["edges", "candidate_edges", "rejected_edges"])
+def test_duplicate_edges_within_sidecar_source_fail_closed(source):
+    duplicate = {"ref_id": "selected", "target_id": "t1"}
+    group = {
+        "group_id": "g1",
+        "edges": [{"ref_id": "selected", "target_id": "t1"}],
+        source: [duplicate, dict(duplicate)],
+    }
+    bridge = pd.DataFrame({"ref_id": ["selected"], "target_id": ["t1"]})
+    labels = pd.DataFrame(
+        {
+            "group_id": ["g1"],
+            "selected_edges": [json.dumps([duplicate])],
+        }
+    )
+
+    with pytest.raises(ValueError, match=rf"{source}\[1\] duplicates edge"):
+        evaluate_stitch_groups(bridge, labels, groups=[group])
+
+
+@pytest.mark.parametrize("bad_id", [{}, [], True])
+def test_structured_or_boolean_sidecar_ids_fail_closed(bad_id):
+    group = {
+        "group_id": "g1",
+        "edges": [{"ref_id": bad_id, "target_id": "t1"}],
+    }
+    bridge = pd.DataFrame({"ref_id": ["selected"], "target_id": ["t1"]})
+    labels = pd.DataFrame(
+        {
+            "group_id": ["g1"],
+            "selected_edges": [json.dumps([{"ref_id": "selected", "target_id": "t1"}])],
+        }
+    )
+
+    with pytest.raises(ValueError, match=r"ref_id must be a string or numeric scalar"):
+        evaluate_stitch_groups(bridge, labels, groups=[group])
+
+
+def test_repeated_edge_across_sidecar_sources_remains_valid():
+    repeated = {"ref_id": "selected", "target_id": "t1"}
+    group = {
+        "group_id": "g1",
+        "edges": [repeated],
+        "candidate_edges": [dict(repeated)],
+        "rejected_edges": [dict(repeated)],
+    }
+    bridge = pd.DataFrame({"ref_id": ["selected"], "target_id": ["t1"]})
+    labels = pd.DataFrame(
+        {
+            "group_id": ["g1"],
+            "selected_edges": [json.dumps([repeated])],
+        }
+    )
+
+    result = evaluate_stitch_groups(bridge, labels, groups=[group])
+
+    assert result.exact_match_rate == pytest.approx(1.0)
+
+
 def test_selected_fragment_ownership_beats_foreign_candidate_attribution():
     groups = [
         {

@@ -10,13 +10,19 @@ For usage instructions, see [README.md](../README.md). For development workflow,
 ## ML Model
 
 - **Algorithm**: XGBoost binary classifier
-- **Features**: 79 features across 17 categories (defined in `src/crosswalk/config.py::FEATURE_COLUMNS`)
-- **Location**: `data/models/matcher_model_combined.joblib`
+- **Features**: 83 features across 17 categories (defined in `src/crosswalk/config.py::FEATURE_COLUMNS`)
+- **Production location**: bundled `src/crosswalk/_model/matcher_model_combined.joblib`
+- **Local training output**: `data/models/matcher_model_combined.joblib`
 - **Training**: `crosswalk train` (trains on all labeled data in `labels/`)
 - **Parallelization**: Uses `ProcessPoolExecutor` with worker initialization for feature computation
-- **Auto Model Selection**: When `settings.auto_select_model=True`, automatically uses geometry-only model for datasets with low name coverage (< 50%)
+- **Auto Model Selection**: the advisory labeling workflow can use a local geometry-only model for datasets with low name coverage (< 50%)
 
-The trained model is not committed to git. After cloning, run `crosswalk train` before using `-m xgboost`.
+`crosswalk stitch` and the factory default to the committed bundled artifact.
+An incidental file under `data/models/` never changes production output. A local
+experiment must opt in with `crosswalk stitch --model-path <path>` or
+`MATCHER_MODEL_PATH=<path>`; a missing explicit override fails instead of falling
+back silently. The labeling UI remains local-first because its scores are
+advisory during retraining.
 
 ### Shipped models (bundled in the wheel)
 
@@ -25,13 +31,17 @@ the wheel, so `pip install crosswalk-py` needs zero training:
 
 | Artifact | What it is | Consumer |
 |----------|------------|----------|
-| `matcher_model_combined.joblib` | Full-feature (`config.FEATURE_COLUMNS`) calibrated model | `crosswalk stitch` fallback when `data/models/` has no local model (`config.bundled_model_path()`) |
+| `matcher_model_combined.joblib` | Full-feature (`config.FEATURE_COLUMNS`) calibrated model | Default `crosswalk stitch` and factory artifact (`config.bundled_model_path()`) |
 | `spark_model.json` + `spark_manifest.json` | Spark-portable 28-feature (`SPARK_PORTABLE_FEATURES`) XGBoost-native booster + manifest | Spark scoring jobs (tf-data-platform) via `matcher.spark` |
 
 Both are kept in lockstep with `config.FEATURE_VERSION` by CI
 (`test_shipped_model.py`, `test_shipped_spark_model.py`) — a feature bump fails
 those tests until the artifacts are re-exported in the same PR (see
-docs/RELEASING.md).
+docs/RELEASING.md). Newly trained native models and Spark manifests also record
+`training_metadata.source_commit`: the source SHA plus separate tracked-dirty
+and untracked-file counts. Older artifacts remain loadable when this additive
+field is absent; the currently bundled model receives it at its next clean
+retrain/reship.
 
 #### Spark-portable model shipping and consumption
 
@@ -194,10 +204,11 @@ Group optimization (`src/crosswalk/matching/optimizer.py::optimize_matches_with_
 
 1. **Connected components**: Build bipartite connected components over candidate pairs above `min_confidence` (`find_match_components`)
 2. **Classification**: Classify each component as 1:1, 1:N, N:1, or M:N by counting distinct refs/targets (`_classify_and_resolve_component`)
-3. **Contiguity clustering**: Within 1:N/N:1/M:N components, cluster segments into contiguous subgroups via cKDTree endpoint proximity (within `contiguity_tolerance`); non-contiguous singletons fall back to the 1:1 pool
-4. **Greedy 1:1 assignment**: Assign unclaimed leftover candidates greedily by descending confidence (`optimize_matches_greedy`)
-5. **Post-hoc expansion**: Expand 1:1 matches into 1:N/N:1 groups where contiguous candidates exist (`_expand_greedy_matches`); this only adds matches, never removes assignments
-6. **Coverage-conflict demotion**: When two targets claim overlapping portions of the same reference segment (overlap > `MAX_ALIGNMENT_OVERLAP_M` = 5 m), the lower-confidence match is demoted to REVIEW (`_validate_assignment_coverage`)
+3. **Corridor-aware contiguity**: Within 1:N/N:1/M:N components and post-greedy expansion, cluster endpoint-adjacent segments only when they are collinear continuations or share a normalized name; disconnected chains remain separate groups
+4. **Guarded alignment rescue**: Rejoin complementary same-name fragments when their alignment intervals tile one shared segment with only a short gap/overlap and either their endpoints snap directly or a real short connector segment explains the split; ambiguous transitive attachments are rejected
+5. **Canonical greedy assignment**: Assign unclaimed candidates by confidence, name agreement, measured alignment coverage, and stable IDs/indices (`optimize_matches_greedy`), so exact calibrated-score ties are input-order invariant
+6. **Post-hoc expansion and recomposition**: Expand surviving anchors with corridor-compatible candidates above the glue floor, then recompose connected assignments without duplicating selected pairs; low-confidence/decomposed additions remain REVIEW
+7. **Symmetric coverage-conflict demotion**: When two targets claim overlapping portions of one reference, or two references claim overlapping portions of one target (overlap > `MAX_ALIGNMENT_OVERLAP_M` = 5 m), demote the lower-ranked assignment to REVIEW (`_validate_assignment_coverage`)
 
 Applied during group optimization and to define the labeling UI review band:
 
@@ -206,7 +217,9 @@ Applied during group optimization and to define the labeling UI review band:
 | `optimizer_match_threshold` | 0.75 | Confident match in optimizer; upper bound of labeling review band |
 | `optimizer_review_threshold` | 0.5 | Below this = no match in optimizer; lower bound of labeling review band |
 
-1:N groups: `avg_confidence >= optimizer_review_threshold` -> MATCH
+Low-confidence additions, pruned/decomposed singletons, parallel siblings, and
+coverage conflicts are retained only as REVIEW with an explicit review-reason
+flag; they are not promoted merely to keep a group nonempty.
 
 ## Model Evaluation
 
@@ -234,7 +247,7 @@ crosswalk eval --model data/models/matcher_model_combined.joblib -d us_frisco_tr
 
 ## Feature Categories
 
-79 features across 17 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
+83 features across 17 categories. `config.py::FEATURE_COLUMNS` is the single source of truth.
 
 | Category | Count | Features |
 |----------|-------|----------|
@@ -243,7 +256,7 @@ crosswalk eval --model data/models/matcher_model_combined.joblib -d us_frisco_tr
 | Class | 1 | class_similarity |
 | Endpoint/Connectivity | 3 | min_endpoint_proximity_m, max_endpoint_proximity_m, shared_endpoint_count |
 | Lateral Offset | 3 | lateral_offset_m, lateral_offset_iqr_m, lateral_offset_p95_m |
-| Topology | 18 | from/to_degree_ref/target, degree_match_score, degree_signature_similarity, is_dead_end_ref/target, dead_end_match, is_intersection_ref/target, intersection_match, interior_junction_count_ref/target, interior_junction_count_delta, interior_connector_jaccard, interior_junction_position_sim, shared_anchor_count |
+| Topology | 22 | from/to_degree_ref/target, from/to_degree_target_native, degree_match_score, degree_signature_similarity, is_dead_end_ref/target, is_dead_end_target_native, dead_end_match, is_intersection_ref/target, is_intersection_target_native, intersection_match, interior_junction_count_ref/target, interior_junction_count_delta, interior_connector_jaccard, interior_junction_position_sim, shared_anchor_count |
 | Alignment Coverage | 5 | ref_coverage, target_coverage, min_coverage, coverage_ratio, max_coverage |
 | Graphlet | 2 | graphlet_similarity, endpoint_degree_similarity |
 | Clustering | 3 | clustering_coef_ref, clustering_coef_target, clustering_coef_delta |
@@ -263,7 +276,7 @@ Understanding the computation paths is critical for preventing training/inferenc
 ### Single Source of Truth
 
 ```
-config.py::FEATURE_COLUMNS (79 features)
+config.py::FEATURE_COLUMNS (83 features)
          |
          |---> compute.py::compute_pair_features()  <-- AUTHORITATIVE computation
          |           |

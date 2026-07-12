@@ -4,6 +4,7 @@ This test evaluates the trained model on a held-out test dataset and verifies
 that the F1 score is at least 0.90. This prevents model quality regressions.
 """
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -134,12 +135,26 @@ class TestModelEvaluation:
         decision_agreement = np.mean(
             production_decisions["ci-trained"] == production_decisions["bundled"]
         )
+        f1_delta = abs(production_f1_scores["ci-trained"] - production_f1_scores["bundled"])
+        agreement_line = (
+            "cross_platform_model_agreement "
+            f"holdout_rows={len(test_df)} "
+            f"ci_production_f1={production_f1_scores['ci-trained']:.6f} "
+            f"bundled_production_f1={production_f1_scores['bundled']:.6f} "
+            f"decision_agreement={decision_agreement:.6f} "
+            f"absolute_f1_delta={f1_delta:.6f}"
+        )
+        print(agreement_line)
+        if summary_path := os.environ.get("GITHUB_STEP_SUMMARY"):
+            with Path(summary_path).open("a", encoding="utf-8") as summary:
+                summary.write(f"### Cross-platform model agreement\n\n`{agreement_line}`\n")
+        # Emit the complete diagnostics before either gate. A red agreement/F1
+        # check is exactly when the step summary is most useful for triage.
         assert decision_agreement >= MIN_CROSS_PLATFORM_DECISION_AGREEMENT, (
             f"Bundled and freshly trained deployment decisions agree on only "
             f"{decision_agreement:.1%} of holdout rows; expected at least "
             f"{MIN_CROSS_PLATFORM_DECISION_AGREEMENT:.1%}."
         )
-        f1_delta = abs(production_f1_scores["ci-trained"] - production_f1_scores["bundled"])
         assert f1_delta <= MAX_CROSS_PLATFORM_F1_DELTA, (
             f"Bundled and freshly trained production F1 differ by {f1_delta:.3f}; "
             f"maximum allowed cross-platform delta is {MAX_CROSS_PLATFORM_F1_DELTA:.3f}."
