@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import GroupKFold
 
-from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
+from crosswalk.resolver.features import FEATURE_COLUMNS, featurize, group_keys
 
 
 def _prf(pred: np.ndarray, truth: np.ndarray) -> tuple[float, float, float]:
@@ -74,7 +74,7 @@ class EvalResult:
         }
 
 
-def _make_model(n_pos: int, n_neg: int):
+def _make_model(n_pos: int, n_neg: int, seed: int = 0):
     import xgboost as xgb
 
     spw = (n_neg / n_pos) if n_pos else 1.0
@@ -88,8 +88,8 @@ def _make_model(n_pos: int, n_neg: int):
         reg_lambda=1.5,
         scale_pos_weight=spw,
         eval_metric="logloss",
-        n_jobs=1,  # single-threaded for reproducible results on this tiny dataset
-        random_state=0,
+        n_jobs=1,
+        random_state=seed,
     )
 
 
@@ -99,7 +99,7 @@ def _eval_from_predictions(
     pred: np.ndarray,
 ) -> EvalResult:
     truth = df["keep"].to_numpy()
-    gids = df["group_id"].to_numpy()
+    gids = group_keys(df).to_numpy()
     p, r, f1 = _prf(pred, truth)
     ge = _group_exact_rate(gids, pred, truth)
     # sliver-filtered: drop rows flagged is_sliver from both sides
@@ -108,7 +108,7 @@ def _eval_from_predictions(
     return EvalResult(
         label=label,
         n_edges=len(df),
-        n_groups=df["group_id"].nunique(),
+        n_groups=int(group_keys(df).nunique()),
         precision=p,
         recall=r,
         f1=f1,
@@ -144,9 +144,9 @@ def run_cv(
     df = df.reset_index(drop=True)
     X = df[FEATURE_COLUMNS].to_numpy(dtype=float)
     y = df["keep"].to_numpy()
-    groups = df["group_id"].to_numpy()
+    groups = group_keys(df).to_numpy()
 
-    n_groups = df["group_id"].nunique()
+    n_groups = int(group_keys(df).nunique())
     if n_groups < 2:
         raise ValueError(f"grouped CV needs >= 2 groups, got {n_groups}; nothing to hold out.")
     n_splits = min(n_splits, n_groups)
@@ -169,11 +169,9 @@ def run_cv(
         n_pos = int(ytr.sum())
         n_neg = int((ytr == 0).sum())
         if n_pos == 0 or n_neg == 0:
-            # single-class training fold: fall back to majority (keep-all is the
-            # production default and the majority class here).
             oof_pred[te] = 1
         else:
-            model = _make_model(n_pos, n_neg)
+            model = _make_model(n_pos, n_neg, seed=seed)
             model.fit(Xtr, ytr)
             proba = model.predict_proba(X[te])[:, 1]
             oof_pred[te] = (proba >= threshold).astype(int)

@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from crosswalk.resolver.evaluate import _eval_from_predictions, _make_model, _prf
-from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
+from crosswalk.resolver.features import FEATURE_COLUMNS, featurize, group_key_columns, group_keys
 
 # Round-1 features + competition/coverage context (see featurize_extended).
 EXTENDED_FEATURE_COLUMNS: list[str] = FEATURE_COLUMNS + [
@@ -63,7 +63,7 @@ def featurize_extended(df: pd.DataFrame) -> pd.DataFrame:
     # same ref (resp. target) in the group. Positive => this edge is the
     # strongest claim on that segment.
     for side, col in (("ref_id", "ref"), ("target_id", "tgt")):
-        key = ["group_id", side]
+        key = [*group_key_columns(out), side]
         gmax = out.groupby(key)["confidence"].transform("max")
         # second-best: max of others = max overall unless this row is the max,
         # then it's the second max.
@@ -88,7 +88,7 @@ def featurize_extended(df: pd.DataFrame) -> pd.DataFrame:
         ("target_id", "local_start_frac", "local_end_frac", "tgt_span_overlap_higher"),
     ):
         vals = np.zeros(len(out))
-        for (_, _), sub in out.groupby(["group_id", side]):
+        for _, sub in out.groupby([*group_key_columns(out), side]):
             if len(sub) == 1:
                 continue
             rows = sub.sort_values("confidence", ascending=False)
@@ -110,17 +110,33 @@ def featurize_extended(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def select_expected_f1(probs: np.ndarray) -> np.ndarray:
+PER_TYPE_EF1_PENALTY: dict[str, float] = {
+    "1:N": 0.08,
+    "N:1": -0.02,
+    "M:N": 0.04,
+}
+
+# Optional training-only target. ``keep`` remains the hard evaluation truth so
+# smoothing cannot silently turn every non-zero negative into a positive metric.
+TRAIN_LABEL_COLUMN = "_train_keep"
+
+
+def select_expected_f1(
+    probs: np.ndarray,
+    *,
+    empty_bonus: float = 0.0,
+    per_type_penalty: float = 0.0,
+) -> np.ndarray:
     """Choose the subset of one group's edges maximizing plug-in expected F1.
 
     Sort by probability descending; over prefixes of size k (including k=0)
-    pick argmax of ``2 * sum_{i<=k} p_i / (k + sum p_i)``.
+    pick argmax of ``2 * sum_{i<=k} p_i / (k + sum p_i)``.  empty_bonus biases
+    toward non-empty (negative) or empty (positive); per_type_penalty biases
+    k=0 threshold per match type (1:N more conservative).
     """
     order = np.argsort(-probs)
     total = probs.sum()
-    # k=0 (predict the empty set) scores F1=1 exactly when the true set is
-    # empty: E[F1 | empty] = P(no edge is a keep) = prod(1 - p_i).
-    best_k, best_v = 0, float(np.prod(1.0 - probs))
+    best_k, best_v = 0, float(np.prod(1.0 - probs)) + empty_bonus + per_type_penalty
     csum = 0.0
     for k, i in enumerate(order, start=1):
         csum += probs[i]
@@ -132,6 +148,25 @@ def select_expected_f1(probs: np.ndarray) -> np.ndarray:
     return sel
 
 
+def select_expected_f1_per_type(
+    df: pd.DataFrame,
+    proba: np.ndarray,
+    *,
+    penalty_map: dict[str, float] | None = None,
+) -> np.ndarray:
+    pm = penalty_map or PER_TYPE_EF1_PENALTY
+    pred = np.zeros(len(df), dtype=int)
+    mt_col = df["match_type"].to_numpy() if "match_type" in df.columns else None
+    for _, idx in df.groupby(group_key_columns(df)).indices.items():
+        if mt_col is not None:
+            mt = str(mt_col[idx[0]]) if len(idx) else ""
+            pen = pm.get(mt, 0.0)
+        else:
+            pen = 0.0
+        pred[idx] = select_expected_f1(proba[idx], per_type_penalty=pen)
+    return pred
+
+
 def run_cv2(
     df: pd.DataFrame,
     feature_cols: list[str],
@@ -139,19 +174,30 @@ def run_cv2(
     threshold: float = 0.5,
     n_splits: int = 5,
     soft_extra: pd.DataFrame | None = None,
+    seed: int = 0,
+    use_float_soft: bool = False,
+    per_type_ef1: bool = False,
 ) -> dict:
     """Grouped-CV eval with pluggable feature set and per-group selector.
 
-    selector: ``threshold`` (independent per-edge, round-1 style) or ``ef1``
-    (structured per-group expected-F1 subset selection).
+    selector: threshold|ef1|ef1_per_type.  If use_float_soft, soft_extra keeps
+    are trained as float BCE instead of binarized.  Seed propagated to model.
     """
     from sklearn.model_selection import GroupKFold
 
     df = df.reset_index(drop=True)
     X = df[feature_cols].to_numpy(dtype=float)
-    y = df["keep"].to_numpy()
-    groups = df["group_id"].to_numpy()
-    n_groups = df["group_id"].nunique()
+    raw_truth = df["keep"].to_numpy(dtype=float)
+    if not np.isin(raw_truth, [0.0, 1.0]).all():
+        raise ValueError("keep must remain binary evaluation truth")
+    y_truth = raw_truth.astype(int)
+    y_train = (
+        df[TRAIN_LABEL_COLUMN].to_numpy(dtype=float)
+        if TRAIN_LABEL_COLUMN in df.columns
+        else y_truth.astype(float)
+    )
+    groups = group_keys(df).to_numpy()
+    n_groups = int(group_keys(df).nunique())
     if n_groups < 2:
         raise ValueError("grouped CV needs >= 2 groups")
     gkf = GroupKFold(n_splits=min(n_splits, n_groups))
@@ -160,27 +206,77 @@ def run_cv2(
     extra_X = extra_y = None
     if soft_extra is not None and len(soft_extra):
         extra_X = soft_extra[feature_cols].to_numpy(dtype=float)
-        extra_y = (soft_extra["soft_keep"].to_numpy() >= 0.5).astype(int)
+        if use_float_soft and "soft_keep" in soft_extra.columns:
+            extra_y = soft_extra["soft_keep"].to_numpy(dtype=float)
+        else:
+            src = (
+                soft_extra["soft_keep"].to_numpy()
+                if "soft_keep" in soft_extra.columns
+                else soft_extra["keep"].to_numpy()
+            )
+            extra_y = (src >= 0.5).astype(int)
 
-    for tr, te in gkf.split(X, y, groups):
-        Xtr, ytr = X[tr], y[tr]
+    def _seeded_make_model(np_count: int, nn_count: int, s: int):
+        import contextlib
+
+        try:
+            return _make_model(np_count, nn_count, seed=s)
+        except TypeError:
+            m = _make_model(np_count, nn_count)
+            with contextlib.suppress(Exception):
+                m.set_params(random_state=s)
+            return m
+
+    for tr, te in gkf.split(X, y_truth, groups):
+        Xtr, ytr = X[tr], y_train[tr]
         if extra_X is not None:
             Xtr = np.vstack([Xtr, extra_X])
             ytr = np.concatenate([ytr, extra_y])
-        n_pos, n_neg = int(ytr.sum()), int((ytr == 0).sum())
-        if n_pos == 0 or n_neg == 0:
-            oof_proba[te] = float(n_pos > 0)
+        is_float_fold = bool(np.any((ytr != 0) & (ytr != 1)))
+        ytr_bin = (ytr >= 0.5).astype(int) if is_float_fold else ytr.astype(int)
+        n_pos = int((ytr_bin == 1).sum()) if is_float_fold else int(np.nansum(ytr >= 0.5))
+        n_neg = int((ytr_bin == 0).sum()) if is_float_fold else int(np.nansum(ytr < 0.5))
+        if int(ytr_bin.sum()) == 0 or int((ytr_bin == 0).sum()) == 0:
+            oof_proba[te] = float(int(ytr_bin.sum()) > 0)
             continue
-        model = _make_model(n_pos, n_neg)
-        model.fit(Xtr, ytr)
+        if is_float_fold:
+            try:
+                import xgboost as xgb  # type: ignore
+
+                fold_model = xgb.XGBRegressor(
+                    objective="reg:logistic",
+                    eval_metric="logloss",
+                    n_estimators=120,
+                    max_depth=3,
+                    learning_rate=0.08,
+                    subsample=0.9,
+                    colsample_bytree=0.9,
+                    min_child_weight=2,
+                    reg_lambda=1.5,
+                    n_jobs=1,
+                    random_state=seed,
+                )
+                fold_model.fit(Xtr, ytr.astype(float))
+                raw = fold_model.predict(X[te])
+                oof_proba[te] = np.clip(raw, 0.0, 1.0)
+                continue
+            except Exception:
+                pass
+        model = _seeded_make_model(n_pos if n_pos else 1, n_neg if n_neg else 1, seed)
+        model.fit(Xtr, ytr_bin if is_float_fold else ytr)
         oof_proba[te] = model.predict_proba(X[te])[:, 1]
 
     if selector == "threshold":
         pred = (oof_proba >= threshold).astype(int)
     elif selector == "ef1":
         pred = np.zeros(len(df), dtype=int)
-        for _, idx in df.groupby("group_id").indices.items():
-            pred[idx] = select_expected_f1(oof_proba[idx])
+        if per_type_ef1:
+            pred = select_expected_f1_per_type(df, oof_proba)
+        else:
+            for _, idx in df.groupby(group_key_columns(df)).indices.items():
+                pred[idx] = select_expected_f1(oof_proba[idx])
+    elif selector == "ef1_per_type":
+        pred = select_expected_f1_per_type(df, oof_proba)
     else:
         raise ValueError(f"unknown selector {selector!r}")
 
@@ -198,7 +294,7 @@ def run_cv2(
     best_t, best_f1 = 0.5, -1.0
     conf = df["confidence"].to_numpy()
     for t in np.arange(0.3, 1.0, 0.01):
-        _, _, f1t = _prf((conf >= t).astype(int), y)
+        _, _, f1t = _prf((conf >= t).astype(int), y_truth)
         if f1t > best_f1:
             best_f1, best_t = f1t, t
     res["baseline_conf_oracle"] = _eval_from_predictions(

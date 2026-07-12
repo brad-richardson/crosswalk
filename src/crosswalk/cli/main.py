@@ -2108,6 +2108,301 @@ def register_commands(app: typer.Typer) -> None:
             **reload_kwargs,
         )
 
+    @app.command("train-resolver")
+    def train_resolver(
+        data_root: Path = typer.Option(
+            Path("."),
+            "--data-root",
+            help="Project root containing data/factory/... or data/output",
+        ),
+        dataset: list[str] = typer.Option(
+            [],
+            "--dataset",
+            "-d",
+            help="Only train on these datasets (repeatable). Default: all with labels.",
+        ),
+        labels_root: Path = typer.Option(
+            Path("labels/stitching"),
+            "--labels",
+            help="Stitching labels root (expects dataset=*/data.csv underneath)",
+        ),
+        output: Path = typer.Option(
+            Path("data/models/resolver_model.joblib"),
+            "--output",
+            "-o",
+            help="Output path for the experimental resolver artifact",
+        ),
+        batches_root: Path = typer.Option(
+            Path("data/agents/stitching/batches"),
+            "--batches-root",
+            help="Panel batches root containing */votes.csv",
+        ),
+        with_votes: bool = typer.Option(
+            False,
+            "--with-votes/--no-votes",
+            help="Opt in to panel soft votes as extra training groups (default: off).",
+        ),
+        with_extended: bool = typer.Option(
+            True,
+            "--with-extended/--no-extended",
+            help="Use the extended resolver feature set (default: on).",
+        ),
+        selector: str = typer.Option(
+            "ef1",
+            "--selector",
+            help="Per-group selection used in CV eval: threshold | ef1 | ef1_per_type",
+        ),
+        threshold: float = typer.Option(
+            0.5,
+            "--threshold",
+            help="Edge threshold when --selector threshold",
+        ),
+        n_splits: int = typer.Option(
+            5,
+            "--n-splits",
+            help="Grouped CV folds",
+        ),
+        include_split: bool = typer.Option(
+            True,
+            "--include-split/--no-split",
+            help="Include split-provenance labels (noisy per gap analysis — try --no-split)",
+        ),
+        clean_only: bool = typer.Option(
+            False,
+            "--clean-only/--no-clean-only",
+            help="Train+eval on provenance=clean only (robust to split-label noise)",
+        ),
+        float_soft: bool = typer.Option(
+            False,
+            "--float-soft/--binary-soft",
+            help="Train soft votes as float BCE not binarized >=0.5",
+        ),
+        label_smoothing: float = typer.Option(
+            0.0,
+            "--label-smoothing",
+            help="Label smoothing for hard labels: y_smooth = (1-a)*y + a*0.5",
+        ),
+        report_out: Path | None = typer.Option(
+            None,
+            "--report-out",
+            help="Write markdown report to this path (default: research/learned_stitcher_round3.md)",
+        ),
+        seed: int = typer.Option(
+            0,
+            "--seed",
+            help="Random seed for determinism (propagated to model)",
+        ),
+        verbose: bool = typer.Option(
+            False,
+            "--verbose",
+            "-v",
+            help="Verbose per-dataset stats",
+        ),
+    ):
+        """Experimental: train the learned M:N stitch edge selector (all datasets).
+
+        Research-only — not wired into production. Saves to
+        data/models/resolver_model.joblib and writes
+        research/learned_stitcher_round3.md.
+
+        Default: all datasets, extended features, eF1, curated labels only.
+
+        Noisy-label aware (gap analysis 2026-07-11): confidence is 95% of signal;
+        split-provenance labels hurt clean; try --no-split or --clean-only.
+        """
+        VALID_SELECTORS = ("threshold", "ef1", "ef1_per_type")
+        if selector not in VALID_SELECTORS:
+            console.print(
+                f"[red]Unknown --selector {selector!r}; expected {'|'.join(VALID_SELECTORS)}[/red]"
+            )
+            raise typer.Exit(1)
+        if not 0.0 <= label_smoothing < 1.0:
+            console.print("[red]--label-smoothing must be in [0, 1)[/red]")
+            raise typer.Exit(1)
+
+        import importlib
+
+        resolver_train = importlib.import_module("crosswalk.resolver.train")
+        resolver_features = importlib.import_module("crosswalk.resolver.features")
+        resolver_round2 = importlib.import_module("crosswalk.resolver.round2")
+
+        BASE_FEAT_COLS = resolver_features.FEATURE_COLUMNS
+        EXT_FEAT_COLS = resolver_round2.EXTENDED_FEATURE_COLUMNS
+
+        feature_cols = list(EXT_FEAT_COLS if with_extended else BASE_FEAT_COLS)
+
+        specs = resolver_train._discover_specs(
+            data_root=data_root,
+            stitching_root=labels_root,
+            dataset_filter=list(dataset) if dataset else None,
+        )
+        if not specs:
+            console.print(f"[yellow]No specs found under labels_root={labels_root}[/yellow]")
+            raise typer.Exit(1)
+
+        console.print(f"[blue]Discovered {len(specs)} dataset specs[/blue]")
+        for ds, gp, lp in specs:
+            status = "exists" if Path(gp).exists() else "MISSING"
+            console.print(f"  - {ds}: {gp} [{status}]  labels={lp}")
+
+        df, per_ds_stats, groups_by_ds = resolver_train._build_combined_table(
+            specs,
+            include_split=include_split,
+            include_rejected=True,
+            prefer_candidate_graph=True,
+            filter_rule5=True,
+            include_empty=True,
+        )
+
+        if df.empty:
+            console.print("[yellow]Combined edge table empty — no labeled groups mapped[/yellow]")
+            for s in per_ds_stats:
+                console.print(f"  {s}")
+            raise typer.Exit(1)
+
+        featurize_base = resolver_features.featurize
+        featurize_ext = resolver_round2.featurize_extended
+
+        if with_extended:
+            df = featurize_ext(df)
+        else:
+            df = featurize_base(df)
+
+        existing_gids = set(zip(df["dataset_id"].astype(str), df["group_id"].astype(str)))
+        soft_df_raw = None
+        soft_extra = None
+        if with_votes:
+            soft_df_raw = resolver_train._build_soft_extra(groups_by_ds, batches_root)
+            if soft_df_raw is not None and len(soft_df_raw):
+                console.print(
+                    f"[blue]Loaded soft votes: {len(soft_df_raw)} rows over "
+                    f"{soft_df_raw['group_id'].nunique()} groups[/blue]"
+                )
+                soft_extra = resolver_train._prepare_soft_for_train(
+                    soft_df_raw,
+                    groups_by_ds,
+                    existing_gids,
+                    feature_cols,
+                    extended=with_extended,
+                    use_float_label=float_soft,
+                )
+                if soft_extra is None:
+                    console.print("[yellow]Soft extra featurized to empty — not used[/yellow]")
+                else:
+                    console.print(
+                        f"[blue]Soft extra featurized: {len(soft_extra)} rows over "
+                        f"{resolver_features.group_keys(soft_extra).nunique()} groups (train-only)[/blue]"
+                    )
+            else:
+                console.print("[yellow]No soft votes found[/yellow]")
+
+        if label_smoothing > 0:
+            y_raw = df["keep"].to_numpy(dtype=float)
+            train_label_column = resolver_round2.TRAIN_LABEL_COLUMN
+            df[train_label_column] = (1.0 - float(label_smoothing)) * y_raw + float(
+                label_smoothing
+            ) * 0.5
+            console.print(f"[blue]Applied label smoothing a={label_smoothing}[/blue]")
+
+        if clean_only:
+            n_before = len(df)
+            df = df[df["provenance"] == "clean"].copy() if "provenance" in df.columns else df
+            console.print(f"[blue]clean-only filter: {n_before} -> {len(df)} rows[/blue]")
+            if df.empty:
+                console.print("[red]clean-only filter emptied dataset[/red]")
+                raise typer.Exit(1)
+
+        if verbose:
+            console.print("[blue]Per-dataset build stats[/blue]")
+            for s in per_ds_stats:
+                console.print(f"  {s}")
+
+        console.print(
+            f"[blue]Training set: {len(df)} hard rows "
+            f"({float(df['keep'].sum()):.1f} pos / {int((df['keep'] < 0.5).sum())} neg) "
+            f"over {resolver_features.group_keys(df).nunique()} groups / {df['dataset_id'].nunique()} datasets; "
+            f"features={len(feature_cols)}; selector={selector}"
+            f"{f'; soft_extra={len(soft_extra)}' if soft_extra is not None else ''}"
+            f" float_soft={float_soft} smoothing={label_smoothing}"
+            f"[/blue]"
+        )
+
+        per_type = selector == "ef1_per_type"
+        sel_for_cv = "ef1" if per_type else selector
+        eval_result = resolver_train.evaluate_all(
+            df,
+            feature_cols=feature_cols,
+            selector=sel_for_cv,
+            n_splits=n_splits,
+            threshold=threshold,
+            soft_extra=soft_extra,
+            seed=seed,
+            use_float_soft=float_soft,
+            per_type_ef1=per_type,
+        )
+
+        for k in ("model", "baseline_production", "baseline_conf_oracle"):
+            v = eval_result.get(k)
+            if v is not None and hasattr(v, "row"):
+                console.print(f"  {k}: {v.row()}")
+
+        model = resolver_train.train_model(df, feature_cols, soft_extra=soft_extra, seed=seed)
+
+        training_stats = {
+            "n_rows_hard": len(df),
+            "n_pos_hard": int(df["keep"].sum()),
+            "n_neg_hard": int((df["keep"] == 0).sum()),
+            "n_groups_hard": int(resolver_features.group_keys(df).nunique()),
+            "n_datasets_hard": int(df["dataset_id"].nunique()),
+            "n_rows_soft": int(len(soft_extra)) if soft_extra is not None else 0,
+            "n_groups_soft": int(resolver_features.group_keys(soft_extra).nunique())
+            if soft_extra is not None
+            else 0,
+            "feature_columns": list(feature_cols),
+            "selector": selector,
+            "with_extended": with_extended,
+            "with_votes": with_votes,
+            "include_split": include_split,
+            "clean_only": clean_only,
+            "float_soft": float_soft,
+            "label_smoothing": label_smoothing,
+            "n_splits": n_splits,
+            "per_ds_stats": per_ds_stats,
+            "seed": seed,
+        }
+
+        cv_summary = {}
+        for k in ("model", "baseline_production", "baseline_conf_oracle"):
+            v = eval_result.get(k)
+            if v is not None and hasattr(v, "row"):
+                cv_summary[k] = v.row()
+
+        resolver_train.save_model(
+            model,
+            feature_cols,
+            output,
+            training_stats=training_stats,
+            cv_summary=cv_summary,
+            selector=selector,
+        )
+        console.print(f"[green]Saved resolver model to {output}[/green]")
+
+        report_text = resolver_train.build_report_text(
+            per_ds_stats=per_ds_stats,
+            df=df,
+            feature_cols=feature_cols,
+            eval_result=eval_result,
+            soft_extra=soft_extra,
+            selector=selector,
+            extended=with_extended,
+            data_root=data_root,
+        )
+
+        out_report = report_out or Path("research/learned_stitcher_round3.md")
+        out_report.parent.mkdir(parents=True, exist_ok=True)
+        out_report.write_text(report_text)
+        console.print(f"[green]Wrote report to {out_report}[/green]")
+
     @app.command()
     def version():
         """Show version information."""

@@ -52,26 +52,53 @@ def load_votes(paths: list[str | Path]) -> pd.DataFrame:
         p = Path(p)
         if not p.exists():
             continue
-        frames.append(pd.read_csv(p, dtype={"group_id": str}))
+        frame = pd.read_csv(p, dtype={"group_id": str})
+        batch_path = p.parent / "batch.json"
+        dataset_id = ""
+        if batch_path.exists():
+            try:
+                dataset_id = str(json.loads(batch_path.read_text()).get("dataset_id", ""))
+            except (OSError, ValueError, TypeError):
+                dataset_id = ""
+        frame["dataset_id"] = dataset_id
+        frames.append(frame)
     if not frames:
         return pd.DataFrame(
-            columns=["group_id", "provider", "choice", "confidence", "edge_set", "timestamp"]
+            columns=[
+                "dataset_id",
+                "group_id",
+                "provider",
+                "choice",
+                "confidence",
+                "edge_set",
+                "timestamp",
+            ]
         )
     df = pd.concat(frames, ignore_index=True)
     df = df[df["error"].isna()] if "error" in df.columns else df
     df = df.sort_values("timestamp")
-    df = df.drop_duplicates(subset=["group_id", "provider"], keep="last")
+    df = df.drop_duplicates(subset=["dataset_id", "group_id", "provider"], keep="last")
     return df.reset_index(drop=True)
+
+
+def _gather_group_edges(g: dict) -> list[dict]:
+    if g.get("candidate_edges"):
+        return list(g["candidate_edges"])
+    out = list(g.get("edges", []) or [])
+    out.extend(g.get("rejected_edges", []) or [])
+    return out
 
 
 def _map_vote_groups_to_sidecar(groups: list[dict], votes_df: pd.DataFrame) -> dict[str, str]:
     """Map each vote group_id -> best sidecar group_id by edge overlap.
 
     A vote group's candidate proxy is the union of all providers' chosen edges.
+    Uses candidate_edges when available (full universe) else
+    edges+rejected_edges — otherwise we under-expand soft vote coverage.
     """
     edge_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
     for g in groups:
-        for e in g.get("edges", []):
+        for e in _gather_group_edges(g):
             edge_groups[(str(e["ref_id"]), str(e["target_id"]))].add(g["group_id"])
 
     mapping: dict[str, str] = {}
@@ -95,15 +122,23 @@ def edge_soft_labels(
     groups: list[dict],
     votes_df: pd.DataFrame,
     provider_weights: dict[str, float] | None = None,
+    dataset_id: str | None = None,
 ) -> pd.DataFrame:
     """Per-edge weighted panel keep-probability, mapped to sidecar groups.
 
     Returns a DataFrame with columns
     ``[group_id, ref_id, target_id, soft_keep, n_providers, unanimous]``
     where ``soft_keep`` is the reliability-weighted fraction of providers whose
-    chosen edge set contained the edge, restricted to edges that exist in the
-    mapped sidecar group.
+    chosen edge set contained the edge. Only edges chosen by at least one voter
+    are emitted: the sidecar candidate graph is a validity/mapping universe, not
+    evidence that an unchosen edge was displayed to the panel. Empty/NONE votes
+    therefore emit no per-edge soft labels.
     """
+    if dataset_id is not None and "dataset_id" in votes_df.columns:
+        votes_df = votes_df[votes_df["dataset_id"] == dataset_id]
+    if votes_df.empty:
+        return pd.DataFrame()
+
     weights = provider_weights or DEFAULT_PROVIDER_WEIGHTS
     vgid_to_sgid = _map_vote_groups_to_sidecar(groups, votes_df)
     gmap = {g["group_id"]: g for g in groups}
@@ -114,7 +149,7 @@ def edge_soft_labels(
         if sgid is None:
             continue
         sidecar_edges = {
-            (str(e["ref_id"]), str(e["target_id"])) for e in gmap[sgid].get("edges", [])
+            (str(e["ref_id"]), str(e["target_id"])) for e in _gather_group_edges(gmap[sgid])
         }
         num = defaultdict(float)
         chosen_by = defaultdict(int)
@@ -130,15 +165,19 @@ def edge_soft_labels(
                 chosen_by[e] += 1
         if wsum == 0:
             continue
-        for e in sidecar_edges:
+        observed_edges: set[tuple[str, str]] = set()
+        for raw in sub["edge_set"]:
+            observed_edges |= _parse_edge_set(raw)
+        for e in observed_edges & sidecar_edges:
             rows.append(
                 {
+                    "dataset_id": dataset_id or "",
                     "group_id": sgid,
                     "ref_id": e[0],
                     "target_id": e[1],
                     "soft_keep": num[e] / wsum,
                     "n_providers": n_prov,
-                    "unanimous": int(chosen_by[e] == n_prov or chosen_by[e] == 0),
+                    "unanimous": int(chosen_by[e] == n_prov),
                 }
             )
     return pd.DataFrame(rows)
