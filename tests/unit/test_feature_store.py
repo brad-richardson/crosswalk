@@ -185,3 +185,62 @@ class TestFeatureStoreLoadAll:
         # Check all feature columns
         for col in FEATURE_COLUMNS:
             assert col in all_features.columns
+
+    def test_load_all_returns_canonical_row_order(self, tmp_features_dir, sample_features):
+        """Partition creation and in-file row order do not affect bulk row order."""
+        store_b = FeatureStore("dataset_b", features_dir=tmp_features_dir)
+        store_b.add("ref-002", "target-002", sample_features)
+        store_b.add("ref-001", "target-003", sample_features)
+        store_b.save()
+
+        store_a = FeatureStore("dataset_a", features_dir=tmp_features_dir)
+        store_a.add("ref-003", "target-002", sample_features)
+        store_a.add("ref-003", "target-001", sample_features)
+        store_a.save()
+
+        rows = FeatureStore.load_all(tmp_features_dir)[
+            ["dataset", "gers_id", "target_id"]
+        ].itertuples(index=False, name=None)
+
+        assert list(rows) == [
+            ("dataset_a", "ref-003", "target-001"),
+            ("dataset_a", "ref-003", "target-002"),
+            ("dataset_b", "ref-001", "target-003"),
+            ("dataset_b", "ref-002", "target-002"),
+        ]
+
+    def test_load_all_strict_rejects_missing_partition_file(self, tmp_features_dir):
+        """Strict bulk loading fails instead of silently skipping an empty partition."""
+        partition = tmp_features_dir / "dataset=missing"
+        partition.mkdir(parents=True)
+
+        with pytest.raises(FileNotFoundError, match="no data.parquet"):
+            FeatureStore.load_all(tmp_features_dir, skip_errors=False)
+
+    def test_strict_required_datasets_ignore_unrelated_orphan(
+        self, tmp_features_dir, sample_features
+    ):
+        """An archival directory outside the requested training set does not block loading."""
+        store = FeatureStore("required", features_dir=tmp_features_dir)
+        store.add("ref-001", "target-001", sample_features)
+        store.save()
+        (tmp_features_dir / "dataset=orphan").mkdir()
+
+        loaded = FeatureStore.load_all(
+            tmp_features_dir,
+            skip_errors=False,
+            required_datasets={"required"},
+        )
+
+        assert list(loaded["dataset"]) == ["required"]
+
+    def test_load_all_strict_propagates_corrupt_partition(self, tmp_features_dir):
+        """Strict bulk loading propagates parquet read failures."""
+        partition = tmp_features_dir / "dataset=corrupt"
+        partition.mkdir(parents=True)
+        (partition / "data.parquet").write_bytes(b"not a parquet file")
+
+        # The default remains tolerant for inspection/reporting callers.
+        assert FeatureStore.load_all(tmp_features_dir).empty
+        with pytest.raises(ValueError):
+            FeatureStore.load_all(tmp_features_dir, skip_errors=False)

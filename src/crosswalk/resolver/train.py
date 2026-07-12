@@ -35,6 +35,7 @@ from crosswalk.resolver.round2 import (
     TRAIN_LABEL_COLUMN,
     featurize_extended,
     run_cv2,
+    select_group_predictions,
 )
 from crosswalk.resolver.votes import default_votes_paths, edge_soft_labels, load_votes
 
@@ -398,6 +399,207 @@ def evaluate_all(
         use_float_soft=use_float_soft,
         per_type_ef1=per_type_ef1,
     )
+
+
+def evaluate_repeated_grouped_cv(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    *,
+    selector: str = "ef1",
+    n_splits: int = 5,
+    seeds: tuple[int, ...] = (0, 1, 2, 3, 4),
+    threshold: float = 0.5,
+    per_type_ef1: bool = False,
+    bootstrap_resamples: int = 2000,
+    bootstrap_seed: int = 1729,
+) -> dict[str, Any]:
+    """Repeat grouped CV, ensemble its OOF probabilities, and quantify deltas.
+
+    Each row is held out once per seed and group membership is never split. The
+    paired bootstrap then resamples complete groups, which is the independent
+    unit for resolver decisions.
+    """
+    from crosswalk.resolver.evaluate import _eval_from_predictions, paired_group_bootstrap
+
+    if not seeds:
+        raise ValueError("at least one repeated-CV seed is required")
+    if len(set(seeds)) != len(seeds):
+        raise ValueError("repeated-CV seeds must be unique")
+
+    frame = df.reset_index(drop=True)
+    runs: list[dict[str, Any]] = []
+    probabilities: list[np.ndarray] = []
+    for run_seed in seeds:
+        result = run_cv2(
+            frame,
+            feature_cols=feature_cols,
+            selector=selector,
+            threshold=threshold,
+            n_splits=n_splits,
+            seed=run_seed,
+            per_type_ef1=per_type_ef1,
+            split_seed=run_seed,
+        )
+        probabilities.append(np.asarray(result["oof_proba"], dtype=float))
+        model_result = result["model"]
+        baseline_result = result["baseline_production"]
+        runs.append(
+            {
+                "seed": run_seed,
+                "f1": model_result.f1,
+                "group_exact": model_result.group_exact_rate,
+                "f1_delta": model_result.f1 - baseline_result.f1,
+                "group_exact_delta": (
+                    model_result.group_exact_rate - baseline_result.group_exact_rate
+                ),
+            }
+        )
+
+    mean_proba = np.mean(np.vstack(probabilities), axis=0)
+    ensemble_pred = select_group_predictions(
+        frame,
+        mean_proba,
+        selector=selector,
+        threshold=threshold,
+        per_type_ef1=per_type_ef1,
+    )
+    production_pred = frame["selected"].to_numpy()
+    ensemble_result = _eval_from_predictions(
+        f"xgb repeated-{len(seeds)} grouped CV ensemble",
+        frame,
+        ensemble_pred,
+    )
+    production_result = _eval_from_predictions(
+        "baseline: optimizer+prune (selected)",
+        frame,
+        production_pred,
+    )
+    bootstrap = paired_group_bootstrap(
+        frame,
+        ensemble_pred,
+        production_pred,
+        n_resamples=bootstrap_resamples,
+        seed=bootstrap_seed,
+    )
+
+    def _spread(key: str) -> dict[str, float]:
+        values = np.asarray([run[key] for run in runs], dtype=float)
+        return {
+            "mean": float(values.mean()),
+            "std": float(values.std(ddof=1)) if len(values) > 1 else 0.0,
+            "min": float(values.min()),
+            "max": float(values.max()),
+        }
+
+    return {
+        "runs": runs,
+        "run_spread": {
+            "f1": _spread("f1"),
+            "group_exact": _spread("group_exact"),
+            "f1_delta": _spread("f1_delta"),
+            "group_exact_delta": _spread("group_exact_delta"),
+        },
+        "model": ensemble_result,
+        "baseline_production": production_result,
+        "paired_bootstrap": bootstrap,
+        "oof_proba": mean_proba,
+        "oof_prediction": ensemble_pred,
+        "seeds": list(seeds),
+    }
+
+
+def evaluate_leave_one_dataset_out(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    *,
+    selector: str = "ef1",
+    threshold: float = 0.5,
+    seed: int = 0,
+    per_type_ef1: bool = False,
+    bootstrap_resamples: int = 2000,
+    bootstrap_seed: int = 2718,
+) -> dict[str, Any]:
+    """Evaluate transfer by holding out each dataset from model fitting.
+
+    This is intentionally harsher than random grouped CV: it answers whether
+    the learned policy transfers to a geography/mode it never saw, rather than
+    merely generalizing to another group from Boston or Seattle.
+    """
+    from crosswalk.resolver.evaluate import _eval_from_predictions, paired_group_bootstrap
+
+    frame = df.reset_index(drop=True)
+    if "dataset_id" not in frame.columns:
+        raise ValueError("leave-one-dataset-out evaluation requires dataset_id")
+    datasets = sorted(frame["dataset_id"].astype(str).unique())
+    if len(datasets) < 2:
+        raise ValueError("leave-one-dataset-out evaluation requires at least two datasets")
+
+    oof_proba = np.full(len(frame), np.nan, dtype=float)
+    oof_pred = np.zeros(len(frame), dtype=int)
+    per_dataset: list[dict[str, Any]] = []
+    for dataset_id in datasets:
+        test_mask = frame["dataset_id"].astype(str).to_numpy() == dataset_id
+        train_frame = frame.loc[~test_mask].reset_index(drop=True)
+        test_frame = frame.loc[test_mask].reset_index(drop=True)
+        train_truth = train_frame["keep"].to_numpy(dtype=float)
+        if not np.isin(train_truth, [0.0, 1.0]).all():
+            raise ValueError("keep must remain binary evaluation truth")
+        if len(np.unique(train_truth)) < 2:
+            raise ValueError(f"training fold for {dataset_id!r} does not contain both classes")
+
+        model = train_model(train_frame, feature_cols, seed=seed)
+        probability = predict_keep_probability(
+            model,
+            test_frame[feature_cols].to_numpy(dtype=float),
+        )
+        prediction = select_group_predictions(
+            test_frame,
+            probability,
+            selector=selector,
+            threshold=threshold,
+            per_type_ef1=per_type_ef1,
+        )
+        positions = np.flatnonzero(test_mask)
+        oof_proba[positions] = probability
+        oof_pred[positions] = prediction
+
+        production = test_frame["selected"].to_numpy()
+        per_dataset.append(
+            {
+                "dataset_id": dataset_id,
+                "model": _eval_from_predictions("learned LODO", test_frame, prediction),
+                "baseline_production": _eval_from_predictions(
+                    "optimizer+prune",
+                    test_frame,
+                    production,
+                ),
+            }
+        )
+
+    if np.isnan(oof_proba).any():
+        raise AssertionError("leave-one-dataset-out predictions did not cover every row")
+    production_pred = frame["selected"].to_numpy()
+    model_result = _eval_from_predictions("learned (leave-one-dataset-out)", frame, oof_pred)
+    production_result = _eval_from_predictions(
+        "baseline: optimizer+prune (selected)",
+        frame,
+        production_pred,
+    )
+    return {
+        "model": model_result,
+        "baseline_production": production_result,
+        "per_dataset": per_dataset,
+        "paired_bootstrap": paired_group_bootstrap(
+            frame,
+            oof_pred,
+            production_pred,
+            n_resamples=bootstrap_resamples,
+            seed=bootstrap_seed,
+            resample_columns=["dataset_id"],
+        ),
+        "oof_proba": oof_proba,
+        "oof_prediction": oof_pred,
+    }
 
 
 def build_report_text(

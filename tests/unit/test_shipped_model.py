@@ -60,6 +60,23 @@ def test_shipped_model_feature_names_match_config(shipped_model):
     assert shipped_model.get("feature_names") == FEATURE_COLUMNS
 
 
+def test_shipped_model_has_reproducible_training_metadata(shipped_model):
+    """The release artifact identifies its exact data, split, and training rows."""
+    metadata = shipped_model.get("training_metadata")
+    assert metadata is not None, (
+        "Shipped model has no training provenance. Retrain and reship it with the "
+        "current deterministic training pipeline."
+    )
+    assert metadata.get("schema_version") == 1
+    fingerprints = metadata.get("fingerprints") or {}
+    assert set(fingerprints) == {
+        "labeled_data_sha256",
+        "split_sha256",
+        "training_data_sha256",
+    }
+    assert all(isinstance(value, str) and len(value) == 64 for value in fingerprints.values())
+
+
 def test_shipped_model_loads_via_mlmatcher():
     """The shipped model loads cleanly through MLMatcher (no version mismatch)."""
     from crosswalk.matching.ml import MLMatcher

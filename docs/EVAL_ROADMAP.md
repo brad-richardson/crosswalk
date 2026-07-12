@@ -277,5 +277,8 @@ uv run python scripts/ablation_study.py --mode category \
    curve (deferred, data-thin) and Spark-side consumption of the exported knots.
 3. Ground-truth trust cascade for pair labels (ensemble-agreement routing,
    provenance-tiered training weights).
-4. Learned group resolver once 100+ stitching labels exist.
+4. Learned group resolver once candidate recall and multi-dataset labels are
+   sufficient. Promotion requires repeated grouped CV, paired whole-group
+   intervals, and leave-one-dataset-out transfer to beat production on edge F1
+   and group exact; the current 163-group prototype remains NO-GO.
 5. Revisit formulation (path matching) only with entity-level evidence.
