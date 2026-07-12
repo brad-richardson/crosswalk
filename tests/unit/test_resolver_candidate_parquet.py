@@ -7,18 +7,16 @@ FEATURE_COLUMNS + signed lateral offset + structural context.
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from crosswalk.resolver.extract import (
     build_edge_table,
     build_multi_dataset_table,
     discover_candidates_parquet,
     load_candidates_parquet,
-    load_sidecar_groups,
-    load_stitching_labels,
 )
 
 
@@ -133,6 +131,52 @@ def test_load_candidates_parquet_validates_keys(tmp_path: Path):
     loaded = load_candidates_parquet(cand_path)
     assert len(loaded) == 2
     assert "hausdorff_distance_m" in loaded.columns
+
+
+@pytest.mark.parametrize(
+    ("rows", "message"),
+    [
+        ([], "is empty"),
+        (
+            [
+                {"group_id": "g1", "ref_id": "A", "target_id": "T"},
+                {"group_id": "g1", "ref_id": "A", "target_id": "T"},
+            ],
+            "duplicate key",
+        ),
+        (
+            [{"group_id": "g1", "ref_id": None, "target_id": "T"}],
+            "null join keys",
+        ),
+    ],
+)
+def test_load_candidates_parquet_rejects_unsafe_keys(
+    tmp_path: Path, rows: list[dict], message: str
+):
+    cand_path = tmp_path / "cands.parquet"
+    columns = ["group_id", "ref_id", "target_id"] if not rows else None
+    pd.DataFrame(rows, columns=columns).to_parquet(cand_path)
+
+    with pytest.raises(ValueError, match=message):
+        load_candidates_parquet(cand_path)
+
+
+def test_build_edge_table_rejects_duplicate_direct_candidate_frame():
+    grp = _group_cg(
+        "g1",
+        [_cand("A", "T", 0.99, True)],
+        ref_ids=["A"],
+        target_ids=["T"],
+    )
+    duplicate_candidates = pd.DataFrame(
+        [
+            {"group_id": "g1", "ref_id": "A", "target_id": "T", "feature": 1.0},
+            {"group_id": "g1", "ref_id": "A", "target_id": "T", "feature": 2.0},
+        ]
+    )
+
+    with pytest.raises(ValueError, match="duplicate key"):
+        build_edge_table([grp], _label_df(), "ds", candidates_df=duplicate_candidates)
 
 
 def test_build_edge_table_enriches_with_parquet(tmp_path: Path):

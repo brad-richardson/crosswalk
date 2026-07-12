@@ -199,8 +199,29 @@ def discover_candidates_parquet(groups_path: str | Path) -> Path | None:
     return None
 
 
+def _normalize_candidate_keys(df: pd.DataFrame, source: str) -> pd.DataFrame:
+    """Validate and string-normalize candidate join keys without mutating input."""
+    missing = [key for key in PARQUET_JOIN_KEYS if key not in df.columns]
+    if missing:
+        raise ValueError(f"{source} missing required key column(s): {', '.join(missing)}")
+
+    null_counts = {key: int(df[key].isna().sum()) for key in PARQUET_JOIN_KEYS}
+    null_counts = {key: count for key, count in null_counts.items() if count}
+    if null_counts:
+        raise ValueError(f"{source} has null join keys: {null_counts}")
+
+    normalized = df.copy()
+    for key in PARQUET_JOIN_KEYS:
+        normalized[key] = normalized[key].astype(str)
+
+    duplicate_count = int(normalized.duplicated(subset=list(PARQUET_JOIN_KEYS)).sum())
+    if duplicate_count:
+        raise ValueError(f"{source} has {duplicate_count} duplicate key(s) on {PARQUET_JOIN_KEYS}")
+    return normalized
+
+
 def load_candidates_parquet(path: str | Path) -> pd.DataFrame:
-    """Load a typed candidates parquet (78+ features + signed lateral offset).
+    """Load a typed candidates parquet (83 features + signed lateral offset).
 
     Validates basic expectations: non-empty, has join keys, unique keys.
     Returns the raw frame with string-typed join keys for safe merging.
@@ -210,22 +231,9 @@ def load_candidates_parquet(path: str | Path) -> pd.DataFrame:
         raise FileNotFoundError(f"candidates parquet not found: {path}")
 
     df = pd.read_parquet(path)
-
-    for key in PARQUET_JOIN_KEYS:
-        if key not in df.columns:
-            raise ValueError(f"candidates parquet {path} missing required key column: {key}")
-        df[key] = df[key].astype(str)
-
-    # Uniqueness check on the join key (dataset_id is not part of parquet join key
-    # to tolerate empty dataset_id runs, but group_id+ref+target is unique).
-    dup = df.duplicated(subset=list(PARQUET_JOIN_KEYS)).sum()
-    if dup:
-        logger.warning(
-            f"candidates parquet {path} has {dup} duplicate keys on {PARQUET_JOIN_KEYS} "
-            "(expected unique per candidate edge)"
-        )
-
-    return df
+    if df.empty:
+        raise ValueError(f"candidates parquet {path} is empty")
+    return _normalize_candidate_keys(df, f"candidates parquet {path}")
 
 
 def _enrich_with_candidate_parquet(
@@ -251,12 +259,10 @@ def _enrich_with_candidate_parquet(
         stats["candidate_parquet_missing_keys"] = 0
         return df
 
-    # Normalize join keys to string
+    candidates_df = _normalize_candidate_keys(candidates_df, "candidates_df")
+    df = df.copy()
     for key in PARQUET_JOIN_KEYS:
-        if key in candidates_df.columns:
-            candidates_df[key] = candidates_df[key].astype(str)
-        if key in df.columns:
-            df[key] = df[key].astype(str)
+        df[key] = df[key].astype(str)
 
     # Columns we never overwrite from parquet (ground truth / provenance)
     exclude_from_join = CANDIDATE_EXCLUDE_FROM_JOIN | {"dataset_id"}
@@ -291,20 +297,13 @@ def _enrich_with_candidate_parquet(
     # 1. Add new columns via left merge
     if new_cols:
         merge_cols = list(PARQUET_JOIN_KEYS) + new_cols
-        # Only keep first occurrence per key to avoid fan-out from dup keys
-        dedup_cand = candidates_df.drop_duplicates(subset=list(PARQUET_JOIN_KEYS))[
-            merge_cols
-        ]
-        df = df.merge(dedup_cand, on=list(PARQUET_JOIN_KEYS), how="left")
+        df = df.merge(candidates_df[merge_cols], on=list(PARQUET_JOIN_KEYS), how="left")
 
     # 2. Enrich overlapping structural columns from parquet (parquet authoritative for runtime parity)
     if overlapping_authoritative:
         merge_cols = list(PARQUET_JOIN_KEYS) + overlapping_authoritative
-        dedup_cand = candidates_df.drop_duplicates(subset=list(PARQUET_JOIN_KEYS))[
-            merge_cols
-        ]
         df = df.merge(
-            dedup_cand,
+            candidates_df[merge_cols],
             on=list(PARQUET_JOIN_KEYS),
             how="left",
             suffixes=("", "_pq"),
@@ -316,15 +315,12 @@ def _enrich_with_candidate_parquet(
             # Parquet is runtime-authoritative (computed on full candidate graph),
             # so prefer it whenever present (not just placeholder fill).
             # This closes the gap where JSON sidecar had default 0/-1 for genuinely new candidates.
-            df[col] = df[pq_col].combine_first(df[col]) if col in df.columns else df[pq_col]
+            df[col] = (
+                df[pq_col].where(df[pq_col].notna(), df[col]) if col in df.columns else df[pq_col]
+            )
             df = df.drop(columns=[pq_col])
 
-    # Count enriched rows: at least one new feature non-null
-    if new_cols:
-        enriched = df[new_cols].notna().any(axis=1).sum() if new_cols else 0
-        stats["candidate_parquet_enriched"] = int(enriched)
-    else:
-        stats["candidate_parquet_enriched"] = 0
+    stats["candidate_parquet_enriched"] = len(df_keys & cand_keys)
 
     return df
 
@@ -575,14 +571,7 @@ def build_edge_table(
     """
     # Resolve candidates parquet if a path was given but no df
     if candidates_df is None and candidates_path is not None:
-        try:
-            candidates_df = load_candidates_parquet(candidates_path)
-        except Exception as exc:
-            logger.warning(
-                f"build_edge_table[{dataset_id}]: failed to load candidates parquet "
-                f"{candidates_path}: {exc} — continuing without parquet features"
-            )
-            candidates_df = None
+        candidates_df = load_candidates_parquet(candidates_path)
 
     rec = recover_labeled_groups(groups, human_df)
     gmap = {g["group_id"]: g for g in groups}
@@ -687,7 +676,9 @@ def build_edge_table(
 
 
 def build_multi_dataset_table(
-    specs: list[tuple[str, str | Path, str | Path] | tuple[str, str | Path, str | Path, str | Path]],
+    specs: list[
+        tuple[str, str | Path, str | Path] | tuple[str, str | Path, str | Path, str | Path]
+    ],
     include_split: bool = True,
     auto_discover_candidates: bool = True,
 ) -> pd.DataFrame:
@@ -728,16 +719,9 @@ def build_multi_dataset_table(
 
         groups = load_sidecar_groups(groups_path)
         human_df = load_stitching_labels(labels_path)
-        candidates_df = None
-        if candidates_path is not None:
-            try:
-                candidates_df = load_candidates_parquet(candidates_path)
-            except Exception as exc:
-                logger.warning(
-                    f"build_multi_dataset_table[{dataset_id}]: failed to load candidates parquet "
-                    f"{candidates_path}: {exc} — continuing without parquet features"
-                )
-                candidates_df = None
+        candidates_df = (
+            load_candidates_parquet(candidates_path) if candidates_path is not None else None
+        )
 
         frames.append(
             build_edge_table(
@@ -746,7 +730,6 @@ def build_multi_dataset_table(
                 dataset_id,
                 include_split=include_split,
                 candidates_df=candidates_df,
-                candidates_path=candidates_path if candidates_df is None else None,
             )
         )
 
