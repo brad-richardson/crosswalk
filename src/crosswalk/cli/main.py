@@ -1,6 +1,7 @@
 """Top-level CLI commands."""
 
 import csv
+import hashlib
 import logging
 import os
 from datetime import UTC, datetime
@@ -53,9 +54,13 @@ def _eval_existing_model(
     """Evaluate an existing trained model on labeled data using 20% holdout."""
     from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
-    from ..config import METRIC_AVERAGE
+    from ..config import METRIC_AVERAGE, settings
     from ..labeling.label_store import LabelStore
-    from ..matching.ml import MLMatcher, segment_aware_split
+    from ..matching.ml import (
+        MLMatcher,
+        _canonicalize_training_frame,
+        segment_aware_split,
+    )
 
     if not model.exists():
         console.print(f"[red]Model not found: {model}[/red]")
@@ -76,15 +81,30 @@ def _eval_existing_model(
     # this flow, so a feature_version mismatch warns rather than blocking.
     matcher = MLMatcher()
     matcher.load_model(str(model), allow_version_mismatch=True)
+    model_sha256 = hashlib.sha256(model.read_bytes()).hexdigest()
+    model_training_sha256 = (
+        (matcher.training_metadata or {}).get("fingerprints", {}).get("training_data_sha256")
+    )
 
     # Load labels
     console.print("[blue]Loading labels...[/blue]")
-    all_labels = LabelStore.load_all(labels_dir)
+    all_labels = LabelStore.load_all(
+        labels_dir,
+        skip_errors=False,
+        required_datasets=dataset or None,
+    )
     console.print(f"  Total labels: {len(all_labels)}")
 
     # Filter to valid labels only
     valid_labels = {"match", "no_match"}
     all_labels = all_labels[all_labels["label"].isin(valid_labels)].copy()
+    matcher._check_feature_versions(
+        all_labels,
+        allow_stale_features=False,
+        expected_version=matcher.feature_version,
+    )
+    all_labels = matcher._validate_training_pairs(all_labels, max_hausdorff_m=1000.0)
+    all_labels = _canonicalize_training_frame(all_labels, source="Evaluation")
     console.print(f"  Valid labels (match/no_match): {len(all_labels)}")
 
     # Filter to specific datasets if requested
@@ -101,17 +121,37 @@ def _eval_existing_model(
     X_test, y_test = matcher._extract_features_and_labels(test_df, binary=True)
     X_test = matcher._cap_infinities(X_test)
     y_pred = matcher.model.predict(X_test)
+    production_probs = matcher.predict(
+        test_df.reindex(columns=matcher.feature_names).to_dict("records")
+    )
+    y_pred_production = (production_probs >= settings.scoring_match_threshold).astype(int)
 
     # Overall metrics
     overall_acc = accuracy_score(y_test, y_pred)
     overall_f1 = f1_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
     overall_precision = precision_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
     overall_recall = recall_score(y_test, y_pred, average=METRIC_AVERAGE, zero_division=0)
+    production_acc = accuracy_score(y_test, y_pred_production)
+    production_f1 = f1_score(y_test, y_pred_production, average=METRIC_AVERAGE, zero_division=0)
+    production_precision = precision_score(
+        y_test, y_pred_production, average=METRIC_AVERAGE, zero_division=0
+    )
+    production_recall = recall_score(
+        y_test, y_pred_production, average=METRIC_AVERAGE, zero_division=0
+    )
 
     console.print(f"\n{'=' * 60}")
     console.print(f"[bold]EVALUATION ON 20% HOLDOUT ({len(test_df)} samples)[/bold]")
     console.print("=" * 60)
-    console.print("\nOverall:")
+    console.print(
+        f"\nProduction path (threshold={settings.scoring_match_threshold:.3f}, "
+        f"calibrated={matcher.calibration_active}):"
+    )
+    console.print(f"  Accuracy:  {production_acc:.3f}")
+    console.print(f"  F1:        {production_f1:.3f}")
+    console.print(f"  Precision: {production_precision:.3f}")
+    console.print(f"  Recall:    {production_recall:.3f}")
+    console.print("\nRaw XGBoost diagnostic:")
     console.print(f"  Accuracy:  {overall_acc:.3f}")
     console.print(f"  F1:        {overall_f1:.3f}")
     console.print(f"  Precision: {overall_precision:.3f}")
@@ -135,16 +175,31 @@ def _eval_existing_model(
             X_ds, y_ds = matcher._extract_features_and_labels(ds_test, binary=True)
             X_ds = matcher._cap_infinities(X_ds)
             y_ds_pred = matcher.model.predict(X_ds)
+            ds_production_probs = matcher.predict(
+                ds_test.reindex(columns=matcher.feature_names).to_dict("records")
+            )
+            y_ds_production = (ds_production_probs >= settings.scoring_match_threshold).astype(int)
 
             ds_acc = accuracy_score(y_ds, y_ds_pred)
             ds_f1 = f1_score(y_ds, y_ds_pred, average=METRIC_AVERAGE)
             ds_precision = precision_score(y_ds, y_ds_pred, average=METRIC_AVERAGE, zero_division=0)
             ds_recall = recall_score(y_ds, y_ds_pred, average=METRIC_AVERAGE, zero_division=0)
+            ds_production_acc = accuracy_score(y_ds, y_ds_production)
+            ds_production_f1 = f1_score(
+                y_ds, y_ds_production, average=METRIC_AVERAGE, zero_division=0
+            )
+            ds_production_precision = precision_score(
+                y_ds, y_ds_production, average=METRIC_AVERAGE, zero_division=0
+            )
+            ds_production_recall = recall_score(
+                y_ds, y_ds_production, average=METRIC_AVERAGE, zero_division=0
+            )
             n_match = int((y_ds == 1).sum())
             n_no_match = int((y_ds == 0).sum())
 
             console.print(
-                f"  {ds}: acc={ds_acc:.3f}, f1={ds_f1:.3f} "
+                f"  {ds}: production acc={ds_production_acc:.3f}, "
+                f"f1={ds_production_f1:.3f}; raw f1={ds_f1:.3f} "
                 f"(n={len(ds_test)}, match={n_match}, no_match={n_no_match})"
             )
 
@@ -156,6 +211,10 @@ def _eval_existing_model(
                 "f1": ds_f1,
                 "precision": ds_precision,
                 "recall": ds_recall,
+                "production_accuracy": ds_production_acc,
+                "production_f1": ds_production_f1,
+                "production_precision": ds_production_precision,
+                "production_recall": ds_production_recall,
             }
     else:
         results["overall"] = {
@@ -166,12 +225,19 @@ def _eval_existing_model(
             "f1": overall_f1,
             "precision": overall_precision,
             "recall": overall_recall,
+            "production_accuracy": production_acc,
+            "production_f1": production_f1,
+            "production_precision": production_precision,
+            "production_recall": production_recall,
         }
 
     # Save results to CSV
     if not skip_save:
         output_dir.mkdir(parents=True, exist_ok=True)
-        results_file = output_dir / "ml_eval_results.csv"
+        # v1 is a tracked historical table with a narrower schema. Writing the
+        # production-path and artifact-identity columns into that file would
+        # silently misalign appended rows with its existing header.
+        results_file = output_dir / "ml_eval_results_v2.csv"
 
         fieldnames = [
             "run_date",
@@ -187,8 +253,17 @@ def _eval_existing_model(
             "f1",
             "precision",
             "recall",
+            "production_accuracy",
+            "production_f1",
+            "production_precision",
+            "production_recall",
+            "production_scoring_match_threshold",
+            "production_calibrated",
             "split_seed",
             "model_name",
+            "model_sha256",
+            "model_training_data_sha256",
+            "model_feature_version",
             "top1_feature",
             "top1_importance",
             "top2_feature",
@@ -211,7 +286,16 @@ def _eval_existing_model(
             "top10_importance",
         ]
 
-        write_header = not results_file.exists()
+        write_header = not results_file.exists() or results_file.stat().st_size == 0
+        if not write_header:
+            with open(results_file, newline="") as existing_file:
+                existing_header = next(csv.reader(existing_file), [])
+            if existing_header != fieldnames:
+                console.print(
+                    f"[red]Evaluation CSV schema mismatch in {results_file}; "
+                    "move the incompatible file aside before appending.[/red]"
+                )
+                raise typer.Exit(1)
 
         with open(results_file, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -234,8 +318,17 @@ def _eval_existing_model(
                     "f1": f"{metrics.get('f1', 0):.4f}",
                     "precision": f"{metrics.get('precision', 0):.4f}",
                     "recall": f"{metrics.get('recall', 0):.4f}",
+                    "production_accuracy": f"{metrics.get('production_accuracy', 0):.4f}",
+                    "production_f1": f"{metrics.get('production_f1', 0):.4f}",
+                    "production_precision": f"{metrics.get('production_precision', 0):.4f}",
+                    "production_recall": f"{metrics.get('production_recall', 0):.4f}",
+                    "production_scoring_match_threshold": (settings.scoring_match_threshold),
+                    "production_calibrated": matcher.calibration_active,
                     "split_seed": seed,
                     "model_name": model.name,
+                    "model_sha256": model_sha256,
+                    "model_training_data_sha256": model_training_sha256 or "",
+                    "model_feature_version": matcher.feature_version or "",
                     **{
                         f"top{i + 1}_feature": top_features[i][0] if len(top_features) > i else ""
                         for i in range(10)
@@ -1056,6 +1149,11 @@ def register_commands(app: typer.Typer) -> None:
             "--min-agent-confidence",
             help="Minimum confidence for including agent labels (0.0-1.0).",
         ),
+        seed: int = typer.Option(
+            42,
+            "--seed",
+            help="Shared seed for the grouped holdout split and XGBoost training.",
+        ),
     ):
         """Train an ML model on labeled data.
 
@@ -1094,7 +1192,11 @@ def register_commands(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
         console.print(f"[blue]Loading labels from {labels_dir}...[/blue]")
-        df = LabelStore.load_all(labels_dir)
+        df = LabelStore.load_all(
+            labels_dir,
+            skip_errors=False,
+            exclude_datasets=exclude_dataset,
+        )
         console.print(f"  Found {len(df)} labels from {df['dataset'].nunique()} datasets")
 
         if exclude_dataset:
@@ -1122,6 +1224,7 @@ def register_commands(app: typer.Typer) -> None:
             exclude_features=list(exclude_features) if exclude_features else None,
             agent_weight=agent_weight,
             min_agent_confidence=min_agent_confidence,
+            seed=seed,
         )
 
         # Save model
@@ -1130,6 +1233,10 @@ def register_commands(app: typer.Typer) -> None:
 
         console.print(f"\n[green]Model saved to {output}[/green]")
         console.print(f"[green]Holdout accuracy: {metrics['test_accuracy']:.1%}[/green]")
+        fingerprints = metrics["training_metadata"]["fingerprints"]
+        console.print(
+            f"[green]Training fingerprint: {fingerprints['training_data_sha256']}[/green]"
+        )
 
     @app.command("export-spark-model")
     def export_spark_model(
@@ -1144,6 +1251,11 @@ def register_commands(app: typer.Typer) -> None:
             "--output",
             "-o",
             help="Output directory for model.json + manifest.json",
+        ),
+        seed: int = typer.Option(
+            42,
+            "--seed",
+            help="Shared seed for the grouped holdout split and XGBoost training.",
         ),
     ):
         """Train and export a Spark-portable XGBoost model for Overture matching.
@@ -1194,6 +1306,7 @@ def register_commands(app: typer.Typer) -> None:
             test_size=0.2,
             binary=True,
             exclude_features=exclude_features,
+            seed=seed,
             **SPARK_PORTABLE_XGB_PARAMS,
         )
 
@@ -1228,6 +1341,7 @@ def register_commands(app: typer.Typer) -> None:
             "feature_version": matcher.feature_version,
             "label_encoder": matcher.label_encoder,
             "hyperparams": hyperparams,
+            "training_metadata": matcher.training_metadata,
         }
         # Isotonic calibration knots (piecewise-linear P(match) remap). Portable
         # by construction: the Spark scorer can apply it as interp(score, xs, ys)

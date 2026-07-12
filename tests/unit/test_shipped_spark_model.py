@@ -96,6 +96,20 @@ def test_shipped_spark_manifest_hyperparams_match_config(shipped_manifest):
     )
 
 
+def test_shipped_spark_manifest_has_reproducible_training_metadata(shipped_manifest):
+    """Spark consumers can identify the exact labels, split, and rows used."""
+    metadata = shipped_manifest.get("training_metadata")
+    assert metadata is not None, f"Shipped Spark manifest has no training provenance. {_RESHIP}"
+    assert metadata.get("schema_version") == 1
+    fingerprints = metadata.get("fingerprints") or {}
+    assert set(fingerprints) == {
+        "labeled_data_sha256",
+        "split_sha256",
+        "training_data_sha256",
+    }
+    assert all(isinstance(value, str) and len(value) == 64 for value in fingerprints.values())
+
+
 def test_shipped_spark_manifest_calibration_present_and_monotonic(shipped_manifest):
     """Calibration knots must be present and monotonic (isotonic remap).
 

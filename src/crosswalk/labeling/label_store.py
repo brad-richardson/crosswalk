@@ -9,6 +9,7 @@ Labels are stored separately from features and raw data in a normalized architec
 - labels/data/dataset={id}/data.parquet - Raw pair data (geometries + attributes)
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -132,6 +133,33 @@ VERSION_DEFAULTS = {
     "ref_data_version": None,
     "target_data_version": None,
 }
+
+# Canonical ordering for bulk-loaded model inputs.  The trailing metadata keys
+# make repeated labels for the same pair deterministic as well; mergesort keeps
+# genuinely identical rows in their on-disk order.
+_BULK_SORT_COLUMNS = [
+    "dataset",
+    "gers_id",
+    "target_id",
+    "labeled_at",
+    "labeler",
+    "session_id",
+    "label",
+    "feature_version",
+]
+
+
+def _sort_bulk_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Return bulk-loaded rows in a stable, canonical order."""
+    sort_columns = [column for column in _BULK_SORT_COLUMNS if column in df.columns]
+    if not sort_columns or df.empty:
+        return df.reset_index(drop=True)
+    return df.sort_values(
+        sort_columns,
+        kind="mergesort",
+        na_position="last",
+        key=lambda values: values.astype("string"),
+    ).reset_index(drop=True)
 
 
 @dataclass
@@ -549,6 +577,8 @@ class LabelStore:
     def load_all(
         labels_dir: Path = DEFAULT_LABELS_DIR,
         skip_errors: bool = True,
+        required_datasets: Collection[str] | None = None,
+        exclude_datasets: Collection[str] | None = None,
     ) -> pd.DataFrame:
         """Load all human labels joined with features for ML training.
 
@@ -560,6 +590,10 @@ class LabelStore:
             labels_dir: Base labels directory (contains human/, features/ subdirs)
             skip_errors: If True (default), skip partitions that fail to load.
                         If False, raise an error on any loading failure.
+            required_datasets: If provided, load only these datasets. In strict
+                        mode every requested human and feature partition must exist.
+            exclude_datasets: Datasets to omit before strict partition loading
+                        and the human-feature join.
 
         Returns:
             DataFrame with all labels joined with features and 'dataset' column
@@ -574,15 +608,71 @@ class LabelStore:
         features_dir = labels_dir / "features"
 
         # Load human labels
-        human_labels = LabelStore.load_human_labels(human_dir, skip_errors=skip_errors)
+        human_labels = LabelStore.load_human_labels(
+            human_dir,
+            skip_errors=skip_errors,
+            required_datasets=required_datasets,
+            exclude_datasets=exclude_datasets,
+        )
         if len(human_labels) == 0:
             return pd.DataFrame(columns=HUMAN_LABEL_COLUMNS + FEATURE_COLUMNS + ["dataset"])
 
         # Load features
-        features = FeatureStore.load_all(features_dir)
+        join_columns = ["gers_id", "target_id", "dataset"]
+        if not skip_errors:
+            missing_label_columns = sorted(set(join_columns) - set(human_labels.columns))
+            if missing_label_columns:
+                raise ValueError(
+                    f"Human labels are missing training join columns: {missing_label_columns}"
+                )
+        human_datasets = set(human_labels["dataset"].dropna().astype(str))
+        features = FeatureStore.load_all(
+            features_dir,
+            skip_errors=skip_errors,
+            required_datasets=human_datasets if not skip_errors else None,
+        )
         if len(features) == 0:
+            if not skip_errors:
+                raise ValueError(
+                    f"No feature rows found for required datasets: {sorted(human_datasets)}"
+                )
             logger.warning(f"No features found in {features_dir}")
             return pd.DataFrame(columns=HUMAN_LABEL_COLUMNS + FEATURE_COLUMNS + ["dataset"])
+
+        if not skip_errors:
+            missing_feature_columns = sorted(set(join_columns) - set(features.columns))
+            if missing_feature_columns:
+                raise ValueError(
+                    f"Features are missing training join columns: {missing_feature_columns}"
+                )
+
+            duplicate_feature_mask = features.duplicated(join_columns, keep=False)
+            if duplicate_feature_mask.any():
+                sample = (
+                    features.loc[duplicate_feature_mask, join_columns]
+                    .sort_values(join_columns, kind="mergesort")
+                    .head(5)
+                    .to_dict("records")
+                )
+                raise ValueError(
+                    f"{int(duplicate_feature_mask.sum())} feature rows have duplicate "
+                    f"training join keys; sample: {sample}"
+                )
+
+            feature_keys = features[join_columns].drop_duplicates()
+            missing_keys = human_labels[join_columns].merge(
+                feature_keys,
+                on=join_columns,
+                how="left",
+                indicator=True,
+            )
+            missing_keys = missing_keys[missing_keys["_merge"] == "left_only"]
+            if not missing_keys.empty:
+                sample = missing_keys[join_columns].head(5).to_dict("records")
+                raise ValueError(
+                    f"{len(missing_keys)} human labels are missing feature join keys; "
+                    f"sample: {sample}"
+                )
 
         # Drop feature_version from human labels if present — it belongs in
         # FeatureStore and having it on both sides creates _x/_y suffixes
@@ -592,7 +682,7 @@ class LabelStore:
         # Join labels with features
         result = human_labels.merge(
             features,
-            on=["gers_id", "target_id", "dataset"],
+            on=join_columns,
             how="inner",
         )
 
@@ -600,94 +690,144 @@ class LabelStore:
             missing = len(human_labels) - len(result)
             logger.warning(f"{missing} labels missing features (run 'crosswalk backfill')")
 
-        return result
+        return _sort_bulk_rows(result)
 
     @staticmethod
     def load_human_labels(
         human_dir: Path = DEFAULT_HUMAN_LABELS_DIR,
         skip_errors: bool = True,
+        required_datasets: Collection[str] | None = None,
+        exclude_datasets: Collection[str] | None = None,
     ) -> pd.DataFrame:
         """Load human labels from normalized format.
 
         Args:
             human_dir: Directory containing human label CSVs (labels/human/)
             skip_errors: If True, skip partitions that fail to load.
+            required_datasets: If provided, load only these dataset partitions.
+            exclude_datasets: Dataset partitions to ignore.
 
         Returns:
             DataFrame with human labels and 'dataset' column
         """
         human_dir = Path(human_dir)
         if not human_dir.exists():
+            if not skip_errors and required_datasets:
+                raise FileNotFoundError(f"Human-label partition directory is missing: {human_dir}")
             return pd.DataFrame(columns=HUMAN_LABEL_COLUMNS + ["dataset"])
 
         dfs = []
-        for partition_dir in human_dir.glob("dataset=*"):
-            if not partition_dir.is_dir():
+        excluded = {str(value) for value in (exclude_datasets or [])}
+        if required_datasets is None:
+            partition_dirs = sorted(human_dir.glob("dataset=*"), key=lambda path: path.name)
+        else:
+            partition_dirs = [
+                human_dir / f"dataset={dataset_id}"
+                for dataset_id in sorted({str(value) for value in required_datasets})
+            ]
+        for partition_dir in partition_dirs:
+            dataset_id = partition_dir.name.removeprefix("dataset=")
+            if dataset_id in excluded:
                 continue
-            dataset_id = partition_dir.name.split("=")[1]
-            csv_path = partition_dir / "data.csv"
-            if csv_path.exists():
-                try:
-                    df = pd.read_csv(
-                        csv_path,
-                        dtype={"gers_id": str, "ref_id": str, "target_id": str},
+            if not partition_dir.is_dir():
+                if not skip_errors:
+                    raise FileNotFoundError(
+                        f"Human-label partition is missing or is not a directory: {partition_dir}"
                     )
-                    df["dataset"] = dataset_id
-                    # Handle ref_id -> gers_id rename
-                    if "ref_id" in df.columns and "gers_id" not in df.columns:
-                        df = df.rename(columns={"ref_id": "gers_id"})
-                    dfs.append(df)
-                except Exception as e:
-                    if skip_errors:
-                        logger.warning(f"Failed to load {csv_path}: {e}")
-                    else:
-                        raise
+                continue
+            csv_path = partition_dir / "data.csv"
+            if not csv_path.exists():
+                if skip_errors:
+                    logger.warning(f"Human-label partition has no data.csv: {partition_dir}")
+                    continue
+                raise FileNotFoundError(f"Human-label partition has no data.csv: {partition_dir}")
+
+            try:
+                df = pd.read_csv(
+                    csv_path,
+                    dtype={"gers_id": str, "ref_id": str, "target_id": str},
+                )
+                df["dataset"] = dataset_id
+                # Handle ref_id -> gers_id rename
+                if "ref_id" in df.columns and "gers_id" not in df.columns:
+                    df = df.rename(columns={"ref_id": "gers_id"})
+                dfs.append(df)
+            except Exception as e:
+                if skip_errors:
+                    logger.warning(f"Failed to load {csv_path}: {e}")
+                else:
+                    raise
 
         if dfs:
-            return pd.concat(dfs, ignore_index=True)
+            return _sort_bulk_rows(pd.concat(dfs, ignore_index=True))
         return pd.DataFrame(columns=HUMAN_LABEL_COLUMNS + ["dataset"])
 
     @staticmethod
     def load_agent_labels(
         agent_dir: Path = DEFAULT_AGENT_LABELS_DIR,
         skip_errors: bool = True,
+        required_datasets: Collection[str] | None = None,
+        exclude_datasets: Collection[str] | None = None,
     ) -> pd.DataFrame:
         """Load agent labels from normalized format.
 
         Args:
             agent_dir: Directory containing agent label CSVs (labels/agent/)
             skip_errors: If True, skip partitions that fail to load.
+            required_datasets: If provided, load only these dataset partitions.
+            exclude_datasets: Dataset partitions to ignore.
 
         Returns:
             DataFrame with agent labels and 'dataset' column
         """
         agent_dir = Path(agent_dir)
         if not agent_dir.exists():
+            if not skip_errors and required_datasets:
+                raise FileNotFoundError(f"Agent-label partition directory is missing: {agent_dir}")
             return pd.DataFrame(columns=AGENT_LABEL_COLUMNS + ["dataset"])
 
         dfs = []
-        for partition_dir in agent_dir.glob("dataset=*"):
-            if not partition_dir.is_dir():
+        excluded = {str(value) for value in (exclude_datasets or [])}
+        if required_datasets is None:
+            partition_dirs = sorted(agent_dir.glob("dataset=*"), key=lambda path: path.name)
+        else:
+            partition_dirs = [
+                agent_dir / f"dataset={dataset_id}"
+                for dataset_id in sorted({str(value) for value in required_datasets})
+            ]
+        for partition_dir in partition_dirs:
+            dataset_id = partition_dir.name.removeprefix("dataset=")
+            if dataset_id in excluded:
                 continue
-            dataset_id = partition_dir.name.split("=")[1]
-            csv_path = partition_dir / "data.csv"
-            if csv_path.exists():
-                try:
-                    df = pd.read_csv(
-                        csv_path,
-                        dtype={"gers_id": str, "ref_id": str, "target_id": str},
+            if not partition_dir.is_dir():
+                if not skip_errors:
+                    raise FileNotFoundError(
+                        f"Agent-label partition is missing or is not a directory: {partition_dir}"
                     )
-                    df["dataset"] = dataset_id
-                    # Handle ref_id -> gers_id rename
-                    if "ref_id" in df.columns and "gers_id" not in df.columns:
-                        df = df.rename(columns={"ref_id": "gers_id"})
-                    dfs.append(df)
-                except Exception as e:
-                    if skip_errors:
-                        logger.warning(f"Failed to load {csv_path}: {e}")
-                    else:
-                        raise
+                continue
+            csv_path = partition_dir / "data.csv"
+            if not csv_path.exists():
+                if skip_errors:
+                    logger.warning(f"Agent-label partition has no data.csv: {partition_dir}")
+                    continue
+                raise FileNotFoundError(f"Agent-label partition has no data.csv: {partition_dir}")
+
+            try:
+                df = pd.read_csv(
+                    csv_path,
+                    dtype={"gers_id": str, "ref_id": str, "target_id": str},
+                )
+                df["dataset"] = dataset_id
+                # Handle ref_id -> gers_id rename
+                if "ref_id" in df.columns and "gers_id" not in df.columns:
+                    df = df.rename(columns={"ref_id": "gers_id"})
+                dfs.append(df)
+            except Exception as e:
+                if skip_errors:
+                    logger.warning(f"Failed to load {csv_path}: {e}")
+                else:
+                    raise
 
         if dfs:
-            return pd.concat(dfs, ignore_index=True)
+            return _sort_bulk_rows(pd.concat(dfs, ignore_index=True))
         return pd.DataFrame(columns=AGENT_LABEL_COLUMNS + ["dataset"])

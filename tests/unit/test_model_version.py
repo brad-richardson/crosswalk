@@ -249,6 +249,26 @@ class TestTrainVersionChecks:
         )
         assert matcher.model is not None
 
+    def test_explicit_artifact_feature_version_is_used_for_evaluation(self):
+        """An older model may only be evaluated on features from its own contract."""
+        labels = pd.DataFrame({"feature_version": ["legacy-v1", "legacy-v1"]})
+
+        MLMatcher._check_feature_versions(
+            labels,
+            expected_version="legacy-v1",
+        )
+        with pytest.raises(ValueError, match="expected feature_version=current-v2"):
+            MLMatcher._check_feature_versions(
+                labels,
+                expected_version="current-v2",
+            )
+
+    def test_versionless_artifact_cannot_claim_compatible_evaluation(self):
+        labels = pd.DataFrame({"feature_version": [FEATURE_VERSION]})
+
+        with pytest.raises(ValueError, match="model has no feature_version"):
+            MLMatcher._check_feature_versions(labels, expected_version=None)
+
 
 class TestAutoSelectVersionPropagation:
     def test_auto_select_deferred_load_honors_allow_flag(self, tmp_path, log_capture):
