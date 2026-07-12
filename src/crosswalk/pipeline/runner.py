@@ -391,6 +391,7 @@ def _compute_candidate_graph_by_group(
     min_confidence: float,
     sliver_edges: set[tuple[Any, Any]],
     glue_min_confidence: float | None,
+    pruned_gid_by_pair: dict[tuple[str, str], str] | None = None,
 ) -> dict[str, list[dict]]:
     """Attribute the FULL pre-selection candidate graph to sidecar groups.
 
@@ -406,7 +407,8 @@ def _compute_candidate_graph_by_group(
     attributed to the post-decomposition groups; ties break on the
     lexicographically smallest ``group_id`` for determinism):
 
-    1. A pair in some group's optimizer assignment belongs to THAT group.
+    0. A confidence-pruned pair belongs to its snapshotted PRE-prune group.
+    1. Else, a pair in some group's optimizer assignment belongs to THAT group.
     2. Else, a group containing BOTH endpoints (in-product alternative).
     3. Else, a group containing the ref endpoint.
     4. Else, a group containing the target endpoint.
@@ -423,10 +425,10 @@ def _compute_candidate_graph_by_group(
 
     Per edge: ``ref_id``, ``target_id``, ``confidence`` (raw ML score, rounded
     like every other sidecar confidence), ``selected`` (True iff the pair is in
-    the OWNING group's assignment), and ``selected_elsewhere: true`` only when a
-    non-selected edge was selected by the optimizer somewhere else (another
-    group or a 1:1 match) — so a resolver never learns a genuinely-selected pair
-    as an optimizer drop.
+    the OWNING group's assignment), ``pruned: true`` for an owned confidence-
+    pruned pair, and ``selected_elsewhere: true`` only when a non-selected edge
+    was selected by the optimizer somewhere else (another group or a 1:1 match)
+    — so a resolver never learns a genuinely-selected pair as an optimizer drop.
 
     Returns:
         Mapping of ``group_id`` -> candidate edge dicts, each list sorted by
@@ -434,6 +436,8 @@ def _compute_candidate_graph_by_group(
     """
     from ..matching.optimizer import find_match_components
 
+    pruned_gid_by_pair = pruned_gid_by_pair or {}
+    pruned_pairs_to_restore = set(pruned_gid_by_pair)
     gid_refs = {gid: {str(r.ref_id) for r in assign} for gid, assign in assignment_by_gid.items()}
     gid_tgts = {
         gid: {str(r.target_id) for r in assign} for gid, assign in assignment_by_gid.items()
@@ -445,6 +449,42 @@ def _compute_candidate_graph_by_group(
 
     # Every pair the optimizer selected ANYWHERE (groups + 1:1), post-prune.
     selected_global = {(str(r.ref_id), str(r.target_id)) for r in optimized}
+    selected_pruned = sorted(pruned_pairs_to_restore & selected_global)
+    if selected_pruned:
+        raise ValueError(
+            f"Candidate graph received pairs marked both selected and pruned: {selected_pruned[:5]}"
+        )
+
+    # Best floor-passing scored result for every pair. Component reconstruction
+    # below intentionally omits some disconnected/glue-pruned edges; the global
+    # lookup lets rule 0 restore an edge the optimizer actually selected before
+    # the confidence-drop prune, even when both endpoints left the surviving
+    # group and the edge no longer touches a reconstructed component group.
+    best_result_by_pair: dict[tuple[str, str], Any] = {}
+    for r in results:
+        if _is_nan(r.confidence) or r.confidence < min_confidence:
+            continue
+        pair = (str(r.ref_id), str(r.target_id))
+        prev = best_result_by_pair.get(pair)
+        if prev is None or r.confidence > prev.confidence:
+            best_result_by_pair[pair] = r
+
+    missing_owners = sorted(
+        (pair, owner)
+        for pair, owner in pruned_gid_by_pair.items()
+        if owner not in assignment_by_gid
+    )
+    if missing_owners:
+        raise ValueError(
+            "Candidate graph cannot restore pruned pairs whose pre-prune group "
+            f"did not survive: {missing_owners[:5]}"
+        )
+    missing_results = sorted(pruned_pairs_to_restore - best_result_by_pair.keys())
+    if missing_results:
+        raise ValueError(
+            "Candidate graph cannot restore pruned pairs without a floor-passing "
+            f"scored result: {missing_results[:5]}"
+        )
 
     # Recompute the optimizer's components. Deterministic given the same
     # inputs (results, floor, sliver set, glue prune) the optimizer used.
@@ -484,14 +524,18 @@ def _compute_candidate_graph_by_group(
             if ci is not None:
                 comp_gids[ci].add(gid)
 
-    def _edge_dict(pair: tuple[str, str], confidence: float, selected: bool) -> dict:
+    def _edge_dict(
+        pair: tuple[str, str], confidence: float, selected: bool, *, pruned: bool = False
+    ) -> dict:
         edge = {
             "ref_id": pair[0],
             "target_id": pair[1],
             "confidence": round(float(confidence), 4),
             "selected": selected,
         }
-        if not selected and pair in selected_global:
+        if pruned:
+            edge["pruned"] = True
+        elif not selected and pair in selected_global:
             edge["selected_elsewhere"] = True
         return edge
 
@@ -499,6 +543,11 @@ def _compute_candidate_graph_by_group(
     for ci, gids in comp_gids.items():
         gids_sorted = sorted(gids)
         for pair, r in comp_best[ci].items():
+            # Authoritative rule 0 restores these directly below. Skipping them
+            # here avoids both temporary foreign attribution and an O(P*G)
+            # cleanup pass on datasets with many pruned pairs/groups.
+            if pair in pruned_pairs_to_restore:
+                continue
             rid, tid = pair
             owner = pair_to_assignment_gid.get(pair)
             if owner is None:
@@ -521,6 +570,13 @@ def _compute_candidate_graph_by_group(
             pair = (str(r.ref_id), str(r.target_id))
             if pair not in by_gid[gid]:
                 by_gid[gid][pair] = _edge_dict(pair, r.confidence, True)
+
+    # Rule 0 is authoritative and runs last. The normal attribution pass skipped
+    # these prevalidated pairs, so each is restored exactly once in O(P), under
+    # its pre-prune owner, including fully detached pendant edges.
+    for pair, owner in pruned_gid_by_pair.items():
+        result = best_result_by_pair[pair]
+        by_gid[owner][pair] = _edge_dict(pair, result.confidence, False, pruned=True)
 
     return {gid: [pairs[p] for p in sorted(pairs)] for gid, pairs in by_gid.items()}
 
@@ -962,6 +1018,22 @@ def _export_groups_sidecar(
         for (r, t), gid in (pruned_group_ids or {}).items()
         if gid is not None
     }
+    # Group attribution is the stronger form of the SAME prune provenance, not
+    # an independent source of truth. Production snapshots both together; fail
+    # closed on partial/mismatched metadata so JSON/parquet flags and n_pruned
+    # cannot disagree. ``None`` retains the legacy unattributed fallback.
+    if pruned_group_ids is not None and set(pruned_gid_by_pair) != pruned_pairs_str:
+        missing_attribution = sorted(pruned_pairs_str - pruned_gid_by_pair.keys())
+        unexpected_attribution = sorted(pruned_gid_by_pair.keys() - pruned_pairs_str)
+        raise ValueError(
+            "Pruned pair/group attribution mismatch: "
+            f"missing={missing_attribution[:5]}, unexpected={unexpected_attribution[:5]}"
+        )
+
+    # Index ownership once so group serialization is O(P + G), not O(P*G).
+    pruned_pairs_by_gid: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    for pair, gid in pruned_gid_by_pair.items():
+        pruned_pairs_by_gid[gid].add(pair)
     all_selected_pairs: set[tuple[str, str]] = set()
     for _gid, _assign in assignment_by_gid.items():
         for r in _assign:
@@ -986,6 +1058,7 @@ def _export_groups_sidecar(
             min_confidence=min_confidence,
             sliver_edges=sliver_edges,
             glue_min_confidence=glue_min_confidence,
+            pruned_gid_by_pair=pruned_gid_by_pair,
         )
 
     # Projected (metric) geometry + name lookups for corridor/structure analysis
@@ -1113,9 +1186,7 @@ def _export_groups_sidecar(
         # that pass ``pruned_pairs`` but not ``pruned_group_ids``), fall back to
         # global membership so a single-group prune is still recorded.
         if pruned_gid_by_pair:
-            group_owned_pruned = {
-                p for p in pruned_pairs_str if pruned_gid_by_pair.get(p) == str(group_id)
-            }
+            group_owned_pruned = pruned_pairs_by_gid.get(str(group_id), set())
         else:
             group_owned_pruned = pruned_pairs_str
         # Pairs in THIS group's assignment that the optimizer flagged as a
@@ -1386,8 +1457,9 @@ def _export_groups_sidecar(
                 # Full candidate graph (learned-resolver flip condition #1):
                 # EVERY floor-passing candidate pair in this group's component,
                 # attributed to exactly one group, with the optimizer's decision
-                # (`selected`). Uncapped, minimal uniform schema; empty when
-                # settings.stitch_persist_candidate_graph is off.
+                # (`selected`), plus authoritative pre-prune ownership (`pruned`)
+                # for confidence-pruned pairs. Uncapped, minimal uniform schema;
+                # empty when settings.stitch_persist_candidate_graph is off.
                 "candidate_edges": (
                     candidate_graph_by_gid.get(group_id, [])
                     if settings.stitch_persist_candidate_graph

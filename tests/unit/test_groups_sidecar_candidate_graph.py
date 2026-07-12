@@ -24,6 +24,7 @@ import json
 
 import geopandas as gpd
 import pandas as pd
+import pytest
 from shapely import LineString
 
 from crosswalk.config import FEATURE_COLUMNS, FEATURE_VERSION, settings
@@ -334,6 +335,174 @@ def test_cross_group_candidate_attributed_to_exactly_one_group(tmp_path):
     for g in by_gid.values():
         sel = {(e["ref_id"], e["target_id"]) for e in g["candidate_edges"] if e["selected"]}
         assert sel == {(e["ref_id"], e["target_id"]) for e in g["optimizer_assignment"]}
+
+
+def test_pruned_pendant_candidate_restored_to_pre_prune_owner(tmp_path):
+    """A confidence-pruned edge whose endpoints both left its surviving group
+    remains in the resolver universe, owned exactly once by its pre-prune gid."""
+    ref, tgt = _ref_gdf(), _tgt_gdf()
+    kept = _mr("R1", "T1", 0.98, 0, 0, gid="g1")
+    pruned = _mr("R2", "T2", 0.30, 1, 1, gid="g1")
+
+    original = settings.stitch_persist_rejected_edges
+    try:
+        # The canonical candidate graph/parquet must not depend on the legacy
+        # rejected-edge recovery path that already knew how to retain pendants.
+        settings.stitch_persist_rejected_edges = False
+        groups = _export(
+            tmp_path,
+            [kept, pruned],
+            [kept],
+            ref,
+            tgt,
+            pruned_pairs={("R2", "T2")},
+            pruned_group_ids={("R2", "T2"): "g1"},
+        )
+        reversed_groups = _export(
+            tmp_path / "reversed",
+            [pruned, kept],
+            [kept],
+            ref,
+            tgt,
+            pruned_pairs={("R2", "T2")},
+            pruned_group_ids={("R2", "T2"): "g1"},
+        )
+    finally:
+        settings.stitch_persist_rejected_edges = original
+    group = next(g for g in groups if g["group_id"] == "g1")
+    assert group["rejected_edges"] == []
+    reversed_group = next(g for g in reversed_groups if g["group_id"] == "g1")
+    assert group["candidate_edges"] == reversed_group["candidate_edges"]
+    by_pair = {(e["ref_id"], e["target_id"]): e for e in group["candidate_edges"]}
+
+    assert by_pair[("R2", "T2")] == {
+        "ref_id": "R2",
+        "target_id": "T2",
+        "confidence": 0.3,
+        "selected": False,
+        "pruned": True,
+    }
+    occurrences = [
+        g["group_id"]
+        for g in groups
+        for e in g["candidate_edges"]
+        if (e["ref_id"], e["target_id"]) == ("R2", "T2")
+    ]
+    assert occurrences == ["g1"]
+
+    frame = pd.read_parquet(candidates_sidecar_path(tmp_path / "bridge.parquet"))
+    row = frame.set_index(["group_id", "ref_id", "target_id"]).loc[("g1", "R2", "T2")]
+    assert bool(row["pruned"])
+    assert not bool(row["selected"])
+    assert row["optimizer_decision"] == "pruned"
+    assert row["decision_reason"] == "confidence_drop_prune"
+
+
+def test_pruned_candidate_ownership_overrides_foreign_endpoint_attribution(tmp_path):
+    """If a pruned pair touches a surviving foreign group, rule 0 moves it back
+    to its snapshotted owner instead of teaching that foreign group a drop."""
+    ref = gpd.GeoDataFrame(
+        {"id": ["R1", "R2", "R3"]},
+        geometry=[
+            LineString([(0, 0), (100, 0)]),
+            LineString([(0, 500), (100, 500)]),
+            LineString([(100, 500), (200, 500)]),
+        ],
+        crs=_CRS,
+    )
+    tgt = gpd.GeoDataFrame(
+        {"id": ["T1", "T2", "T3"]},
+        geometry=[
+            LineString([(0, 1), (100, 1)]),
+            LineString([(0, 3), (100, 3)]),
+            LineString([(0, 501), (200, 501)]),
+        ],
+        crs=_CRS,
+    )
+    owner_kept = _mr("R1", "T1", 0.98, 0, 0, gid="g1")
+    foreign_a = _mr("R2", "T3", 0.97, 1, 2, gid="g2")
+    foreign_b = _mr("R3", "T3", 0.95, 2, 2, gid="g2")
+    pruned = _mr("R2", "T2", 0.30, 1, 1, gid="g1")
+    groups = _export(
+        tmp_path,
+        [owner_kept, foreign_a, foreign_b, pruned],
+        [owner_kept, foreign_a, foreign_b],
+        ref,
+        tgt,
+        pruned_pairs={("R2", "T2")},
+        pruned_group_ids={("R2", "T2"): "g1"},
+    )
+    by_gid = {g["group_id"]: g for g in groups}
+    owners = [
+        gid
+        for gid, group in by_gid.items()
+        for edge in group["candidate_edges"]
+        if (edge["ref_id"], edge["target_id"]) == ("R2", "T2")
+    ]
+    assert owners == ["g1"]
+    edge = next(
+        e for e in by_gid["g1"]["candidate_edges"] if (e["ref_id"], e["target_id"]) == ("R2", "T2")
+    )
+    assert edge["pruned"] is True
+    assert edge["selected"] is False
+    assert "selected_elsewhere" not in edge
+    assert sum(g["n_pruned"] for g in groups) == 1
+    assert sum(bool(e.get("pruned")) for g in groups for e in g["candidate_edges"]) == 1
+
+    frame = pd.read_parquet(candidates_sidecar_path(tmp_path / "bridge.parquet"))
+    json_keys = {
+        (g["group_id"], e["ref_id"], e["target_id"]) for g in groups for e in g["candidate_edges"]
+    }
+    parquet_keys = set(
+        frame[["group_id", "ref_id", "target_id"]].itertuples(index=False, name=None)
+    )
+    assert parquet_keys == json_keys
+    parquet_edge = frame.set_index(["group_id", "ref_id", "target_id"]).loc[("g1", "R2", "T2")]
+    assert bool(parquet_edge["pruned"])
+    assert parquet_edge["optimizer_decision"] == "pruned"
+
+
+@pytest.mark.parametrize(
+    ("pruned_pair", "owner", "message"),
+    [
+        (("R1", "T1"), "g1", "both selected and pruned"),
+        (("R2", "T2"), "missing", "did not survive"),
+        (("X", "Y"), "g1", "without a floor-passing"),
+    ],
+)
+def test_invalid_pruned_candidate_metadata_fails_closed(tmp_path, pruned_pair, owner, message):
+    ref, tgt, scenario_results, selected = _scenario()
+    with pytest.raises(ValueError, match=message):
+        _export(
+            tmp_path,
+            scenario_results,
+            selected,
+            ref,
+            tgt,
+            pruned_pairs={pruned_pair},
+            pruned_group_ids={pruned_pair: owner},
+        )
+
+
+@pytest.mark.parametrize(
+    ("pruned_pairs", "pruned_group_ids"),
+    [
+        ({("R1", "T2")}, {}),
+        (set(), {("R1", "T2"): "g1"}),
+    ],
+)
+def test_pruned_pair_and_owner_map_must_match(tmp_path, pruned_pairs, pruned_group_ids):
+    ref, tgt, results, selected = _scenario()
+    with pytest.raises(ValueError, match="attribution mismatch"):
+        _export(
+            tmp_path,
+            results,
+            selected,
+            ref,
+            tgt,
+            pruned_pairs=pruned_pairs,
+            pruned_group_ids=pruned_group_ids,
+        )
 
 
 def test_existing_keys_invariant_to_candidate_graph_flag(tmp_path):
