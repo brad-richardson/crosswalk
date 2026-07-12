@@ -277,6 +277,73 @@ class TestOptimizeMatchesWithGrouping:
             assert r.features["group_ref_count"] == 2
             assert r.features["group_target_count"] == 1
 
+    def test_one_to_n_disconnected_chains_stay_separate(self):
+        """One shared ref must not flatten two distant target chains into one group."""
+        ref_geoms = {"r0": LineString([(0, 5), (300, 5)])}
+        target_geoms = {
+            "t1": LineString([(0, 0), (50, 0)]),
+            "t2": LineString([(50, 0), (100, 0)]),
+            "t3": LineString([(200, 0), (250, 0)]),
+            "t4": LineString([(250, 0), (300, 0)]),
+        }
+        results = [
+            MatchResult("r0", target_id, MatchDecision.MATCH, 0.9, {}, {})
+            for target_id in target_geoms
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            contiguity_tolerance=5.0,
+            corridor_aware=True,
+        )
+
+        groups: dict[str, set[str]] = {}
+        for result in optimized:
+            assert result.features["match_type"] == "1:N"
+            assert result.features["group_size"] == 2
+            assert result.features["group_target_count"] == 2
+            groups.setdefault(result.features["group_id"], set()).add(result.target_id)
+        assert set(map(frozenset, groups.values())) == {
+            frozenset({"t1", "t2"}),
+            frozenset({"t3", "t4"}),
+        }
+
+    def test_n_to_one_disconnected_chains_stay_separate(self):
+        """One shared target must not flatten two distant ref chains into one group."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(50, 0), (100, 0)]),
+            "r3": LineString([(200, 0), (250, 0)]),
+            "r4": LineString([(250, 0), (300, 0)]),
+        }
+        target_geoms = {"t0": LineString([(0, 5), (300, 5)])}
+        results = [
+            MatchResult(ref_id, "t0", MatchDecision.MATCH, 0.9, {}, {}) for ref_id in ref_geoms
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            contiguity_tolerance=5.0,
+            corridor_aware=True,
+        )
+
+        groups: dict[str, set[str]] = {}
+        for result in optimized:
+            assert result.features["match_type"] == "N:1"
+            assert result.features["group_size"] == 2
+            assert result.features["group_ref_count"] == 2
+            groups.setdefault(result.features["group_id"], set()).add(result.ref_id)
+        assert set(map(frozenset, groups.values())) == {
+            frozenset({"r1", "r2"}),
+            frozenset({"r3", "r4"}),
+        }
+
     def test_m_to_n_both_contiguous(self):
         """M:N where both sides are fully contiguous."""
         ref_geoms = {
@@ -451,6 +518,165 @@ class TestOptimizeMatchesWithGrouping:
         r3_matches = [r for r in optimized if r.ref_id == "r3"]
         assert len(r3_matches) == 1
         assert r3_matches[0].target_id == "t2"
+
+    def test_corridor_gate_blocks_perpendicular_one_to_n_expansion(self):
+        """A junction touch cannot become 1:N through direct or post-greedy grouping."""
+        ref_geoms = {"r0": LineString([(0, 2), (50, 2)])}
+        target_geoms = {
+            "t1": LineString([(0, 0), (50, 0)]),
+            "t2": LineString([(50, 0), (50, 50)]),
+        }
+        results = [
+            MatchResult("r0", "t1", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r0", "t2", MatchDecision.MATCH, 0.8, {}, {}),
+        ]
+        ref_gdf = self._make_gdf("id", ref_geoms)
+        target_gdf = self._make_gdf("local_id", target_geoms)
+
+        ungated = optimize_matches_with_grouping(
+            results,
+            ref_gdf,
+            target_gdf,
+            min_confidence=0.5,
+            contiguity_tolerance=1.0,
+            corridor_aware=False,
+        )
+        gated = optimize_matches_with_grouping(
+            results,
+            ref_gdf,
+            target_gdf,
+            min_confidence=0.5,
+            contiguity_tolerance=1.0,
+            corridor_aware=True,
+        )
+
+        assert len(ungated) == 2
+        assert {r.features["match_type"] for r in ungated} == {"1:N"}
+        assert [(r.ref_id, r.target_id) for r in gated] == [("r0", "t1")]
+
+    def test_corridor_gate_blocks_perpendicular_n_to_one_expansion(self):
+        """The corridor-aware post-expander applies the same rule on the ref side."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(50, 0), (50, 50)]),
+        }
+        target_geoms = {"t0": LineString([(0, 2), (50, 2)])}
+        results = [
+            MatchResult("r1", "t0", MatchDecision.MATCH, 0.9, {}, {}),
+            MatchResult("r2", "t0", MatchDecision.MATCH, 0.8, {}, {}),
+        ]
+        ref_gdf = self._make_gdf("id", ref_geoms)
+        target_gdf = self._make_gdf("local_id", target_geoms)
+
+        ungated = optimize_matches_with_grouping(
+            results,
+            ref_gdf,
+            target_gdf,
+            min_confidence=0.5,
+            contiguity_tolerance=1.0,
+            corridor_aware=False,
+        )
+        gated = optimize_matches_with_grouping(
+            results,
+            ref_gdf,
+            target_gdf,
+            min_confidence=0.5,
+            contiguity_tolerance=1.0,
+            corridor_aware=True,
+        )
+
+        assert len(ungated) == 2
+        assert {r.features["match_type"] for r in ungated} == {"N:1"}
+        assert [(r.ref_id, r.target_id) for r in gated] == [("r1", "t0")]
+
+    def test_target_side_coverage_overlap_demotes_lower_confidence(self):
+        """Two refs cannot both claim the same portion of one target."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(50, 0), (100, 0)]),
+        }
+        target_geoms = {"t0": LineString([(0, 5), (100, 5)])}
+        results = [
+            MatchResult(
+                "r1",
+                "t0",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=0.0,
+                local_end_frac=0.75,
+            ),
+            MatchResult(
+                "r2",
+                "t0",
+                MatchDecision.MATCH,
+                0.8,
+                {},
+                {},
+                gers_start_frac=0.0,
+                gers_end_frac=1.0,
+                local_start_frac=0.25,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            contiguity_tolerance=5.0,
+        )
+        by_ref = {result.ref_id: result for result in optimized}
+
+        assert by_ref["r1"].decision == MatchDecision.MATCH
+        assert by_ref["r2"].decision == MatchDecision.REVIEW
+        assert by_ref["r2"].features["coverage_conflict"] == 1.0
+        assert by_ref["r2"].features["target_coverage_conflict"] == 1.0
+
+    def test_target_side_touching_coverage_is_not_a_conflict(self):
+        """Adjacent target intervals that only touch remain valid N:1 assignments."""
+        ref_geoms = {
+            "r1": LineString([(0, 0), (50, 0)]),
+            "r2": LineString([(50, 0), (100, 0)]),
+        }
+        target_geoms = {"t0": LineString([(0, 5), (100, 5)])}
+        results = [
+            MatchResult(
+                "r1",
+                "t0",
+                MatchDecision.MATCH,
+                0.9,
+                {},
+                {},
+                local_start_frac=0.0,
+                local_end_frac=0.5,
+            ),
+            MatchResult(
+                "r2",
+                "t0",
+                MatchDecision.MATCH,
+                0.8,
+                {},
+                {},
+                local_start_frac=0.5,
+                local_end_frac=1.0,
+            ),
+        ]
+
+        optimized = optimize_matches_with_grouping(
+            results,
+            self._make_gdf("id", ref_geoms),
+            self._make_gdf("local_id", target_geoms),
+            min_confidence=0.5,
+            contiguity_tolerance=5.0,
+        )
+
+        assert len(optimized) == 2
+        assert all(result.decision == MatchDecision.MATCH for result in optimized)
 
     def test_preserves_alignment_fractions(self):
         """Group results should preserve original alignment fractions."""

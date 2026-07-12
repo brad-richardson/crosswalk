@@ -194,10 +194,10 @@ Group optimization (`src/crosswalk/matching/optimizer.py::optimize_matches_with_
 
 1. **Connected components**: Build bipartite connected components over candidate pairs above `min_confidence` (`find_match_components`)
 2. **Classification**: Classify each component as 1:1, 1:N, N:1, or M:N by counting distinct refs/targets (`_classify_and_resolve_component`)
-3. **Contiguity clustering**: Within 1:N/N:1/M:N components, cluster segments into contiguous subgroups via cKDTree endpoint proximity (within `contiguity_tolerance`); non-contiguous singletons fall back to the 1:1 pool
+3. **Corridor-aware contiguity clustering**: Within 1:N/N:1/M:N components and post-expansion, cluster segments via cKDTree endpoint proximity (within `contiguity_tolerance`) gated by collinear continuation or same normalized name; disconnected chains remain separate groups and non-contiguous singletons fall back to the 1:1 pool
 4. **Greedy 1:1 assignment**: Assign unclaimed leftover candidates greedily by descending confidence (`optimize_matches_greedy`)
 5. **Post-hoc expansion**: Expand 1:1 matches into 1:N/N:1 groups where contiguous candidates exist (`_expand_greedy_matches`); this only adds matches, never removes assignments
-6. **Coverage-conflict demotion**: When two targets claim overlapping portions of the same reference segment (overlap > `MAX_ALIGNMENT_OVERLAP_M` = 5 m), the lower-confidence match is demoted to REVIEW (`_validate_assignment_coverage`)
+6. **Symmetric coverage-conflict demotion**: When two targets claim overlapping portions of one reference, or two references claim overlapping portions of one target (overlap > `MAX_ALIGNMENT_OVERLAP_M` = 5 m), the lower-confidence match is demoted to REVIEW (`_validate_assignment_coverage`)
 
 Applied during group optimization and to define the labeling UI review band:
 

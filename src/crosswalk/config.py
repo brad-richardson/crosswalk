@@ -696,16 +696,14 @@ class MatcherSettings(BaseSettings):
         "If estimated memory exceeds this, greedy algorithm is used instead.",
     )
 
-    # Corridor-aware M:N grouping (group-splitting design).
-    # When enabled, the M:N branch's endpoint-proximity contiguity only chains
-    # segments that are collinear continuations (turn angle <= max_turn_deg) OR
-    # share a normalized name. This stops perpendicular junction kisses from
-    # welding whole neighbourhoods into one "monster" group; the existing
-    # per-(ref_group x target_group) re-matching then decomposes the corridor
-    # over-merge into per-corridor subgroups.
+    # Corridor-aware grouping (group-splitting design).
+    # When enabled, endpoint-proximity contiguity in 1:N, N:1, M:N, and greedy
+    # post-expansion only chains segments that are collinear continuations
+    # (turn angle <= max_turn_deg) OR share a normalized name. This stops
+    # perpendicular junction kisses from welding independent corridors.
     optimizer_corridor_aware: bool = Field(
         default=True,
-        description="Gate M:N contiguity on collinear continuation or same name.",
+        description="Gate optimizer contiguity on collinear continuation or same name.",
     )
     optimizer_corridor_max_turn_deg: float = Field(
         default=40.0,

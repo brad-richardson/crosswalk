@@ -95,7 +95,7 @@ flowchart TB
         E --> F[Compute 78 Features<br/>Geometric, semantic, topological]
         F --> G[Score with XGBoost]
         G --> H["Graph-Level Resolution<br/>(Planned)"]
-        H --> I[Optimize M:N Matches<br/>Hungarian algorithm]
+        H --> I[Optimize M:N Matches<br/>components + greedy assignment]
         I --> J{Quality<br/>Acceptable?}
     end
 

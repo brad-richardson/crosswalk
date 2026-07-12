@@ -362,7 +362,7 @@ def build_contiguity_adjacency(
             the two segments are a collinear continuation at the shared endpoint
             (deflection <= ``max_turn_deg``) OR share a normalized name (the
             "same-street rescue" for gently curving named corridors). This is
-            the corridor-aware gate used by the M:N branch so perpendicular
+            the corridor-aware gate used by optimizer grouping so perpendicular
             junction kisses do not chain independent corridors together.
         max_turn_deg: Deflection threshold (degrees) for the collinearity gate.
         name_lookup: Optional ID -> name map (string or Overture name dict) for
@@ -574,6 +574,10 @@ def _expand_greedy_matches(
     target_geoms: dict[Any, LineString],
     tolerance: float,
     min_confidence: float,
+    corridor_aware: bool = False,
+    max_turn_deg: float = 40.0,
+    ref_name_lookup: dict[Any, Any] | None = None,
+    target_name_lookup: dict[Any, Any] | None = None,
 ) -> list[MatchResult]:
     """Expand greedy 1:1 matches to 1:N/N:1 groups where contiguous candidates exist.
 
@@ -592,6 +596,10 @@ def _expand_greedy_matches(
         target_geoms: Target geometry lookup
         tolerance: Contiguity tolerance in meters
         min_confidence: Minimum confidence for expansion candidates
+        corridor_aware: Gate contiguity on collinear continuation or same name.
+        max_turn_deg: Deflection threshold for corridor-aware contiguity.
+        ref_name_lookup: Optional reference ID -> name map for same-name rescue.
+        target_name_lookup: Optional target ID -> name map for same-name rescue.
 
     Returns:
         Expanded list of MatchResult objects (original 1:1 + new group members)
@@ -634,7 +642,14 @@ def _expand_greedy_matches(
 
         # Check which are contiguous with the assigned target
         all_target_ids = [assigned_target] + other_targets
-        target_groups = _find_contiguous_id_groups(all_target_ids, target_geoms, tolerance)
+        target_groups = _find_contiguous_id_groups(
+            all_target_ids,
+            target_geoms,
+            tolerance,
+            require_collinear=corridor_aware,
+            max_turn_deg=max_turn_deg,
+            name_lookup=target_name_lookup,
+        )
 
         # Find the group containing the assigned target
         for tg in target_groups:
@@ -666,7 +681,14 @@ def _expand_greedy_matches(
             continue
 
         all_ref_ids = [assigned_ref] + other_refs
-        ref_groups = _find_contiguous_id_groups(all_ref_ids, ref_geoms, tolerance)
+        ref_groups = _find_contiguous_id_groups(
+            all_ref_ids,
+            ref_geoms,
+            tolerance,
+            require_collinear=corridor_aware,
+            max_turn_deg=max_turn_deg,
+            name_lookup=ref_name_lookup,
+        )
 
         for rg in ref_groups:
             if assigned_ref in rg and len(rg) > 1:
@@ -975,13 +997,20 @@ def _classify_and_resolve_component(
 
     # Case 2: 1:N — single ref, multiple targets
     if n_refs == 1 and n_targets > 1:
-        target_groups = _find_contiguous_id_groups(target_ids, target_geoms, tolerance)
+        target_groups = _find_contiguous_id_groups(
+            target_ids,
+            target_geoms,
+            tolerance,
+            require_collinear=corridor_aware,
+            max_turn_deg=max_turn_deg,
+            name_lookup=target_name_lookup,
+        )
 
         group_results: list[MatchResult] = []
         leftover: list[MatchResult] = []
 
         # Collect contiguous groups and singletons
-        contiguous_group_matches: list[MatchResult] = []
+        contiguous_match_groups: list[list[MatchResult]] = []
         singleton_matches: list[MatchResult] = []
 
         for tg in target_groups:
@@ -989,23 +1018,25 @@ def _classify_and_resolve_component(
             group_matches = [r for r in component_results if r.target_id in tg_set]
 
             if len(tg) > 1:
-                contiguous_group_matches.extend(group_matches)
+                contiguous_match_groups.append(group_matches)
             else:
                 singleton_matches.extend(group_matches)
 
-        # Try to merge singletons into the contiguous group by alignment fractions
-        if contiguous_group_matches and singleton_matches:
+        # Alignment-only singleton recovery is unambiguous with one chain. If
+        # there are multiple disconnected chains, leave singletons for greedy
+        # assignment instead of attaching them to an arbitrary chain by order.
+        if len(contiguous_match_groups) == 1 and singleton_matches:
             ref_id = ref_ids[0]
             ref_length_m = ref_geoms[ref_id].length if ref_id in ref_geoms else 0.0
-            contiguous_group_matches, singleton_matches = _merge_singletons_by_alignment(
-                contiguous_group_matches,
+            contiguous_match_groups[0], singleton_matches = _merge_singletons_by_alignment(
+                contiguous_match_groups[0],
                 singleton_matches,
                 frac_start_key="gers_start_frac",
                 frac_end_key="gers_end_frac",
                 shared_segment_length_m=ref_length_m,
             )
 
-        if contiguous_group_matches:
+        for contiguous_group_matches in contiguous_match_groups:
             group_results.extend(
                 _create_group_results(contiguous_group_matches, MatchType.ONE_TO_N)
             )
@@ -1015,13 +1046,20 @@ def _classify_and_resolve_component(
 
     # Case 3: N:1 — multiple refs, single target
     if n_refs > 1 and n_targets == 1:
-        ref_groups = _find_contiguous_id_groups(ref_ids, ref_geoms, tolerance)
+        ref_groups = _find_contiguous_id_groups(
+            ref_ids,
+            ref_geoms,
+            tolerance,
+            require_collinear=corridor_aware,
+            max_turn_deg=max_turn_deg,
+            name_lookup=ref_name_lookup,
+        )
 
         group_results = []
         leftover = []
 
         # Collect contiguous groups and singletons
-        contiguous_group_matches: list[MatchResult] = []
+        contiguous_match_groups: list[list[MatchResult]] = []
         singleton_matches: list[MatchResult] = []
 
         for rg in ref_groups:
@@ -1029,23 +1067,22 @@ def _classify_and_resolve_component(
             group_matches = [r for r in component_results if r.ref_id in rg_set]
 
             if len(rg) > 1:
-                contiguous_group_matches.extend(group_matches)
+                contiguous_match_groups.append(group_matches)
             else:
                 singleton_matches.extend(group_matches)
 
-        # Try to merge singletons into the contiguous group by alignment fractions
-        if contiguous_group_matches and singleton_matches:
+        if len(contiguous_match_groups) == 1 and singleton_matches:
             target_id = target_ids[0]
             target_length_m = target_geoms[target_id].length if target_id in target_geoms else 0.0
-            contiguous_group_matches, singleton_matches = _merge_singletons_by_alignment(
-                contiguous_group_matches,
+            contiguous_match_groups[0], singleton_matches = _merge_singletons_by_alignment(
+                contiguous_match_groups[0],
                 singleton_matches,
                 frac_start_key="local_start_frac",
                 frac_end_key="local_end_frac",
                 shared_segment_length_m=target_length_m,
             )
 
-        if contiguous_group_matches:
+        for contiguous_group_matches in contiguous_match_groups:
             group_results.extend(
                 _create_group_results(contiguous_group_matches, MatchType.N_TO_ONE)
             )
@@ -1151,17 +1188,20 @@ def _classify_and_resolve_component(
 def _validate_assignment_coverage(
     results: list[MatchResult],
     ref_geoms: dict[Any, LineString],
+    target_geoms: dict[Any, LineString],
     max_overlap_m: float = MAX_ALIGNMENT_OVERLAP_M,
 ) -> list[MatchResult]:
     """Detect conflicting alignment coverage in assigned matches.
 
-    Checks per reference segment: no two targets should claim overlapping
-    portions. When the overlap exceeds max_overlap_m, the lower-confidence
-    match is demoted to REVIEW.
+    Checks both assignment directions: no two targets should claim overlapping
+    portions of one reference, and no two references should claim overlapping
+    portions of one target. When either overlap exceeds ``max_overlap_m``, the
+    lower-confidence match is demoted to REVIEW.
 
     Args:
         results: Optimized match results
         ref_geoms: Reference geometries for computing overlap in meters
+        target_geoms: Target geometries for computing overlap in meters
         max_overlap_m: Maximum accepted overlap in meters
 
     Returns:
@@ -1170,63 +1210,73 @@ def _validate_assignment_coverage(
     if not results:
         return results
 
-    # Group results by ref_id
-    by_ref: dict[Any, list[int]] = defaultdict(list)
-    for i, r in enumerate(results):
-        by_ref[r.ref_id].append(i)
+    demote_sides: dict[int, set[str]] = defaultdict(set)
 
-    # Track indices that need demotion
-    demote_indices: set[int] = set()
+    def _collect_conflicts(
+        id_attr: str,
+        start_attr: str,
+        end_attr: str,
+        geom_lookup: dict[Any, LineString],
+        side: str,
+    ) -> None:
+        by_segment: dict[Any, list[int]] = defaultdict(list)
+        for index, result in enumerate(results):
+            by_segment[getattr(result, id_attr)].append(index)
 
-    for ref_id, indices in by_ref.items():
-        if len(indices) < 2:
-            continue
-
-        ref_length_m = ref_geoms[ref_id].length if ref_id in ref_geoms else 0.0
-        if ref_length_m <= 0:
-            continue
-
-        # Check all pairs for overlap on the ref side
-        for a_pos in range(len(indices)):
-            a_idx = indices[a_pos]
-            a = results[a_idx]
-            a_start = a.gers_start_frac
-            a_end = a.gers_end_frac
-            if a_start is None or a_end is None:
+        for segment_id, indices in by_segment.items():
+            if len(indices) < 2:
                 continue
-            a_lo, a_hi = min(a_start, a_end), max(a_start, a_end)
+            segment_length_m = geom_lookup[segment_id].length if segment_id in geom_lookup else 0.0
+            if segment_length_m <= 0:
+                continue
 
-            for b_pos in range(a_pos + 1, len(indices)):
-                b_idx = indices[b_pos]
-                b = results[b_idx]
-                b_start = b.gers_start_frac
-                b_end = b.gers_end_frac
-                if b_start is None or b_end is None:
+            for a_pos, a_idx in enumerate(indices):
+                a = results[a_idx]
+                a_start = getattr(a, start_attr)
+                a_end = getattr(a, end_attr)
+                if a_start is None or a_end is None:
                     continue
-                b_lo, b_hi = min(b_start, b_end), max(b_start, b_end)
+                a_lo, a_hi = min(a_start, a_end), max(a_start, a_end)
 
-                # Compute overlap in meters
-                overlap_frac = max(0.0, min(a_hi, b_hi) - max(a_lo, b_lo))
-                if overlap_frac <= 0:
-                    continue
+                for b_idx in indices[a_pos + 1 :]:
+                    b = results[b_idx]
+                    b_start = getattr(b, start_attr)
+                    b_end = getattr(b, end_attr)
+                    if b_start is None or b_end is None:
+                        continue
+                    b_lo, b_hi = min(b_start, b_end), max(b_start, b_end)
+                    overlap_frac = max(0.0, min(a_hi, b_hi) - max(a_lo, b_lo))
+                    overlap_m = overlap_frac * segment_length_m
+                    if overlap_m > max_overlap_m:
+                        loser = a_idx if a.confidence <= b.confidence else b_idx
+                        demote_sides[loser].add(side)
 
-                overlap_m = overlap_frac * ref_length_m
-                if overlap_m > max_overlap_m:
-                    # Conflict — demote the lower-confidence one
-                    if a.confidence <= b.confidence:
-                        demote_indices.add(a_idx)
-                    else:
-                        demote_indices.add(b_idx)
+    _collect_conflicts(
+        "ref_id",
+        "gers_start_frac",
+        "gers_end_frac",
+        ref_geoms,
+        "ref",
+    )
+    _collect_conflicts(
+        "target_id",
+        "local_start_frac",
+        "local_end_frac",
+        target_geoms,
+        "target",
+    )
 
-    if not demote_indices:
+    if not demote_sides:
         return results
 
-    demote_count = len(demote_indices)
+    demote_count = len(demote_sides)
     logger.info(f"  Coverage validation: demoting {demote_count} conflicting matches to REVIEW")
 
     validated: list[MatchResult] = []
     for i, r in enumerate(results):
-        if i in demote_indices and r.decision != MatchDecision.REVIEW:
+        if i in demote_sides and r.decision != MatchDecision.REVIEW:
+            conflict_features = {"coverage_conflict": 1.0}
+            conflict_features.update({f"{side}_coverage_conflict": 1.0 for side in demote_sides[i]})
             validated.append(
                 MatchResult(
                     ref_id=r.ref_id,
@@ -1234,7 +1284,7 @@ def _validate_assignment_coverage(
                     decision=MatchDecision.REVIEW,
                     confidence=r.confidence,
                     score_breakdown=r.score_breakdown,
-                    features={**r.features, "coverage_conflict": 1.0},
+                    features={**r.features, **conflict_features},
                     ref_idx=r.ref_idx,
                     target_idx=r.target_idx,
                     gers_start_frac=r.gers_start_frac,
@@ -1277,7 +1327,7 @@ def optimize_matches_with_grouping(
         glue_min_confidence: Grouping-only confidence prune (see
             :func:`find_match_components`). Defaults to
             ``settings.optimizer_glue_min_confidence``.
-        corridor_aware: Gate M:N contiguity on collinear continuation / same
+        corridor_aware: Gate optimizer contiguity on collinear continuation / same
             name. Defaults to ``settings.optimizer_corridor_aware``.
         corridor_max_turn_deg: Collinearity deflection threshold (degrees).
             Defaults to ``settings.optimizer_corridor_max_turn_deg``.
@@ -1406,10 +1456,18 @@ def optimize_matches_with_grouping(
             target_geoms,
             contiguity_tolerance,
             min_confidence,
+            corridor_aware=corridor_aware,
+            max_turn_deg=corridor_max_turn_deg,
+            ref_name_lookup=ref_name_lookup,
+            target_name_lookup=target_name_lookup,
         )
 
     # Combine results and validate alignment coverage
-    final = _validate_assignment_coverage(all_group_results + optimized_1to1, ref_geoms)
+    final = _validate_assignment_coverage(
+        all_group_results + optimized_1to1,
+        ref_geoms,
+        target_geoms,
+    )
 
     # Log summary — count match types across ALL results
     type_counts = defaultdict(int)
