@@ -172,7 +172,9 @@ def test_typed_candidate_parquet_covers_full_graph_with_runtime_features(tmp_pat
         for group in groups
         for edge in group["candidate_edges"]
     }
-    parquet_keys = set(frame[["group_id", "ref_id", "target_id"]].itertuples(index=False, name=None))
+    parquet_keys = set(
+        frame[["group_id", "ref_id", "target_id"]].itertuples(index=False, name=None)
+    )
     assert parquet_keys == json_keys
     assert len(frame) == 4
     assert frame["dataset_id"].eq("toy").all()

@@ -600,9 +600,7 @@ def _export_candidates_sidecar(
     ref_geoms = reference_proj.geometry.to_numpy()
     target_geoms = target_proj.geometry.to_numpy()
     ref_classes = (
-        reference_proj[CLASS_COLUMN].to_numpy()
-        if CLASS_COLUMN in reference_proj.columns
-        else None
+        reference_proj[CLASS_COLUMN].to_numpy() if CLASS_COLUMN in reference_proj.columns else None
     )
     target_classes = (
         target_proj[CLASS_COLUMN].to_numpy() if CLASS_COLUMN in target_proj.columns else None
@@ -697,9 +695,7 @@ def _export_candidates_sidecar(
             if target_class is None:
                 target_class = target_class_by_id.get(pair[1])
             aligned_ref = _aligned(ref_geom, result.gers_start_frac, result.gers_end_frac)
-            aligned_target = _aligned(
-                target_geom, result.local_start_frac, result.local_end_frac
-            )
+            aligned_target = _aligned(target_geom, result.local_start_frac, result.local_end_frac)
 
             pruned = pruned_gid_by_pair.get(pair) == gid
             selected = bool(candidate.get("selected", False))
@@ -758,9 +754,7 @@ def _export_candidates_sidecar(
                 "target_length_m": (
                     float(target_geom.length) if target_geom is not None else float("nan")
                 ),
-                "lateral_offset_signed_m": _signed_lateral_offset_m(
-                    aligned_ref, aligned_target
-                ),
+                "lateral_offset_signed_m": _signed_lateral_offset_m(aligned_ref, aligned_target),
                 "feature_version": FEATURE_VERSION,
                 "model_hash": model_hash,
                 "calibration_active": calibration_active,
