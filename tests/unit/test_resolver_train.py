@@ -449,6 +449,144 @@ def test_evaluate_all_scores_against_hard_truth_when_training_is_smoothed():
         evaluate_all(corrupted_truth, FEATURE_COLUMNS, selector="ef1", n_splits=3, seed=0)
 
 
+def test_paired_group_bootstrap_is_group_scoped_and_reproducible():
+    import numpy as np
+
+    from crosswalk.resolver.evaluate import paired_group_bootstrap
+
+    df = pd.DataFrame(
+        {
+            "dataset_id": ["a", "a", "b", "b"],
+            # Deliberate cross-dataset ID collision: these are two groups.
+            "group_id": ["same", "same", "same", "same"],
+            "keep": [1, 0, 1, 0],
+            "is_sliver": [False] * 4,
+        }
+    )
+    candidate = np.array([1, 0, 1, 0])
+    baseline = np.array([1, 1, 1, 1])
+
+    first = paired_group_bootstrap(
+        df, candidate, baseline, n_resamples=100, seed=42, confidence=0.90
+    )
+    second = paired_group_bootstrap(
+        df, candidate, baseline, n_resamples=100, seed=42, confidence=0.90
+    )
+
+    assert first == second
+    assert first["n_groups"] == 2
+    assert first["f1"]["delta"] == pytest.approx(1.0 / 3.0)
+    assert first["f1"]["ci_low"] == pytest.approx(1.0 / 3.0)
+    assert first["f1"]["ci_high"] == pytest.approx(1.0 / 3.0)
+    assert first["group_exact"]["delta"] == pytest.approx(1.0)
+
+    with pytest.raises(ValueError, match="predictions must be binary"):
+        paired_group_bootstrap(df, np.array([1.0, 0.5, 1.0, 0.0]), baseline)
+    with pytest.raises(ValueError, match="one-dimensional"):
+        paired_group_bootstrap(df, candidate.reshape(-1, 1), baseline)
+
+    nonbinary_truth = df.copy()
+    nonbinary_truth["keep"] = nonbinary_truth["keep"].astype(float)
+    nonbinary_truth.loc[0, "keep"] = 0.5
+    with pytest.raises(ValueError, match="binary evaluation truth"):
+        paired_group_bootstrap(nonbinary_truth, candidate, baseline)
+
+    missing_group = df.copy()
+    missing_group.loc[0, "group_id"] = None
+    with pytest.raises(ValueError, match="group keys"):
+        paired_group_bootstrap(missing_group, candidate, baseline)
+
+
+def _multi_dataset_resolver_table(n_datasets: int = 3, groups_per_dataset: int = 4):
+    from crosswalk.resolver.extract import build_edge_table
+    from crosswalk.resolver.features import featurize
+
+    frames = []
+    for ds_idx in range(n_datasets):
+        dataset_id = f"ds{ds_idx}"
+        groups = [
+            _group(
+                f"g{i}",
+                [
+                    _edge(f"R{ds_idx}-{i}", f"T{ds_idx}-{i}", 0.95),
+                    _edge(f"S{ds_idx}-{i}", f"T{ds_idx}-{i}", 0.30),
+                ],
+            )
+            for i in range(groups_per_dataset)
+        ]
+        labels = [
+            _label_row(f"h{i}", [(f"R{ds_idx}-{i}", f"T{ds_idx}-{i}")])
+            for i in range(groups_per_dataset)
+        ]
+        frames.append(build_edge_table(groups, _labels(labels), dataset_id))
+    return featurize(pd.concat(frames, ignore_index=True))
+
+
+def test_repeated_grouped_cv_returns_paired_uncertainty():
+    from crosswalk.resolver.features import FEATURE_COLUMNS
+    from crosswalk.resolver.train import evaluate_repeated_grouped_cv
+
+    df = _multi_dataset_resolver_table()
+    result = evaluate_repeated_grouped_cv(
+        df,
+        FEATURE_COLUMNS,
+        selector="ef1",
+        n_splits=3,
+        seeds=(3, 7),
+        bootstrap_resamples=50,
+        bootstrap_seed=11,
+    )
+
+    assert [run["seed"] for run in result["runs"]] == [3, 7]
+    assert len(result["oof_prediction"]) == len(df)
+    assert result["paired_bootstrap"]["n_groups"] == 12
+    assert set(result["run_spread"]) == {
+        "f1",
+        "group_exact",
+        "f1_delta",
+        "group_exact_delta",
+    }
+
+    invalid_selected = df.copy()
+    invalid_selected["selected"] = invalid_selected["selected"].astype(float)
+    invalid_selected.loc[0, "selected"] = 0.5
+    with pytest.raises(ValueError, match="predictions must be binary"):
+        evaluate_repeated_grouped_cv(
+            invalid_selected,
+            FEATURE_COLUMNS,
+            seeds=(3,),
+            n_splits=3,
+            bootstrap_resamples=10,
+        )
+
+
+def test_leave_one_dataset_out_predicts_every_row_without_dataset_leakage():
+    from crosswalk.resolver.features import FEATURE_COLUMNS
+    from crosswalk.resolver.train import evaluate_leave_one_dataset_out
+
+    df = _multi_dataset_resolver_table()
+    result = evaluate_leave_one_dataset_out(
+        df,
+        FEATURE_COLUMNS,
+        selector="ef1",
+        bootstrap_resamples=50,
+    )
+
+    assert [row["dataset_id"] for row in result["per_dataset"]] == ["ds0", "ds1", "ds2"]
+    assert len(result["oof_prediction"]) == len(df)
+    assert result["model"].n_groups == 12
+    assert result["paired_bootstrap"]["n_groups"] == 12
+    assert result["paired_bootstrap"]["n_resample_units"] == 3
+    assert result["paired_bootstrap"]["resample_columns"] == ["dataset_id"]
+
+    with pytest.raises(ValueError, match="at least two datasets"):
+        evaluate_leave_one_dataset_out(
+            df[df["dataset_id"] == "ds0"],
+            FEATURE_COLUMNS,
+            bootstrap_resamples=10,
+        )
+
+
 def test_feature_aggregation_scopes_same_group_id_by_dataset():
     from crosswalk.resolver.features import featurize
 
