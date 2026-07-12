@@ -1,0 +1,123 @@
+{
+  "crs": "EPSG:4326",
+  "source": "Boston integration_421 group 757a93c0 and canonical raw segments",
+  "evidence": "The strong Willow Street candidate shares the Railroad Street target with two non-sliver candidates in the scorer review floor but below the grouping glue floor. Glue pruning must not erase that contested provenance when the strong edge falls back to 1:1.",
+  "label_provenance": "Direct human label: no_match by brad on 2026-01-16 (session 99b790ab); original decision review at confidence 0.7470868937.",
+  "selected_pair": [
+    "2f15282b-e0f9-4302-a9df-1103fd1131c2",
+    "us_boston_streets_1378_882a3065d3"
+  ],
+  "references": [
+    {
+      "id": "2f15282b-e0f9-4302-a9df-1103fd1131c2",
+      "names": {"primary": "Willow Street"},
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-71.1517319, 42.2866545],
+          [-71.1517735, 42.286716],
+          [-71.1518224, 42.2867912],
+          [-71.1519461, 42.2869904],
+          [-71.1520775, 42.2872057],
+          [-71.1521481, 42.2873211],
+          [-71.1521899, 42.287395],
+          [-71.152245, 42.2875279]
+        ]
+      }
+    },
+    {
+      "id": "157d1b68-419e-4c59-a92d-7169a9d09323",
+      "names": {"primary": "Lord and Lady's Way"},
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-71.1503155, 42.2867419],
+          [-71.1504, 42.2867376],
+          [-71.1504577, 42.2867328],
+          [-71.1505285, 42.2867243],
+          [-71.1506802, 42.286705],
+          [-71.1507743, 42.2866935],
+          [-71.150896, 42.2866786],
+          [-71.1509623, 42.2866707],
+          [-71.1510502, 42.2866603],
+          [-71.1512208, 42.2866384],
+          [-71.1513872, 42.2866233],
+          [-71.1514679, 42.2866165],
+          [-71.1515455, 42.2866127],
+          [-71.1516017, 42.2866124],
+          [-71.1516395, 42.2866192],
+          [-71.1516763, 42.2866298],
+          [-71.1517319, 42.2866545]
+        ]
+      }
+    },
+    {
+      "id": "638a3de7-78dc-4b59-9a29-56228de22b46",
+      "names": null,
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-71.1500181, 42.2868288],
+          [-71.1500171, 42.286836],
+          [-71.1500201, 42.2868457],
+          [-71.1500412, 42.2869433],
+          [-71.1500763, 42.2870496],
+          [-71.1501163, 42.2871306],
+          [-71.1502077, 42.2871719],
+          [-71.1503416, 42.287196],
+          [-71.1519992, 42.287448],
+          [-71.1520709, 42.2874425],
+          [-71.1520984, 42.2873984],
+          [-71.151629, 42.2866702],
+          [-71.1516763, 42.2866298],
+          [-71.1517149, 42.2865968]
+        ]
+      }
+    }
+  ],
+  "targets": [
+    {
+      "id": "us_boston_streets_1378_882a3065d3",
+      "names": {"primary": "RAILROAD STREET"},
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-71.1515725405397, 42.2864907789106],
+          [-71.1516439794628, 42.286614240335],
+          [-71.1517135197208, 42.2867344251649],
+          [-71.1519442699528, 42.2871332164439],
+          [-71.1522029420429, 42.2875340706166]
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "ref_id": "2f15282b-e0f9-4302-a9df-1103fd1131c2",
+      "target_id": "us_boston_streets_1378_882a3065d3",
+      "confidence": 0.6827586293,
+      "gers_start_frac": 0.0,
+      "gers_end_frac": 0.9933884236,
+      "local_start_frac": 0.171377007,
+      "local_end_frac": 1.0
+    },
+    {
+      "ref_id": "157d1b68-419e-4c59-a92d-7169a9d09323",
+      "target_id": "us_boston_streets_1378_882a3065d3",
+      "confidence": 0.1875,
+      "gers_start_frac": 0.8015465823,
+      "gers_end_frac": 1.0,
+      "local_start_frac": 0.0,
+      "local_end_frac": 0.1858334434
+    },
+    {
+      "ref_id": "638a3de7-78dc-4b59-9a29-56228de22b46",
+      "target_id": "us_boston_streets_1378_882a3065d3",
+      "confidence": 0.1875,
+      "gers_start_frac": 0.6656048739,
+      "gers_end_frac": 0.9752299907,
+      "local_start_frac": 0.1343666759,
+      "local_end_frac": 0.8806023001
+    }
+  ]
+}

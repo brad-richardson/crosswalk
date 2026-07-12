@@ -63,8 +63,9 @@ class TestCrosswalkAdapter:
         # CWD without crosswalk being on PATH.
         assert cmd[: len(DEFAULT_CROSSWALK_CMD.split())] == DEFAULT_CROSSWALK_CMD.split()
         assert "stitch" in cmd
-        # Subprocess runs from the repo root so crosswalk's relative model path
-        # (data/models/...) resolves regardless of the caller's CWD.
+        # Subprocess runs from the repo root so project-relative dataset/config
+        # discovery is stable regardless of the caller's CWD. The production
+        # model itself defaults to the packaged bundle.
         assert mock_run.call_args.kwargs["cwd"] == _find_repo_root()
 
     @patch("mbench.adapters.crosswalk.subprocess.run")
@@ -235,6 +236,11 @@ class TestCrosswalkAdapter:
             {"groups": [{"group_id": "g", "edges": []}]},
             {"groups": [{"group_id": "g", "edges": ["wrong"]}]},
             {"groups": [{"group_id": "g", "edges": [{"ref_id": "", "target_id": "t"}]}]},
+            {"groups": [{"group_id": {}, "edges": [{"ref_id": "r", "target_id": "t"}]}]},
+            {"groups": [{"group_id": True, "edges": [{"ref_id": "r", "target_id": "t"}]}]},
+            {"groups": [{"group_id": "g", "edges": [{"ref_id": {}, "target_id": "t"}]}]},
+            {"groups": [{"group_id": "g", "edges": [{"ref_id": "r", "target_id": []}]}]},
+            {"groups": [{"group_id": "g", "edges": [{"ref_id": True, "target_id": "t"}]}]},
             {
                 "groups": [
                     {"group_id": "g", "edges": [{"ref_id": "r", "target_id": "t"}]},
@@ -260,6 +266,76 @@ class TestCrosswalkAdapter:
             {"groups": [{"group_id": "abc123", "edges": [{"ref_id": "r1", "target_id": "t1"}]}]}
         )
         assert groups[0]["group_id"] == "abc123"
+
+    @pytest.mark.parametrize("source", ["candidate_edges", "rejected_edges"])
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            None,
+            {},
+            "",
+            0,
+            False,
+            ["wrong"],
+            [{"ref_id": "", "target_id": "t1"}],
+            [{"ref_id": "r1", "target_id": " "}],
+        ],
+    )
+    def test_groups_sidecar_schema_rejects_malformed_optional_edge_sources(self, source, bad_value):
+        group = {
+            "group_id": "abc123",
+            "edges": [{"ref_id": "r1", "target_id": "t1"}],
+            source: bad_value,
+        }
+
+        with pytest.raises(ValueError, match=source):
+            _validated_groups_sidecar({"groups": [group]})
+
+    def test_groups_sidecar_schema_accepts_empty_or_valid_optional_edge_sources(self):
+        groups = _validated_groups_sidecar(
+            {
+                "groups": [
+                    {
+                        "group_id": "abc123",
+                        "edges": [{"ref_id": "r1", "target_id": "t1"}],
+                        "candidate_edges": [],
+                        "rejected_edges": [{"ref_id": "r2", "target_id": "t2"}],
+                    }
+                ]
+            }
+        )
+
+        assert groups[0]["candidate_edges"] == []
+        assert groups[0]["rejected_edges"] == [{"ref_id": "r2", "target_id": "t2"}]
+
+    @pytest.mark.parametrize("source", ["edges", "candidate_edges", "rejected_edges"])
+    def test_groups_sidecar_schema_rejects_duplicate_edges_within_source(self, source):
+        duplicate = {"ref_id": "r1", "target_id": "t1"}
+        group = {
+            "group_id": "abc123",
+            "edges": [{"ref_id": "selected", "target_id": "truth"}],
+            source: [duplicate, dict(duplicate)],
+        }
+
+        with pytest.raises(ValueError, match=rf"{source}\[1\] duplicates edge"):
+            _validated_groups_sidecar({"groups": [group]})
+
+    def test_groups_sidecar_schema_allows_same_edge_across_sources(self):
+        repeated = {"ref_id": "r1", "target_id": "t1"}
+        groups = _validated_groups_sidecar(
+            {
+                "groups": [
+                    {
+                        "group_id": "abc123",
+                        "edges": [repeated],
+                        "candidate_edges": [dict(repeated)],
+                        "rejected_edges": [dict(repeated)],
+                    }
+                ]
+            }
+        )
+
+        assert groups[0]["edges"] == groups[0]["candidate_edges"]
 
     def test_parse_output_preserves_match_decision(self, tmp_path):
         bridge_path = tmp_path / "bridge.parquet"

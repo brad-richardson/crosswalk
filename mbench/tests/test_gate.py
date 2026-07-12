@@ -176,7 +176,19 @@ def test_armed_gate_fails_without_sidecar_mapping_diagnostics(groups):
     assert "mapping diagnostics" in out.message
 
 
-@pytest.mark.parametrize("sidecar_contents", [None, "not-json", '{"groups": []}'])
+@pytest.mark.parametrize(
+    "sidecar_contents",
+    [
+        None,
+        "not-json",
+        '{"groups": []}',
+        (
+            '{"groups":[{"group_id":"g1",'
+            '"edges":[{"ref_id":"r1","target_id":"t1"}],'
+            '"candidate_edges":{}}]}'
+        ),
+    ],
+)
 def test_armed_gate_treats_missing_malformed_and_empty_sidecars_equally(tmp_path, sidecar_contents):
     bridge_path = tmp_path / "bridge.parquet"
     pd.DataFrame(
@@ -505,6 +517,6 @@ def test_committed_toml_has_boston_gate():
     assert floors["us_boston_streets"].min_mapping_rate == pytest.approx(0.90)
     assert floors["us_boston_streets"].min_labels_total == 106
     # Re-derived 2026-07-12 with decomposition-aware pair recovery:
-    # baseline F1 0.9142 / exact 0.5893 over 112/113 mapped pair labels.
+    # baseline F1 0.9120 / exact 0.5714 over 112/113 mapped pair labels.
     assert floors["us_boston_streets"].f1_filtered_floor == pytest.approx(0.83)
     assert floors["us_boston_streets"].exact_filtered_floor == pytest.approx(0.50)

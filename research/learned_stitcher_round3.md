@@ -1,9 +1,15 @@
 # Learned Stitcher Round 3 — candidate-joined experimental ablation
 
+> **Superseded evidence snapshot.** This 949-edge/163-group run predates collision
+> quarantine, the final Boston/Seattle #424 artifacts, and the corrected omission
+> accounting. The canonical current comparison is
+> [`resolver_benchmark.md`](resolver_benchmark.md); the historical numbers below
+> remain only to document the experiment's evolution.
+
 > Experimental only — not wired into production. This is a meaningful training and
 > evaluation prototype, but the current evidence is a production NO-GO. Draft PR #411
 > invalidated the proposed heuristic defaults on a fixed label universe, and this model
-> still trails the production optimizer on honest edge F1.
+> still trails the production optimizer on its historical grouped-CV edge F1.
 
 ## Inventory
 

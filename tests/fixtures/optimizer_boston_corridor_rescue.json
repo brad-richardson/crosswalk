@@ -1,0 +1,419 @@
+{
+  "crs": "EPSG:4326",
+  "source": "Boston integration_main artifacts audited for draft PR #421",
+  "cases": [
+    {
+      "id": "bowman",
+      "expected_match_type": "1:N",
+      "evidence": "The shared Overture geometry changes its linear-referenced name from Bowman Street to Blackwell Street at 0.6137; both target spans agree with the applicable name.",
+      "ambiguity": null,
+      "label_provenance": "No curated pair or stitch label covers this pair set.",
+      "references": [
+        {
+          "id": "0a51d6ae-6523-4b23-bdc9-859c899a73ea",
+          "names": {
+            "primary": "Bowman Street",
+            "rules": [
+              {"between": [0.0, 0.61372209], "value": "Bowman Street"},
+              {"between": [0.61372209, 1.0], "value": "Blackwell Street"}
+            ]
+          },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.04747, 42.2864022],
+              [-71.047488, 42.2864403],
+              [-71.0481772, 42.2878989],
+              [-71.0469626, 42.2881044],
+              [-71.0468662, 42.2881207]
+            ]
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "us_boston_streets_7312_882a306697",
+          "names": {"primary": "BOWMAN STREET"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.0474616, 42.2863978],
+              [-71.0478218, 42.2871881],
+              [-71.0481462, 42.2878995]
+            ]
+          }
+        },
+        {
+          "id": "us_boston_streets_1654_882a306697",
+          "names": {"primary": "BLACKWELL STREET"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.0481462, 42.2878995],
+              [-71.0468734, 42.2881381]
+            ]
+          }
+        }
+      ],
+      "edges": [
+        {
+          "ref_id": "0a51d6ae-6523-4b23-bdc9-859c899a73ea",
+          "target_id": "us_boston_streets_1654_882a306697",
+          "confidence": 1.0,
+          "gers_start_frac": 0.622427253,
+          "gers_end_frac": 0.987395366,
+          "local_start_frac": 0.0,
+          "local_end_frac": 0.967741935
+        },
+        {
+          "ref_id": "0a51d6ae-6523-4b23-bdc9-859c899a73ea",
+          "target_id": "us_boston_streets_7312_882a306697",
+          "confidence": 1.0,
+          "gers_start_frac": 0.0,
+          "gers_end_frac": 0.611014331,
+          "local_start_frac": 0.003926498,
+          "local_end_frac": 1.0
+        }
+      ]
+    },
+    {
+      "id": "clifton",
+      "expected_match_type": "1:N",
+      "evidence": "The shared Overture geometry changes its linear-referenced name from Batchelder Street to Clifton Street at 0.4553; both target spans agree with the applicable name.",
+      "ambiguity": null,
+      "label_provenance": "No curated label covers the pair set. All three agent-panel ballots' selected sets contained the Clifton edge, but the enclosing group remained human_review because the ballots disagreed elsewhere.",
+      "references": [
+        {
+          "id": "0f6930ae-5397-47ba-a155-ce46538709cb",
+          "names": {
+            "primary": "Clifton Street",
+            "rules": [
+              {"between": [0.0, 0.45528757], "value": "Batchelder Street"},
+              {"between": [0.45528757, 1.0], "value": "Clifton Street"}
+            ]
+          },
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.069199, 42.321463],
+              [-71.069218, 42.321339],
+              [-71.069346, 42.320846],
+              [-71.0694297, 42.3205384],
+              [-71.0694916, 42.3204837],
+              [-71.069573, 42.320565],
+              [-71.069709, 42.320723],
+              [-71.06987, 42.320913],
+              [-71.069959, 42.321013],
+              [-71.070006, 42.321077],
+              [-71.070035, 42.321141],
+              [-71.070052, 42.321255],
+              [-71.07008, 42.32143],
+              [-71.0700975, 42.3215021],
+              [-71.070103, 42.3215245],
+              [-71.070115, 42.3215741]
+            ]
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "us_boston_streets_9339_882a3066a9",
+          "names": {"primary": "CLIFTON STREET"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.0694594, 42.3204422],
+              [-71.069574, 42.3205732],
+              [-71.0697098, 42.3207318],
+              [-71.0698709, 42.320922],
+              [-71.0699599, 42.3210214],
+              [-71.0700065, 42.3210852],
+              [-71.070036, 42.3211494],
+              [-71.0700523, 42.3212637],
+              [-71.0700811, 42.3214388],
+              [-71.070111, 42.3215723]
+            ]
+          }
+        },
+        {
+          "id": "us_boston_streets_2757_882a3066a9",
+          "names": {"primary": "BATCHELDER STREET"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.0694594, 42.3204422],
+              [-71.0693469, 42.3208548],
+              [-71.0692182, 42.3213472],
+              [-71.0691996, 42.3214715]
+            ]
+          }
+        }
+      ],
+      "edges": [
+        {
+          "ref_id": "0f6930ae-5397-47ba-a155-ce46538709cb",
+          "target_id": "us_boston_streets_2757_882a3066a9",
+          "confidence": 0.990430593,
+          "gers_start_frac": 0.0,
+          "gers_end_frac": 0.452429027,
+          "local_start_frac": 0.03200023,
+          "local_end_frac": 0.992007138
+        },
+        {
+          "ref_id": "0f6930ae-5397-47ba-a155-ce46538709cb",
+          "target_id": "us_boston_streets_9339_882a3066a9",
+          "confidence": 0.990430593,
+          "gers_start_frac": 0.434322701,
+          "gers_end_frac": 0.980732323,
+          "local_start_frac": 0.0,
+          "local_end_frac": 0.967741935
+        }
+      ]
+    },
+    {
+      "id": "metropolitan",
+      "expected_match_type": "N:1",
+      "evidence": "Two full-length Metropolitan Avenue references align to complementary target spans with an 11.9 m uncovered gap.",
+      "ambiguity": "The references are physically joined by a 21.24 m Overture link named Hyde Park Avenue (8a85d7f6-b5af-49d4-9211-58f2baf04c81), while the local dataset models one continuous Metropolitan Avenue. Its rejected connector pair scores 0.2581 over local span 0.8389-0.8783. The two strong fragments should MATCH; the connector should remain rejected/REVIEW provenance and is not asserted as a match.",
+      "label_provenance": "No curated pair, stitch, or agent-panel label covers this pair set.",
+      "references": [
+        {
+          "id": "a160c97e-94fd-4efa-bfe2-2261c1369f53",
+          "names": {"primary": "Metropolitan Avenue"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.1182861, 42.2666168],
+              [-71.1183085, 42.2666654],
+              [-71.118391, 42.266843],
+              [-71.118897, 42.267638],
+              [-71.119271, 42.2682525],
+              [-71.119519, 42.26866],
+              [-71.120003, 42.269411],
+              [-71.120252, 42.269814],
+              [-71.120424, 42.2700808],
+              [-71.1204895, 42.2701115],
+              [-71.1205263, 42.2701213],
+              [-71.1206633, 42.2701578]
+            ]
+          }
+        },
+        {
+          "id": "9c7c984b-e9eb-4f84-b223-8c4e1f97c163",
+          "names": {"primary": "Metropolitan Avenue"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.121185, 42.270684],
+              [-71.1210826, 42.2706097],
+              [-71.120999, 42.270549],
+              [-71.1208346, 42.2704518],
+              [-71.1208079, 42.2704344],
+              [-71.120778, 42.270415],
+              [-71.1205973, 42.2703426]
+            ]
+          }
+        },
+        {
+          "id": "8a85d7f6-b5af-49d4-9211-58f2baf04c81",
+          "names": {"primary": "Hyde Park Avenue"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.1206633, 42.2701578],
+              [-71.1205973, 42.2703426]
+            ]
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "us_boston_streets_565_882a306487",
+          "names": {"primary": "METROPOLITAN AVENUE"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.1182709, 42.2666034],
+              [-71.1183919, 42.2668514],
+              [-71.1188975, 42.2676471],
+              [-71.11952, 42.2686682],
+              [-71.1200036, 42.2694193],
+              [-71.1202619, 42.2698272],
+              [-71.1204123, 42.2700531],
+              [-71.1204497, 42.2700853],
+              [-71.1204955, 42.2701165],
+              [-71.1205315, 42.2701518],
+              [-71.1205549, 42.2701891],
+              [-71.1205755, 42.2702378],
+              [-71.1205916, 42.270334],
+              [-71.1207181, 42.270383],
+              [-71.120867, 42.2704743],
+              [-71.1209995, 42.2705581],
+              [-71.1211858, 42.2706926]
+            ]
+          }
+        }
+      ],
+      "edges": [
+        {
+          "ref_id": "9c7c984b-e9eb-4f84-b223-8c4e1f97c163",
+          "target_id": "us_boston_streets_565_882a306487",
+          "confidence": 1.0,
+          "gers_start_frac": 0.0,
+          "gers_end_frac": 1.0,
+          "local_start_frac": 0.879925622,
+          "local_end_frac": 0.998723601
+        },
+        {
+          "ref_id": "a160c97e-94fd-4efa-bfe2-2261c1369f53",
+          "target_id": "us_boston_streets_565_882a306487",
+          "confidence": 0.990430593,
+          "gers_start_frac": 0.0,
+          "gers_end_frac": 1.0,
+          "local_start_frac": 0.003533396,
+          "local_end_frac": 0.857187948
+        },
+        {
+          "ref_id": "8a85d7f6-b5af-49d4-9211-58f2baf04c81",
+          "target_id": "us_boston_streets_565_882a306487",
+          "confidence": 0.2581,
+          "gers_start_frac": 0.0,
+          "gers_end_frac": 0.9677419,
+          "local_start_frac": 0.8389214,
+          "local_end_frac": 0.8783424,
+          "expected_selected": false,
+          "expected_disposition": "rejected"
+        }
+      ]
+    },
+    {
+      "id": "lanark",
+      "expected_match_type": "N:1",
+      "evidence": "Two full-length Lanark Road references align to complementary target spans with an 8.4 m uncovered gap.",
+      "ambiguity": "The references are physically joined by a 15.15 m Overture link named Sutherland Road (8b63ac6c-aafb-4b34-87ff-fa8e649a9dbc), while the local dataset models one continuous Lanark Road. Its rejected connector pair scores 0.5155 over local span 0.6163-0.6622. The two strong fragments should MATCH; the connector should remain rejected/REVIEW provenance and is not asserted as a match.",
+      "label_provenance": "No curated pair, stitch, or agent-panel label covers this pair set.",
+      "references": [
+        {
+          "id": "d5e26827-4ef0-4211-b5b2-538afa2bac21",
+          "names": {"primary": "Lanark Road"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.149206, 42.3403258],
+              [-71.1491493, 42.3403695],
+              [-71.1490378, 42.3404551],
+              [-71.1489571, 42.3405066],
+              [-71.1488691, 42.3405552],
+              [-71.1487653, 42.3406036],
+              [-71.1486743, 42.3406369],
+              [-71.1485804, 42.3406611],
+              [-71.1484903, 42.3406718],
+              [-71.1483968, 42.3406775],
+              [-71.1483096, 42.3406737],
+              [-71.1482109, 42.3406593],
+              [-71.1480757, 42.3406372],
+              [-71.1479628, 42.3406215],
+              [-71.147916, 42.3406162],
+              [-71.1477971, 42.3406027],
+              [-71.1477626, 42.3405981],
+              [-71.1476252, 42.3405831]
+            ]
+          }
+        },
+        {
+          "id": "82ca9285-25f6-4cfc-ad8f-0fb2139303ed",
+          "names": {"primary": "Lanark Road"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.1475072, 42.3406877],
+              [-71.1474576, 42.3406599],
+              [-71.1474437, 42.3406536],
+              [-71.1473982, 42.3406381],
+              [-71.147337, 42.3406222],
+              [-71.1472403, 42.3406028],
+              [-71.147132, 42.3405757],
+              [-71.1470471, 42.3405472],
+              [-71.1469692, 42.3405077],
+              [-71.1468968, 42.3404615],
+              [-71.1468423, 42.3404182],
+              [-71.1467983, 42.3403679],
+              [-71.146763, 42.3403164],
+              [-71.14674, 42.340272]
+            ]
+          }
+        },
+        {
+          "id": "8b63ac6c-aafb-4b34-87ff-fa8e649a9dbc",
+          "names": {"primary": "Sutherland Road"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.1476252, 42.3405831],
+              [-71.1475072, 42.3406877]
+            ]
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "us_boston_streets_5534_882a306429",
+          "names": {"primary": "LANARK ROAD"},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [-71.1492136, 42.3403373],
+              [-71.1489958, 42.3404926],
+              [-71.1488339, 42.3405786],
+              [-71.1486625, 42.3406453],
+              [-71.1484816, 42.3406785],
+              [-71.1482718, 42.3406756],
+              [-71.1480817, 42.3406344],
+              [-71.1479012, 42.3406075],
+              [-71.1477947, 42.3406073],
+              [-71.147572, 42.3406194],
+              [-71.1473858, 42.3406329],
+              [-71.1472901, 42.3406241],
+              [-71.1471435, 42.3405944],
+              [-71.1470168, 42.3405367],
+              [-71.1468906, 42.3404468],
+              [-71.1467953, 42.3403542],
+              [-71.1467448, 42.3402781]
+            ]
+          }
+        }
+      ],
+      "edges": [
+        {
+          "ref_id": "82ca9285-25f6-4cfc-ad8f-0fb2139303ed",
+          "target_id": "us_boston_streets_5534_882a306429",
+          "confidence": 0.990430593,
+          "gers_start_frac": 0.0,
+          "gers_end_frac": 0.989170301,
+          "local_start_frac": 0.653147026,
+          "local_end_frac": 1.0
+        },
+        {
+          "ref_id": "d5e26827-4ef0-4211-b5b2-538afa2bac21",
+          "target_id": "us_boston_streets_5534_882a306429",
+          "confidence": 0.990430593,
+          "gers_start_frac": 0.000890409,
+          "gers_end_frac": 1.0,
+          "local_start_frac": 0.0,
+          "local_end_frac": 0.616970588
+        },
+        {
+          "ref_id": "8b63ac6c-aafb-4b34-87ff-fa8e649a9dbc",
+          "target_id": "us_boston_streets_5534_882a306429",
+          "confidence": 0.5155,
+          "gers_start_frac": 0.1046252,
+          "gers_end_frac": 0.8108329,
+          "local_start_frac": 0.6163155,
+          "local_end_frac": 0.662219,
+          "expected_selected": false,
+          "expected_disposition": "rejected"
+        }
+      ]
+    }
+  ]
+}

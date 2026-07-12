@@ -88,9 +88,10 @@ prune operates at the 0.575 calibrated point (#269).
    **Auto-arming.** A dataset's floor is enforced only once ≥ `min_mapped_groups`
    (30) curated labels map to current pipeline groups; below that the gate
    reports `skip_unarmed` (non-blocking). This makes the gate go live as the
-   label base grows with no second PR: `us_boston_streets` (73 labels → 67 mapped
-   groups) is already **armed**; `us_seattle_sidewalks` (9 labels → 2 mapped) is
-   unarmed and ungated until it grows.
+   label base grows with no second PR. As of the 2026-07-12 regeneration,
+   `us_boston_streets` has 112/113 pair labels mapped (its 6 set labels are
+   reported separately) and is **armed** at F1 0.83 / exact 0.50; Seattle
+   remains unarmed until at least 30 pair groups map.
 
    **Re-measured baselines** (2026-07-05, post-#263/#267, against the committed
    `data/output/*_{bridge.parquet,groups.json}`; the #258 snapshot raw F1 ≈ 0.814
@@ -268,8 +269,9 @@ uv run python scripts/ablation_study.py --mode category \
 1. ~~Scale stitching-group ground truth, then promote the mbench stitch-level
    metric to a gate.~~ **Done (2026-07-05):** promoted to an auto-arming,
    benchmark-time gate (`mbench run --gate`, per-dataset floors in
-   `datasets.toml`, CI fixture test of the machinery). Boston is armed (67 mapped
-   groups); the gate engages on further datasets automatically as labels grow.
+   `datasets.toml`, CI fixture test of the machinery). Boston is armed (112
+   mapped pair groups); the gate engages on further datasets automatically as
+   labels grow.
    Continue scaling stitching labels (agent-assisted; separate plan doc) to arm
    more datasets and enable a learned group resolver.
 2. ~~Isotonic calibration~~ (shipped, #266); per-dataset-type calibration was
@@ -280,5 +282,8 @@ uv run python scripts/ablation_study.py --mode category \
 4. Learned group resolver once candidate recall and multi-dataset labels are
    sufficient. Promotion requires repeated grouped CV, paired whole-group
    intervals, and leave-one-dataset-out transfer to beat production on edge F1
-   and group exact; the current 163-group prototype remains NO-GO.
+   and group exact. The current fail-closed 147-group prototype remains NO-GO:
+   repeated grouped CV is 0.0095 F1 below production and LODO is 0.0240 below
+   (95% CI −0.1132 to −0.0074). Three Boston groups with contradictory recovered
+   historical labels are quarantined pending adjudication.
 5. Revisit formulation (path matching) only with entity-level evidence.

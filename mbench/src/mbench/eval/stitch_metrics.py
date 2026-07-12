@@ -275,23 +275,40 @@ def _edge_prf(pred: EdgeSet, truth: EdgeSet) -> tuple[float, float, float]:
 
 def _group_source_edges(group: dict, source: str) -> EdgeSet:
     """Read and validate one edge-list source from a groups-sidecar record."""
-    raw_edges = group.get(source) or []
+    # Optional legacy sources may be absent, but a present field must retain the
+    # canonical list shape. Do not truthiness-coerce ``None``, ``{}``, ``False``,
+    # etc. to an empty list: that would silently discard malformed recovery
+    # provenance when this evaluator is called directly rather than via the
+    # adapter's sidecar validator.
+    raw_edges = group.get(source, [])
     if not isinstance(raw_edges, list):
         raise ValueError(f"group {group.get('group_id')} {source} must be a list")
     parsed: list[Edge] = []
+    seen_pairs: set[Edge] = set()
     for index, edge in enumerate(raw_edges):
         if not isinstance(edge, dict):
             raise ValueError(f"group {group.get('group_id')} {source}[{index}] must be an object")
-        ref_id = edge.get("ref_id")
-        target_id = edge.get("target_id")
-        if (
-            ref_id is None
-            or target_id is None
-            or not str(ref_id).strip()
-            or not str(target_id).strip()
-        ):
-            raise ValueError(f"group {group.get('group_id')} {source}[{index}] has a null/blank id")
-        parsed.append((str(ref_id), str(target_id)))
+        normalized_ids = []
+        for key in ("ref_id", "target_id"):
+            value = edge.get(key)
+            if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+                raise ValueError(
+                    f"group {group.get('group_id')} {source}[{index}].{key} "
+                    "must be a string or numeric scalar"
+                )
+            normalized = str(value).strip()
+            if not normalized:
+                raise ValueError(
+                    f"group {group.get('group_id')} {source}[{index}].{key} must be nonblank"
+                )
+            normalized_ids.append(normalized)
+        pair = (normalized_ids[0], normalized_ids[1])
+        if pair in seen_pairs:
+            raise ValueError(
+                f"group {group.get('group_id')} {source}[{index}] duplicates edge {pair}"
+            )
+        seen_pairs.add(pair)
+        parsed.append(pair)
     return frozenset(parsed)
 
 

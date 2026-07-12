@@ -20,10 +20,16 @@ from __future__ import annotations
 import json
 
 import geopandas as gpd
+import pandas as pd
+import pytest
 from shapely import LineString
 
+from crosswalk.filenames import candidates_sidecar_path
 from crosswalk.matching.optimizer import (
+    DECOMPOSED_SINGLETON_REVIEW_FLAG,
+    LOW_CONFIDENCE_ADDITION_REVIEW_FLAG,
     PARALLEL_SIBLING_REVIEW_FLAG,
+    PRUNED_SINGLETON_REVIEW_FLAG,
     _contested_small_span_review_pairs,
     _create_group_results,
 )
@@ -187,3 +193,143 @@ def test_sidecar_stays_strict_json_with_review_reason(tmp_path):
     group = data["groups"][0]
     edges_by_pair = {(e["ref_id"], e["target_id"]): e for e in group["edges"]}
     assert edges_by_pair[("r_b", "t_b")]["review_reason"] == "parallel_sibling"
+
+
+@pytest.mark.parametrize(
+    ("review_flag", "expected_reason"),
+    [
+        (LOW_CONFIDENCE_ADDITION_REVIEW_FLAG, "low_confidence_addition"),
+        (PRUNED_SINGLETON_REVIEW_FLAG, "pruned_singleton"),
+        (DECOMPOSED_SINGLETON_REVIEW_FLAG, "decomposed_singleton"),
+    ],
+)
+def test_review_reason_reaches_every_optimizer_provenance_view(
+    tmp_path,
+    review_flag,
+    expected_reason,
+):
+    """New review modes stay visible in JSON assignment views and parquet."""
+    edges = [
+        _edge("r_a", "t_a", 0.95, 1.0, 0.5),
+        _edge("r_b", "t_a", 0.6, 1.0, 0.5),
+    ]
+    ref_geoms, tgt_geoms = _len_geoms(edges)
+    optimized = _create_group_results(
+        edges,
+        MatchType.N_TO_ONE,
+        review_pairs={("r_b", "t_a")},
+        review_flag=review_flag,
+    )
+    bridge_path = tmp_path / "bridge.parquet"
+
+    groups_path = _export_groups_sidecar(
+        results=edges,
+        optimized=optimized,
+        output_path=bridge_path,
+        reference=_gdf(ref_geoms),
+        target=_gdf(tgt_geoms),
+        min_confidence=0.1,
+        ref_id_column="id",
+        target_id_column="id",
+        reference_proj=_gdf(ref_geoms),
+        target_proj=_gdf(tgt_geoms),
+        dataset_id="toy",
+    )
+
+    group = json.loads(groups_path.read_text())["groups"][0]
+    for source in ("edges", "optimizer_assignment", "candidate_edges"):
+        by_pair = {(edge["ref_id"], edge["target_id"]): edge for edge in group[source]}
+        reviewed = by_pair[("r_b", "t_a")]
+        assert reviewed["decision"] == "review"
+        assert reviewed["review_reason"] == expected_reason
+
+    candidates = pd.read_parquet(candidates_sidecar_path(bridge_path))
+    reviewed_row = candidates[
+        (candidates["ref_id"] == "r_b") & (candidates["target_id"] == "t_a")
+    ].iloc[0]
+    assert reviewed_row["optimizer_decision"] == "review"
+    assert reviewed_row["decision_reason"] == expected_reason
+
+
+def test_duplicate_pair_export_uses_canonical_optimizer_row(tmp_path):
+    """Equal-score duplicate rows cannot make sidecar provenance order-sensitive."""
+    bad = MatchResult(
+        "r_a",
+        "t",
+        MatchDecision.MATCH,
+        0.9,
+        {},
+        {},
+        ref_idx=0,
+        target_idx=0,
+        gers_start_frac=0.0,
+        gers_end_frac=0.2,
+        local_start_frac=0.0,
+        local_end_frac=0.2,
+    )
+    good = MatchResult(
+        "r_a",
+        "t",
+        MatchDecision.MATCH,
+        0.9,
+        {},
+        {},
+        ref_idx=1,
+        target_idx=0,
+        gers_start_frac=0.0,
+        gers_end_frac=0.8,
+        local_start_frac=0.0,
+        local_end_frac=0.8,
+    )
+    sibling = MatchResult(
+        "r_b",
+        "t",
+        MatchDecision.MATCH,
+        0.9,
+        {},
+        {},
+        ref_idx=2,
+        target_idx=0,
+        gers_start_frac=0.0,
+        gers_end_frac=1.0,
+        local_start_frac=0.8,
+        local_end_frac=1.0,
+    )
+    optimized = _create_group_results([good, sibling], MatchType.N_TO_ONE)
+    ref = _gdf(
+        {
+            "r_a": LineString([(0, 0), (80, 0)]),
+            "r_b": LineString([(80, 0), (100, 0)]),
+        }
+    )
+    target = _gdf({"t": LineString([(0, 1), (100, 1)])})
+
+    serialized = []
+    for index, raw in enumerate(([bad, good, sibling], [good, bad, sibling])):
+        bridge_path = tmp_path / str(index) / "bridge.parquet"
+        bridge_path.parent.mkdir()
+        groups_path = _export_groups_sidecar(
+            results=raw,
+            optimized=optimized,
+            output_path=bridge_path,
+            reference=ref,
+            target=target,
+            min_confidence=0.1,
+            ref_id_column="id",
+            target_id_column="id",
+            reference_proj=ref,
+            target_proj=target,
+            dataset_id="toy",
+        )
+        group = json.loads(groups_path.read_text())["groups"][0]
+        edge = next(
+            edge for edge in group["edges"] if (edge["ref_id"], edge["target_id"]) == ("r_a", "t")
+        )
+        candidate = (
+            pd.read_parquet(candidates_sidecar_path(bridge_path))
+            .query("ref_id == 'r_a' and target_id == 't'")
+            .iloc[0]
+        )
+        serialized.append((edge["gers_end_frac"], int(candidate["ref_idx"])))
+
+    assert serialized == [(0.8, 1), (0.8, 1)]

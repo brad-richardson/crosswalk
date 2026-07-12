@@ -266,10 +266,11 @@ All three recommended fixes shipped; matcher's rubric row is re-scored **14 → 
 **What shipped:**
 
 1. **Pretrained model committed into the package** —
-   `src/matcher/_model/matcher_model_combined.joblib` (466 KB, isotonic
-   calibration included). `stitch` uses it automatically whenever
-   `data/models/` has no locally trained model (a local model always takes
-   precedence). *Committed-in-repo* was chosen over a release-asset fetch: at
+   `src/crosswalk/_model/matcher_model_combined.joblib` (466 KB, isotonic
+   calibration included). Production `stitch` defaults to this bundled artifact;
+   a local model is used only through the explicit `--model-path` option or
+   `MATCHER_MODEL_PATH` override. *Committed-in-repo* was chosen over a
+   release-asset fetch: at
    <0.5 MB/retrain the repo-bloat cost is trivial for a hobby-scale retrain
    cadence (git history grows by one small blob per reship; the labels' LFS
    parquets dwarf it), while a first-run download would add a network dependency,
@@ -281,7 +282,7 @@ All three recommended fixes shipped; matcher's rubric row is re-scored **14 → 
    trusted bundled path is exempt), and the CI lockstep test
    (`tests/unit/test_shipped_model.py`) fails any PR that bumps
    `FEATURE_VERSION` without reshipping the bundled artifact — retrain + reship
-   must land in the same PR (`matcher train -o src/matcher/_model/…`). The test
+   must land in the same PR (`matcher train -o src/crosswalk/_model/…`). The test
    also asserts the shipped calibration knots are present and the feature list
    matches `config.FEATURE_COLUMNS`.
 2. **PyPI packaging** — the distribution is **`road-matcher`** (verified

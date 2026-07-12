@@ -27,6 +27,13 @@ class TestTopLevelCommands:
         result = runner.invoke(app, ["stitch", "--help"])
         assert result.exit_code == 0
         assert "stitch pipeline" in result.output.lower()
+        assert "--model-path" in strip_ansi(result.output)
+
+    def test_stitch_missing_explicit_model_fails_before_pipeline(self, tmp_path):
+        missing = tmp_path / "missing.joblib"
+        result = runner.invoke(app, ["stitch", "--model-path", str(missing)])
+        assert result.exit_code == 1
+        assert "Active ML model not found" in strip_ansi(result.output)
 
     def test_train_help(self):
         """Test train command is at top level."""

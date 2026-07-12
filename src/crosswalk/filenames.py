@@ -198,7 +198,10 @@ def _model_fingerprint() -> str:
     Returns a stable 8-char hex string. If the model file doesn't exist,
     returns "nomodel" so the cache path is still valid.
     """
-    model_path = settings.model_path
+    # Labeling caches intentionally follow the locally trained advisory model.
+    # Production stitch/factory scoring defaults to the bundled artifact via
+    # settings.model_path and requires an explicit override.
+    model_path = settings.local_model_path
     if not model_path.exists():
         return "nomodel"
     stat = model_path.stat()

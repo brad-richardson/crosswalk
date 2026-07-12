@@ -40,9 +40,11 @@ for single-node operation.
   the case for ML rests on dense parallel geometry where buffer+bearing can't
   separate near-parallel candidates and recall stays near 0.2.
 - **Stitch quality is gated**: mbench `--gate` enforces sliver-filtered edge-F1
-  ≥ 0.78 / exact ≥ 0.45 on Boston (baseline 0.8345 / 0.537, 67 mapped labels,
-  armed). Seattle arms automatically at 30 mapped labels (currently 27).
-- **Ground truth**: 140 curated stitching labels (113 Boston / 27 Seattle);
+  ≥ 0.83 / exact ≥ 0.50 on Boston (2026-07-12 baseline 0.9120 / 0.5714,
+  112 mapped pair labels, armed). Seattle arms automatically at 30 mapped pair
+  groups and remains unarmed in the latest gate evaluation.
+- **Ground truth**: 226 curated stitching labels across 13 datasets (178 pair /
+  48 set): Boston 119 (113 pair / 6 set) and Seattle 49 (22 pair / 27 set);
   5,543 pair labels across 34 datasets, all backfillable again after the GERS
   id-churn fix (#273). Panel economics: ~0.68 exportable labels/group on roads,
   ~0.45 on sidewalks at the current 3-provider composition.

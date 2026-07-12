@@ -54,10 +54,16 @@ stage-2 ``candidates.parquet`` feature columns join on, so no competing scheme
 is introduced.
 
 Provenance is preserved on every row so the eval can slice by dataset,
-labeler, and clean-vs-split-vs-empty mapping. Each build logs a one-line stats
-summary (rows, label split, rule-5 drops, ``selected_elsewhere`` exclusions,
-human-selected edges missing from the candidate graph) and attaches the same
-dict as ``df.attrs["build_stats"]``.
+labeler, and clean-vs-split-vs-empty mapping. Multiple historical labels can
+recover onto the same current group. Equal per-edge labels are deduplicated
+across distinct historical labels while their human group ids remain in the
+``historical_human_group_ids`` audit column. A repeated candidate inside one
+historical label is malformed and fails closed. If any current candidate key
+receives contradictory ``keep`` values, the entire current group is
+quarantined from training and evaluation. Each build logs a one-line stats
+summary (rows, label collisions, rule-5 drops, ``selected_elsewhere``
+exclusions, and legacy-known omission occurrences) and attaches the same dict
+as ``df.attrs["build_stats"]``.
 """
 
 from __future__ import annotations
@@ -253,10 +259,15 @@ def _enrich_with_candidate_parquet(
 
     Returns enriched df; updates stats with enrichment counters.
     """
+    # pandas merge/copy operations do not provide a sufficiently stable attrs
+    # preservation contract for audit metadata. Keep it explicitly so callers
+    # can attach collision/build stats before enrichment without losing them.
+    input_attrs = dict(df.attrs)
     if df.empty or candidates_df is None or candidates_df.empty:
         stats["candidate_parquet_rows"] = len(candidates_df) if candidates_df is not None else 0
         stats["candidate_parquet_enriched"] = 0
         stats["candidate_parquet_missing_keys"] = 0
+        df.attrs = input_attrs
         return df
 
     candidates_df = _normalize_candidate_keys(candidates_df, "candidates_df")
@@ -321,8 +332,114 @@ def _enrich_with_candidate_parquet(
             df = df.drop(columns=[pq_col])
 
     stats["candidate_parquet_enriched"] = len(df_keys & cand_keys)
+    df.attrs = input_attrs
 
     return df
+
+
+def _resolve_duplicate_label_collisions(
+    df: pd.DataFrame,
+    stats: dict[str, int],
+) -> tuple[pd.DataFrame, set[tuple[str, str]]]:
+    """Fail closed when historical labels disagree on a current group.
+
+    Group-id churn can cause several historical labels to recover onto the same
+    current sidecar group. That emits repeated :data:`KEY_COLUMNS` rows. A
+    repeated key with one unambiguous ``keep`` value is safe to stable-dedupe:
+    its candidate/runtime fields all came from the same current group edge.
+    If a repeated key has both keep values, however, choosing a label or unioning
+    their selected edges would manufacture ground truth. Quarantine every row
+    for that current ``(dataset_id, group_id)`` instead.
+
+    ``duplicate_rows`` counts surplus raw rows beyond one per duplicated key;
+    ``quarantined_rows`` counts all raw rows removed with conflicting groups.
+    Duplicate keys emitted by the *same* human label are not historical-label
+    collisions: they mean the candidate source itself is malformed, so they
+    raise instead of being silently collapsed.
+    """
+    collision_defaults = {
+        "duplicate_rows": 0,
+        "duplicate_keys": 0,
+        "conflicting_keys": 0,
+        "quarantined_groups": 0,
+        "quarantined_rows": 0,
+        "deduplicated_rows": 0,
+    }
+    stats.update(collision_defaults)
+    if df.empty:
+        return df, set()
+
+    key_columns = list(KEY_COLUMNS)
+    source_columns = [*key_columns, "human_group_id"]
+    within_source_duplicate = df.duplicated(subset=source_columns, keep=False)
+    if within_source_duplicate.any():
+        examples = (
+            df.loc[within_source_duplicate, source_columns]
+            .drop_duplicates()
+            .head(3)
+            .to_dict("records")
+        )
+        raise ValueError(
+            "candidate rows repeat within one historical human_group_id; "
+            f"refusing malformed candidate universe (examples={examples})"
+        )
+
+    lineage_by_key = (
+        df.groupby(key_columns, sort=False, dropna=False)["human_group_id"]
+        .agg(lambda values: sorted({str(value) for value in values}))
+        .to_dict()
+    )
+    duplicated = df.duplicated(subset=key_columns, keep=False)
+    if not duplicated.any():
+        df = df.copy()
+        df["historical_human_group_ids"] = df.apply(
+            lambda row: json.dumps(lineage_by_key[tuple(row[column] for column in key_columns)]),
+            axis=1,
+        )
+        return df, set()
+
+    duplicate_sizes = df.loc[duplicated].groupby(key_columns, sort=False, dropna=False).size()
+    stats["duplicate_keys"] = len(duplicate_sizes)
+    stats["duplicate_rows"] = int(duplicate_sizes.sum() - len(duplicate_sizes))
+
+    keep_counts = (
+        df.loc[duplicated]
+        .groupby(key_columns, sort=False, dropna=False)[EDGE_LABEL_COL]
+        .nunique(dropna=False)
+    )
+    conflicting = keep_counts[keep_counts > 1].reset_index()[key_columns]
+    stats["conflicting_keys"] = len(conflicting)
+
+    quarantined_group_keys: set[tuple[str, str]] = set()
+    if not conflicting.empty:
+        group_columns = ["dataset_id", "group_id"]
+        quarantined_groups = conflicting[group_columns].drop_duplicates()
+        quarantined_group_keys = {
+            (str(row.dataset_id), str(row.group_id))
+            for row in quarantined_groups.itertuples(index=False)
+        }
+        group_index = pd.MultiIndex.from_frame(df[group_columns])
+        quarantined_index = pd.MultiIndex.from_frame(quarantined_groups)
+        quarantine_mask = group_index.isin(quarantined_index)
+        stats["quarantined_groups"] = len(quarantined_groups)
+        stats["quarantined_rows"] = int(quarantine_mask.sum())
+        df = df.loc[~quarantine_mask].copy()
+        logger.warning(
+            "build_edge_table: quarantined {} current group(s) / {} raw row(s) "
+            "because {} duplicate candidate key(s) have conflicting keep labels",
+            stats["quarantined_groups"],
+            stats["quarantined_rows"],
+            stats["conflicting_keys"],
+        )
+
+    before_dedupe = len(df)
+    df = df.drop_duplicates(subset=key_columns, keep="first").copy()
+    stats["deduplicated_rows"] = before_dedupe - len(df)
+    df["historical_human_group_ids"] = df.apply(
+        lambda row: json.dumps(lineage_by_key[tuple(row[column] for column in key_columns)]),
+        axis=1,
+    )
+    return df, quarantined_group_keys
 
 
 def _edge_row(
@@ -396,6 +513,7 @@ def _rows_from_candidate_graph(
     human_es: frozenset[tuple[str, str]],
     filter_rule5: bool,
     stats: dict[str, int],
+    legacy_known_omissions: list[tuple[str, str, str, str, str]],
 ) -> list[dict]:
     """Emit rows over the group's #344 ``candidate_edges`` universe.
 
@@ -425,10 +543,13 @@ def _rows_from_candidate_graph(
     Recall accounting: a human-selected edge known to the group's legacy view
     (``edges``/``rejected_edges``) but NOT emitted here — below the candidate
     floor, glue/sliver-pruned out of the reconstructed component, attributed to
-    another group, or rule-5 filtered — is counted in
-    ``stats["human_selected_outside_candidate_graph"]``. The drop is deliberate
-    (the resolver can never select an edge outside its candidate universe) but
-    the design cares about measuring that recall ceiling, so it must be visible.
+    another group, or rule-5 filtered — is recorded as a *legacy-known omission*.
+    This deliberately does not claim to be a universal candidate-recall count:
+    a selected edge absent from both the candidate graph and the mapped group's
+    legacy view cannot be classified here, and split labels commonly contain
+    valid edges belonging to a different current group. Occurrence, unique raw,
+    and unique retained-group counts are finalized after label-collision
+    quarantine.
     """
     grp_refs = {str(x) for x in group.get("ref_ids", [])}
     grp_tgts = {str(x) for x in group.get("target_ids", [])}
@@ -464,11 +585,12 @@ def _rows_from_candidate_graph(
         emitted.add(key)
         rows.append(_edge_row(merged, group, n_edges, dataset_id, hgid, hrow, provenance, human_es))
 
-    # Lost positives vs the legacy universe (see docstring "Recall accounting").
-    outside = sum(1 for key in human_es if key in struct_lookup and key not in emitted)
-    stats["human_selected_outside_candidate_graph"] += outside
-    if provenance in {"clean", "split"}:
-        stats[f"human_selected_outside_candidate_graph_{provenance}"] += outside
+    # Legacy-known omissions vs the emitted universe (see docstring above).
+    for ref_id, target_id in human_es:
+        if (ref_id, target_id) in struct_lookup and (ref_id, target_id) not in emitted:
+            legacy_known_omissions.append(
+                (provenance, str(group["group_id"]), hgid, ref_id, target_id)
+            )
     return rows
 
 
@@ -571,8 +693,8 @@ def build_edge_table(
 
     Returns:
         DataFrame with one row per (group, edge); empty if no labels map. The
-        per-build counters are logged once and attached as
-        ``df.attrs["build_stats"]``.
+        per-build counters, including duplicate-label collision quarantine, are
+        logged once and attached as ``df.attrs["build_stats"]``.
     """
     # Resolve candidates parquet if a path was given but no df
     if candidates_df is None and candidates_path is not None:
@@ -607,6 +729,15 @@ def build_edge_table(
         "human_selected_outside_candidate_graph": 0,
         "human_selected_outside_candidate_graph_clean": 0,
         "human_selected_outside_candidate_graph_split": 0,
+        "legacy_known_omission_occurrences": 0,
+        "legacy_known_omission_occurrences_clean": 0,
+        "legacy_known_omission_occurrences_split": 0,
+        "legacy_known_omission_unique_raw_keys": 0,
+        "legacy_known_omission_unique_raw_keys_clean": 0,
+        "legacy_known_omission_unique_raw_keys_split": 0,
+        "legacy_known_omission_unique_retained_keys": 0,
+        "legacy_known_omission_unique_retained_keys_clean": 0,
+        "legacy_known_omission_unique_retained_keys_split": 0,
         "empty_rows": 0,
         "empty_legacy_skipped": 0,
         "empty_unrecovered": n_empty_unrecovered,
@@ -614,6 +745,7 @@ def build_edge_table(
         "candidate_groups": 0,
     }
     rows: list[dict] = []
+    legacy_known_omissions: list[tuple[str, str, str, str, str]] = []
     for hgid, bg, provenance in mapped:
         group = gmap.get(bg)
         if group is None:
@@ -623,7 +755,15 @@ def build_edge_table(
         if prefer_candidate_graph and _group_has_candidate_graph(group):
             stats["candidate_groups"] += 1
             new_rows = _rows_from_candidate_graph(
-                group, dataset_id, hgid, hrow, provenance, human_es, filter_rule5, stats
+                group,
+                dataset_id,
+                hgid,
+                hrow,
+                provenance,
+                human_es,
+                filter_rule5,
+                stats,
+                legacy_known_omissions,
             )
             if provenance == "empty":
                 stats["empty_rows"] += len(new_rows)
@@ -642,6 +782,42 @@ def build_edge_table(
             )
 
     df = pd.DataFrame(rows)
+    stats["raw_rows"] = len(df)
+    df, quarantined_group_keys = _resolve_duplicate_label_collisions(df, stats)
+
+    # This is an audit of legacy-known omission events, not a universal recall
+    # claim. An event is one historical-label occurrence. A unique key is scoped
+    # to current group + candidate pair, so the same omission recovered from two
+    # historical labels or both provenance slices is counted once in the total.
+    # Slice counters filter provenance first. Retained counts exclude current
+    # groups quarantined for contradictory truth.
+    for provenance in (None, "clean", "split"):
+        suffix = f"_{provenance}" if provenance else ""
+        events = [
+            event
+            for event in legacy_known_omissions
+            if provenance is None or event[0] == provenance
+        ]
+        raw_keys = {(event[1], event[3], event[4]) for event in events}
+        retained_keys = {
+            (event[1], event[3], event[4])
+            for event in events
+            if (dataset_id, event[1]) not in quarantined_group_keys
+        }
+        stats[f"legacy_known_omission_occurrences{suffix}"] = len(events)
+        stats[f"legacy_known_omission_unique_raw_keys{suffix}"] = len(raw_keys)
+        stats[f"legacy_known_omission_unique_retained_keys{suffix}"] = len(retained_keys)
+
+    # Backward-compatible aliases for research scripts written before the
+    # occurrence-vs-key distinction. New reports must use the accurately named
+    # counters above.
+    stats["human_selected_outside_candidate_graph"] = stats["legacy_known_omission_occurrences"]
+    stats["human_selected_outside_candidate_graph_clean"] = stats[
+        "legacy_known_omission_occurrences_clean"
+    ]
+    stats["human_selected_outside_candidate_graph_split"] = stats[
+        "legacy_known_omission_occurrences_split"
+    ]
     stats["rows"] = len(df)
     if len(df):
         stats["positives"] = int(df[EDGE_LABEL_COL].sum())
@@ -651,6 +827,7 @@ def build_edge_table(
     # This is the R1 step that closes the ~95% pair-feature gap and provides
     # signed lateral offset, class/length, optimizer decision/reason, and authoritative
     # structural values. Keeps row count identical — only adds columns / fills defaults.
+    df.attrs["build_stats"] = stats
     if candidates_df is not None:
         df = _enrich_with_candidate_parquet(df, candidates_df, stats)
     # Update row counts after enrichment (count unchanged, but recompute for safety if needed)

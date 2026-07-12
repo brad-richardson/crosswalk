@@ -15,7 +15,8 @@ from mbench.adapters.base import EvalMode, ToolOutput
 # Default invocation. Uses ``uv run`` so the crosswalk CLI resolves from the
 # crosswalk project environment regardless of what is on ``PATH`` in the caller's
 # shell. Executed with ``cwd`` set to the repo root (see ``_find_repo_root``) so
-# crosswalk's relative model path (``data/models/...``) resolves correctly.
+# project-relative dataset/config discovery is stable; production model loading
+# defaults to the packaged bundle and is independent of this working directory.
 DEFAULT_CROSSWALK_CMD = "uv run crosswalk"
 
 
@@ -50,8 +51,59 @@ def _groups_sidecar_path(bridge_path: Path) -> Path:
     return bridge_path.parent / f"{stem}.json"
 
 
+def _normalized_scalar_id(value: object, location: str) -> str:
+    """Return a nonblank scalar sidecar ID; reject structured JSON values."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise ValueError(f"{location} must be a string or numeric scalar")
+    normalized = str(value).strip()
+    if not normalized:
+        raise ValueError(f"{location} must be nonblank")
+    return normalized
+
+
+def _validate_group_edge_source(
+    group: dict,
+    group_index: int,
+    source: str,
+    *,
+    require_nonempty: bool,
+) -> int:
+    """Validate one required or optional edge-list field on a sidecar group."""
+    if source not in group:
+        if require_nonempty:
+            raise ValueError(f"groups[{group_index}].{source} must be a nonempty list")
+        return 0
+
+    edges = group[source]
+    if not isinstance(edges, list) or (require_nonempty and not edges):
+        qualifier = "a nonempty list" if require_nonempty else "a list when present"
+        raise ValueError(f"groups[{group_index}].{source} must be {qualifier}")
+
+    seen_pairs: set[tuple[str, str]] = set()
+    for edge_index, edge in enumerate(edges):
+        if not isinstance(edge, dict):
+            raise ValueError(f"groups[{group_index}].{source}[{edge_index}] must be an object")
+        normalized_ids: dict[str, str] = {}
+        for key in ("ref_id", "target_id"):
+            normalized_ids[key] = _normalized_scalar_id(
+                edge.get(key),
+                f"groups[{group_index}].{source}[{edge_index}].{key}",
+            )
+        pair = (normalized_ids["ref_id"], normalized_ids["target_id"])
+        if pair in seen_pairs:
+            raise ValueError(f"groups[{group_index}].{source}[{edge_index}] duplicates edge {pair}")
+        seen_pairs.add(pair)
+    return len(edges)
+
+
 def _validated_groups_sidecar(data: object) -> list[dict]:
-    """Validate the minimum sidecar schema required for stitch evaluation."""
+    """Validate the minimum sidecar schema required for stitch evaluation.
+
+    ``candidate_edges`` and ``rejected_edges`` are optional for legacy exports,
+    but a producer that includes either field must emit the canonical edge-list
+    shape. A falsey malformed value must not masquerade as an omitted source and
+    silently weaken decomposition-aware label recovery.
+    """
     if not isinstance(data, dict):
         raise ValueError("groups sidecar root must be an object")
     groups = data.get("groups")
@@ -65,27 +117,27 @@ def _validated_groups_sidecar(data: object) -> list[dict]:
     for group_index, group in enumerate(groups):
         if not isinstance(group, dict):
             raise ValueError(f"groups[{group_index}] must be an object")
-        raw_group_id = group.get("group_id")
-        group_id = "" if raw_group_id is None else str(raw_group_id).strip()
-        if not group_id:
-            raise ValueError(f"groups[{group_index}].group_id must be nonblank")
+        group_id = _normalized_scalar_id(
+            group.get("group_id"),
+            f"groups[{group_index}].group_id",
+        )
         if group_id in seen_group_ids:
             raise ValueError(f"duplicate group_id in groups sidecar: {group_id}")
         seen_group_ids.add(group_id)
 
-        edges = group.get("edges")
-        if not isinstance(edges, list) or not edges:
-            raise ValueError(f"groups[{group_index}].edges must be a nonempty list")
-        for edge_index, edge in enumerate(edges):
-            if not isinstance(edge, dict):
-                raise ValueError(f"groups[{group_index}].edges[{edge_index}] must be an object")
-            for key in ("ref_id", "target_id"):
-                raw_id = edge.get(key)
-                if raw_id is None or not str(raw_id).strip():
-                    raise ValueError(
-                        f"groups[{group_index}].edges[{edge_index}].{key} must be nonblank"
-                    )
-        total_edges += len(edges)
+        total_edges += _validate_group_edge_source(
+            group,
+            group_index,
+            "edges",
+            require_nonempty=True,
+        )
+        for optional_source in ("candidate_edges", "rejected_edges"):
+            _validate_group_edge_source(
+                group,
+                group_index,
+                optional_source,
+                require_nonempty=False,
+            )
 
     if total_edges == 0:  # Defensive; nonempty per-group edges already imply this.
         raise ValueError("groups sidecar candidate edge universe is empty")

@@ -15,9 +15,10 @@ For ML pipeline architecture and feature details, see [docs/ARCHITECTURE.md](doc
 # Install with all dependencies
 uv pip install -e ".[dev,ml,web]"
 
-# Train ML model (optional — a pretrained model ships in src/crosswalk/_model/ and
-# is used automatically when data/models/ has no local model; a locally trained
-# model takes precedence. Keep the shipped model in lockstep with FEATURE_VERSION:
+# Train ML model (optional — production matching defaults to the pretrained model
+# in src/crosswalk/_model/ even when a local artifact exists. Opt into a local
+# experiment with `crosswalk stitch --model-path data/models/...` or an explicit
+# MATCHER_MODEL_PATH. Keep the shipped model in lockstep with FEATURE_VERSION:
 # tests/unit/test_shipped_model.py fails if they diverge — reship with
 # `uv run crosswalk train -o src/crosswalk/_model/matcher_model_combined.joblib`)
 uv run crosswalk train

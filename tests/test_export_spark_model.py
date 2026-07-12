@@ -19,6 +19,7 @@ def exported_model(tmp_path):
     """Train and export a Spark-portable model to a temp directory."""
     from crosswalk.config import FEATURE_COLUMNS
     from crosswalk.matching.ml import MLMatcher
+    from crosswalk.model_export import build_spark_model_manifest
 
     labels_dir = Path("labels")
     if not labels_dir.exists():
@@ -39,10 +40,7 @@ def exported_model(tmp_path):
     model_path = tmp_path / "model.json"
     matcher.model.get_booster().save_model(str(model_path))
 
-    manifest = {
-        "features": matcher.feature_names,
-        "n_features": len(matcher.feature_names),
-    }
+    manifest = build_spark_model_manifest(matcher)
     manifest_path = tmp_path / "manifest.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f)
@@ -68,6 +66,7 @@ class TestExportSparkModel:
             manifest = json.load(f)
         assert set(manifest["features"]) == set(SPARK_PORTABLE_FEATURES)
         assert manifest["n_features"] == len(SPARK_PORTABLE_FEATURES)
+        assert "source_commit" in manifest["training_metadata"]
 
     def test_booster_predicts_with_feature_names(self, exported_model):
         """Booster should accept DMatrix with feature names and return probabilities."""

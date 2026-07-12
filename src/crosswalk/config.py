@@ -75,6 +75,18 @@ JUNCTION_MAX_OVERLAP_M = 20.0
 # Two matches overlapping by more than this on the shared segment are considered incompatible.
 MAX_ALIGNMENT_OVERLAP_M = 5.0
 
+# Maximum uncovered distance on the shared segment when optimizer grouping
+# rescues complementary, same-name alignment fragments.  The endpoint snap
+# tolerance remains the primary contiguity rule; this narrow secondary rule
+# spans short connector segments that split an otherwise continuous named
+# corridor (the Boston regression cases are 8-12 m).
+OPTIMIZER_ALIGNMENT_RESCUE_MAX_GAP_M = 15.0
+
+# Same-side endpoint-distance cap for that rescue. This covers the audited
+# 15.15 m and 21.24 m Boston connector gaps while preventing alignment noise
+# from joining distant fragments of a repeated street name.
+OPTIMIZER_ALIGNMENT_RESCUE_MAX_ENDPOINT_GAP_M = 25.0
+
 # ---------------------------------------------------------------------------
 # Junction "sliver" edge classification (single source of truth)
 # ---------------------------------------------------------------------------
@@ -307,6 +319,13 @@ DATA_VERSION = f"v{SCHEMA_VERSION}.{TRANSFORM_VERSION}"  # e.g., "v1.0"
 # logic changes to track which features were computed with which code version.
 # Format: YYYY-MM-DD or semantic version (e.g., "1.0.0")
 FEATURE_VERSION = "2026-07-07.2"
+
+# Version of the post-scoring optimizer/export decision contract. Bump whenever
+# grouping, assignment, review demotion, pruning, or bridge-publication logic
+# changes in a way that must invalidate factory optimize caches. Runtime knobs
+# are snapshotted separately; this token covers algorithmic/code-path changes
+# that cannot be represented by a setting value alone.
+OPTIMIZER_VERSION = "2026-07-12.1"
 
 
 def bundled_model_path() -> Path:
@@ -614,8 +633,13 @@ class MatcherSettings(BaseSettings):
     )
     output_dir: Path = Field(default=Path("data/output"), description="Output directory")
     model_path: Path = Field(
+        default_factory=bundled_model_path,
+        description="Active production ML model. Defaults to the bundled artifact; "
+        "set MATCHER_MODEL_PATH or pass stitch --model-path for an explicit override.",
+    )
+    local_model_path: Path = Field(
         default=Path("data/models/matcher_model_combined.joblib"),
-        description="Path to trained ML model",
+        description="Locally trained full model used by advisory labeling workflows",
     )
     model_geom_only_path: Path = Field(
         default=Path("data/models/matcher_model_geom_only.joblib"),
@@ -696,16 +720,14 @@ class MatcherSettings(BaseSettings):
         "If estimated memory exceeds this, greedy algorithm is used instead.",
     )
 
-    # Corridor-aware M:N grouping (group-splitting design).
-    # When enabled, the M:N branch's endpoint-proximity contiguity only chains
-    # segments that are collinear continuations (turn angle <= max_turn_deg) OR
-    # share a normalized name. This stops perpendicular junction kisses from
-    # welding whole neighbourhoods into one "monster" group; the existing
-    # per-(ref_group x target_group) re-matching then decomposes the corridor
-    # over-merge into per-corridor subgroups.
+    # Corridor-aware grouping (group-splitting design).
+    # When enabled, endpoint-proximity contiguity in 1:N, N:1, M:N, and greedy
+    # post-expansion only chains segments that are collinear continuations
+    # (turn angle <= max_turn_deg) OR share a normalized name. This stops
+    # perpendicular junction kisses from welding independent corridors.
     optimizer_corridor_aware: bool = Field(
         default=True,
-        description="Gate M:N contiguity on collinear continuation or same name.",
+        description="Gate optimizer contiguity on collinear continuation or same name.",
     )
     optimizer_corridor_max_turn_deg: float = Field(
         default=40.0,

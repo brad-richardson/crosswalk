@@ -44,6 +44,7 @@ from ..config import (
     SEMANTIC_FEATURES,
     default_worker_count,
 )
+from ..provenance import source_commit_provenance
 from ..utils.crs import validate_projected_crs
 from ..utils.linear_ref import extract_lr_value
 from .calibration import (
@@ -660,7 +661,11 @@ def select_model_for_dataset(
 
     # Use configured paths if not explicitly provided
     if full_model_path is None:
-        full_model_path = str(settings.model_path)
+        # Automatic model selection is used by the advisory labeling workflow,
+        # which intentionally follows local retraining. Production stitch and
+        # factory paths resolve settings.model_path separately and default to the
+        # bundled artifact.
+        full_model_path = str(settings.local_model_path)
     if geom_only_model_path is None:
         geom_only_model_path = str(settings.model_geom_only_path)
 
@@ -1558,6 +1563,10 @@ class MLMatcher:
         }
         self.training_metadata = {
             "schema_version": 1,
+            # Additive within schema v1: older bundled artifacts remain
+            # loadable, while newly trained native and Spark artifacts identify
+            # the exact source checkout (including tracked/untracked dirt).
+            "source_commit": source_commit_provenance(),
             "feature_version": self.feature_version,
             "feature_names": list(self.feature_names),
             "fingerprints": {

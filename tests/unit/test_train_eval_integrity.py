@@ -210,6 +210,43 @@ class TestCVExcludesTestRows:
             "xgboost",
         }
 
+    def test_training_metadata_serializes_source_commit_for_native_and_spark(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """One metadata record feeds both joblib and the Spark manifest."""
+        import json
+
+        from crosswalk.model_export import build_spark_model_manifest
+
+        expected = {
+            "available": True,
+            "sha": "a" * 40,
+            "worktree_state_available": True,
+            "tracked_dirty": True,
+            "tracked_change_count": 2,
+            "untracked_present": True,
+            "untracked_count": 1,
+        }
+        monkeypatch.setattr(ml_module, "source_commit_provenance", lambda: expected)
+        labels_dir = _make_labels_dir(tmp_path, n_human=20)
+
+        matcher = MLMatcher()
+        results = matcher.train(labels_dir=str(labels_dir), **FAST_XGB)
+        native_path = tmp_path / "model.joblib"
+        matcher.save_model(str(native_path))
+        loaded = MLMatcher(str(native_path))
+
+        assert results["training_metadata"]["source_commit"] == expected
+        assert loaded.training_metadata["source_commit"] == expected
+        # Exercise the exact manifest builder used by export-spark-model, then
+        # round-trip the on-disk JSON representation.
+        spark_path = tmp_path / "spark_manifest.json"
+        spark_path.write_text(json.dumps(build_spark_model_manifest(matcher)))
+        spark_manifest = json.loads(spark_path.read_text())
+        assert spark_manifest["training_metadata"]["source_commit"] == expected
+
     def test_duplicate_pair_keys_fail_closed(self, tmp_path):
         labels_dir = _make_labels_dir(tmp_path, n_human=20)
         human_path = labels_dir / "human" / "dataset=test_ds" / "data.csv"

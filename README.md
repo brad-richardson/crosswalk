@@ -92,10 +92,10 @@ flowchart TB
 
     subgraph Match["2. Stitch Pipeline"]
         D --> E[Generate Candidates<br/>Spatial indexing + filters]
-        E --> F[Compute 78 Features<br/>Geometric, semantic, topological]
+        E --> F[Compute 83 Features<br/>Geometric, semantic, topological]
         F --> G[Score with XGBoost]
-        G --> H["Graph-Level Resolution<br/>(Planned)"]
-        H --> I[Optimize M:N Matches<br/>Hungarian algorithm]
+        G --> H[Graph-Level Resolution]
+        H --> I[Optimize M:N Matches<br/>components + greedy assignment]
         I --> J{Quality<br/>Acceptable?}
     end
 
@@ -158,16 +158,21 @@ For a *configured* dataset (YAML in `datasets/`) with labeling and retraining:
 # 1. Fetch all data (target + Overture reference) for a dataset
 crosswalk data fetch all us_boston_streets
 
-# 2. Run matching (uses the bundled pretrained model, or data/models/ if you trained one)
+# 2. Run matching (uses the bundled pretrained model by default)
 crosswalk stitch data/raw/us_boston_overture_segments.parquet data/raw/us_boston_streets.parquet \
     -m xgboost -o data/output/us_boston_streets_bridge.parquet
 
 # 3. If match quality needs improvement, label more examples (auto-discovers datasets)
 crosswalk ui
 
-# 4. Retrain and re-match until satisfied (a local model takes precedence over the bundled one)
-crosswalk train && crosswalk stitch ...
+# 4. Retrain, then explicitly opt into the local artifact for an experiment
+crosswalk train
+crosswalk stitch ... --model-path data/models/matcher_model_combined.joblib
 ```
+
+Production matching deliberately stays on the bundled, CI-validated artifact
+even when `data/models/` contains a locally trained file. Use `--model-path` for
+one run, or set `MATCHER_MODEL_PATH`, to opt into another artifact explicitly.
 
 ## Installation
 

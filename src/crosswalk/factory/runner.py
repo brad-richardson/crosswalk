@@ -70,6 +70,7 @@ def build_keys(
     buffer_distance_m: float,
     method: str = "xgboost",
     min_confidence: float = 0.1,
+    model_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Compute staleness keys + provenance blocks for a pair.
 
@@ -83,11 +84,24 @@ def build_keys(
     connectors_fp = (
         manifest_mod.file_fingerprint(pair.connectors_path) if pair.has_connectors else None
     )
-    model_fp = manifest_mod.model_fingerprint()
+    model_fp = manifest_mod.model_fingerprint(model_path)
     snapshot = manifest_mod.settings_snapshot()
 
+    scoring_settings = {
+        key: snapshot[key]
+        for key in (
+            "enable_calibration",
+            "scoring_match_threshold",
+            "scoring_review_threshold",
+        )
+    }
     score_key = manifest_mod.compute_score_key(
-        ref_fp, target_fp, model_fp, buffer_distance_m, method=method
+        ref_fp,
+        target_fp,
+        model_fp,
+        buffer_distance_m,
+        method=method,
+        scoring_settings=scoring_settings,
     )
     optimize_key = manifest_mod.compute_optimize_key(snapshot, min_confidence=min_confidence)
     full_key = manifest_mod.compute_full_key(score_key, optimize_key)
@@ -166,7 +180,7 @@ def run_dataset(
         optimize_and_export,
         score_candidates_from_geodataframes,
     )
-    from ..pipeline.runner import _to_wgs84
+    from ..pipeline.runner import _resolve_model_path, _to_wgs84
 
     dataset_dir = paths.dataset_dir(release, pair.name)
     dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -174,7 +188,23 @@ def run_dataset(
     manifest_path = paths.manifest(release, pair.name)
     cache_path = paths.scored_cache(release, pair.name)
 
-    keys = build_keys(pair, buffer_distance_m, method=method, min_confidence=min_confidence)
+    try:
+        active_model_path = _resolve_model_path()
+    except (FileNotFoundError, OSError) as exc:
+        return {
+            "dataset": pair.name,
+            "release": release,
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    keys = build_keys(
+        pair,
+        buffer_distance_m,
+        method=method,
+        min_confidence=min_confidence,
+        model_path=active_model_path,
+    )
 
     if not force and is_up_to_date(manifest_path, bridge_path, keys["full_key"]):
         logger.info(f"[{pair.name}] up-to-date (full_key match) — skipping")
@@ -198,6 +228,7 @@ def run_dataset(
             target=target,
             buffer_distance_m=buffer_distance_m,
             n_jobs=n_jobs,
+            model_path=active_model_path,
         )
         reference_wgs84 = _to_wgs84(reference)
         target_wgs84 = _to_wgs84(target)
@@ -220,6 +251,7 @@ def run_dataset(
             method=method,
             min_confidence=min_confidence,
             prune_dataset_key=pair.name,
+            model_path=active_model_path,
         )
         optimize_wall = time.perf_counter() - t_opt0
 
@@ -286,7 +318,7 @@ def reoptimize_dataset(
     Optimizer/prune/export settings may have changed — that is the point.
     """
     from ..pipeline import load_and_filter_inputs, optimize_and_export
-    from ..pipeline.runner import _to_wgs84
+    from ..pipeline.runner import _resolve_model_path, _to_wgs84
     from ..utils import ensure_projected_crs
 
     dataset_dir = paths.dataset_dir(release, pair.name)
@@ -309,7 +341,23 @@ def reoptimize_dataset(
             "error": "no manifest; run 'crosswalk factory run' first",
         }
 
-    keys = build_keys(pair, buffer_distance_m, method=method, min_confidence=min_confidence)
+    try:
+        active_model_path = _resolve_model_path()
+    except (FileNotFoundError, OSError) as exc:
+        return {
+            "dataset": pair.name,
+            "release": release,
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    keys = build_keys(
+        pair,
+        buffer_distance_m,
+        method=method,
+        min_confidence=min_confidence,
+        model_path=active_model_path,
+    )
     prev = Manifest.read(manifest_path)
     if prev.score_key != keys["score_key"]:
         return {
@@ -361,6 +409,7 @@ def reoptimize_dataset(
             method=method,
             min_confidence=min_confidence,
             prune_dataset_key=pair.name,
+            model_path=active_model_path,
         )
         optimize_wall = time.perf_counter() - t_opt0
         _normalize_outputs(dataset_dir, bridge_path)
