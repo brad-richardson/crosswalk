@@ -64,31 +64,129 @@ def load_votes(paths: list[str | Path]) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def _group_edge_sources(group: dict) -> list[dict]:
+    """All edge sources that can represent a group's candidate universe.
+
+    Mirrors ``stitch_eval.recover_labeled_groups``: edges + candidate_edges +
+    rejected_edges (+ optimizer_assignment if present). This closes the gap where
+    vote batches from fresh packs reference an edge that is only in the uncapped
+    candidate graph and would otherwise be unmappable.
+    """
+    sources = []
+    for key in ("edges", "candidate_edges", "rejected_edges", "optimizer_assignment"):
+        for e in group.get(key, []) or []:
+            try:
+                # Normalize to ref_id/target_id dict for uniform handling
+                sources.append(e)
+            except Exception:
+                continue
+    return sources
+
+
+def _group_segment_ids(group: dict) -> set[str]:
+    """Segment ids (ref + target) for a group, from ref_ids/target_ids + edges."""
+    segs: set[str] = set()
+    for rid in group.get("ref_ids", []) or []:
+        segs.add(str(rid))
+    for tid in group.get("target_ids", []) or []:
+        segs.add(str(tid))
+    for e in _group_edge_sources(group):
+        try:
+            segs.add(str(e["ref_id"]))
+            segs.add(str(e["target_id"]))
+        except (KeyError, TypeError):
+            continue
+    return segs
+
+
 def _map_vote_groups_to_sidecar(groups: list[dict], votes_df: pd.DataFrame) -> dict[str, str]:
-    """Map each vote group_id -> best sidecar group_id by edge overlap.
+    """Map each vote group_id -> best sidecar group_id by edge + segment overlap.
 
     A vote group's candidate proxy is the union of all providers' chosen edges.
+    Primary signal is edge overlap over the full candidate universe
+    (edges + candidate_edges + rejected_edges). Fallback is segment membership
+    overlap (ref_ids/target_ids), mirroring ``stitch_eval.recover_labeled_groups``
+    and ``evaluateset`` set-label recovery – needed when a batch's edge set is
+    empty (NONE) or references edges pruned from the current sidecar.
     """
     edge_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
+    seg_groups: dict[str, set[str]] = defaultdict(set)
+
     for g in groups:
-        for e in g.get("edges", []):
-            edge_groups[(str(e["ref_id"]), str(e["target_id"]))].add(g["group_id"])
+        gid = g["group_id"]
+        for e in _group_edge_sources(g):
+            try:
+                key = (str(e["ref_id"]), str(e["target_id"]))
+            except (KeyError, TypeError):
+                continue
+            edge_groups[key].add(gid)
+            seg_groups[str(e["ref_id"])].add(gid)
+            seg_groups[str(e["target_id"])].add(gid)
+        for sid in g.get("ref_ids", []) or []:
+            seg_groups[str(sid)].add(gid)
+        for sid in g.get("target_ids", []) or []:
+            seg_groups[str(sid)].add(gid)
 
     mapping: dict[str, str] = {}
     for vgid, sub in votes_df.groupby("group_id"):
         union: set[tuple[str, str]] = set()
+        seg_union: set[str] = set()
         for raw in sub["edge_set"]:
-            union |= _parse_edge_set(raw)
+            es = _parse_edge_set(raw)
+            union |= es
+            for r, t in es:
+                seg_union.add(r)
+                seg_union.add(t)
+
+        # Primary: edge overlap
         cnt: dict[str, int] = defaultdict(int)
         for e in union:
             for sgid in edge_groups.get(e, ()):
                 cnt[sgid] += 1
         if cnt:
             # #354: sort before max() so a count tie resolves to the smallest
-            # group_id, not hash-order-dependent set iteration. This feeds the
-            # experimental resolver's training table via edge_soft_labels().
+            # group_id, not hash-order-dependent set iteration.
             mapping[str(vgid)] = max(sorted(cnt), key=cnt.get)
+            continue
+
+        # Fallback: segment membership overlap (for NONE votes or edge-churned groups)
+        if seg_union:
+            seg_cnt: dict[str, int] = defaultdict(int)
+            for s in seg_union:
+                for sgid in seg_groups.get(s, ()):
+                    seg_cnt[sgid] += 1
+            if seg_cnt:
+                mapping[str(vgid)] = max(sorted(seg_cnt), key=seg_cnt.get)
+                continue
+
+        # No overlap at all: unmappable (e.g., old batch referencing deleted geography)
+
     return mapping
+
+
+def _sidecar_candidate_edges(group: dict) -> set[tuple[str, str]]:
+    """Union of all edge keys that represent the group's candidate universe.
+
+    Prefers ``candidate_edges`` when present (uncapped, authoritative), falls back to
+    ``edges`` + ``rejected_edges``. This is the universe the resolver trains on,
+    so soft labels must cover it, not just the selected assignment.
+    """
+    # Prefer candidate_edges (stage-1 uncapped) if available
+    if group.get("candidate_edges"):
+        return {
+            (str(e["ref_id"]), str(e["target_id"]))
+            for e in group.get("candidate_edges", [])
+            if "ref_id" in e and "target_id" in e
+        }
+    # Legacy fallback: selected + capped rejected
+    edges = set()
+    for key in ("edges", "rejected_edges"):
+        for e in group.get(key, []) or []:
+            try:
+                edges.add((str(e["ref_id"]), str(e["target_id"])))
+            except (KeyError, TypeError):
+                continue
+    return edges
 
 
 def edge_soft_labels(
@@ -102,7 +200,9 @@ def edge_soft_labels(
     ``[group_id, ref_id, target_id, soft_keep, n_providers, unanimous]``
     where ``soft_keep`` is the reliability-weighted fraction of providers whose
     chosen edge set contained the edge, restricted to edges that exist in the
-    mapped sidecar group.
+    mapped sidecar group's **full candidate universe** (candidate_edges when
+    present, else edges + rejected_edges). This closes the ~95% gap where the
+    previous implementation only emitted rows for the selected assignment.
     """
     weights = provider_weights or DEFAULT_PROVIDER_WEIGHTS
     vgid_to_sgid = _map_vote_groups_to_sidecar(groups, votes_df)
@@ -113,9 +213,12 @@ def edge_soft_labels(
         sgid = vgid_to_sgid.get(str(vgid))
         if sgid is None:
             continue
-        sidecar_edges = {
-            (str(e["ref_id"]), str(e["target_id"])) for e in gmap[sgid].get("edges", [])
-        }
+        group = gmap.get(sgid)
+        if group is None:
+            continue
+        sidecar_edges = _sidecar_candidate_edges(group)
+        if not sidecar_edges:
+            continue
         num = defaultdict(float)
         chosen_by = defaultdict(int)
         wsum = 0.0
