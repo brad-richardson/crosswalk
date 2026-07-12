@@ -561,8 +561,8 @@ the eval instrument, extended with LODO splits (§2.5) and the de-anchored slice
 **sliver-filtered edge-F1** and **group exact-match**, clean slice, pooled OOF,
 group bootstrap (2000 resamples) for the production comparison. The external
 check is `mbench run crosswalk <ds> --gate` against `mbench/datasets.toml`
-floors (Boston armed: filtered F1 ≥ 0.83, exact ≥ 0.50; baseline 0.8858 /
-0.5946 at 111 mapped pair groups post-#295/#298; Seattle arms at 30 mapped).
+floors (Boston armed: filtered F1 ≥ 0.83, exact ≥ 0.50; decomposition-aware
+baseline 0.9142 / 0.5893 at 112 mapped pair labels; Seattle arms at 30 mapped).
 
 ### 6.2 The bar (promotion criterion)
 
