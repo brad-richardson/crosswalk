@@ -182,6 +182,22 @@ def test_build_combined_table_empty_handling_and_stats(tmp_path):
     ]
     gp = tmp_path / "g.json"
     gp.write_text(json.dumps({"groups": groups}))
+    pd.DataFrame(
+        [
+            {
+                "group_id": "g1",
+                "ref_id": "A",
+                "target_id": "T",
+                "lateral_offset_signed_m": 1.25,
+            },
+            {
+                "group_id": "g1",
+                "ref_id": "B",
+                "target_id": "T",
+                "lateral_offset_signed_m": -2.5,
+            },
+        ]
+    ).to_parquet(tmp_path / "g_candidates.parquet")
     labels = tmp_path / "labels.csv"
     df_h = _labels([_label_row("g1", [("A", "T")])])
     df_h.to_csv(labels, index=False)
@@ -190,6 +206,9 @@ def test_build_combined_table_empty_handling_and_stats(tmp_path):
     assert len(df) == 2
     assert stats[0]["exists"] is True
     assert stats[0]["rows"] == 2
+    assert stats[0]["build_candidate_parquet_enriched"] == 2
+    assert stats[0]["build_candidate_parquet_missing_keys"] == 0
+    assert list(df.sort_values("ref_id")["lateral_offset_signed_m"]) == [1.25, -2.5]
     # empty-reject handling tested in extract, but train path should propagate empty_rows key
     assert "build_empty_rows" in stats[0]
 
@@ -222,14 +241,26 @@ def test_prepare_soft_for_train_requires_feature_cols():
     # soft votes for A and B, but g1 is in existing_group_ids -> excluded
     soft_df = pd.DataFrame(
         [
-            {"group_id": "g1", "ref_id": "A", "target_id": "T", "soft_keep": 0.9},
-            {"group_id": "g1", "ref_id": "B", "target_id": "T", "soft_keep": 0.2},
+            {
+                "dataset_id": "ds",
+                "group_id": "g1",
+                "ref_id": "A",
+                "target_id": "T",
+                "soft_keep": 0.9,
+            },
+            {
+                "dataset_id": "ds",
+                "group_id": "g1",
+                "ref_id": "B",
+                "target_id": "T",
+                "soft_keep": 0.2,
+            },
         ]
     )
     out = _prepare_soft_for_train(
         soft_df,
         groups_by_ds,
-        existing_group_ids={"g1"},
+        existing_group_ids={("ds", "g1")},
         feature_cols=FEATURE_COLUMNS,
         extended=False,
     )
@@ -244,8 +275,20 @@ def test_prepare_soft_for_train_new_groups_featurized():
     groups_by_ds = {"ds": [g]}
     soft_df = pd.DataFrame(
         [
-            {"group_id": "g_new", "ref_id": "A", "target_id": "T", "soft_keep": 0.9},
-            {"group_id": "g_new", "ref_id": "B", "target_id": "T", "soft_keep": 0.1},
+            {
+                "dataset_id": "ds",
+                "group_id": "g_new",
+                "ref_id": "A",
+                "target_id": "T",
+                "soft_keep": 0.9,
+            },
+            {
+                "dataset_id": "ds",
+                "group_id": "g_new",
+                "ref_id": "B",
+                "target_id": "T",
+                "soft_keep": 0.1,
+            },
         ]
     )
     out = _prepare_soft_for_train(
@@ -258,6 +301,106 @@ def test_prepare_soft_for_train_new_groups_featurized():
     assert out is not None
     assert len(out) == 2
     assert set(out["keep"]) == {0, 1}
+    assert set(out["dataset_id"]) == {"ds"}
+
+
+def test_edge_soft_labels_are_dataset_scoped_and_observed_only():
+    from crosswalk.resolver.votes import edge_soft_labels
+
+    groups = [
+        _group(
+            "g1",
+            [_edge("A", "T", 0.9)],
+            candidate_edges=[
+                {"ref_id": "A", "target_id": "T"},
+                {"ref_id": "B", "target_id": "T"},
+                {"ref_id": "C", "target_id": "T"},
+            ],
+        )
+    ]
+    votes = pd.DataFrame(
+        [
+            {
+                "dataset_id": "ds",
+                "group_id": "old",
+                "provider": "claude",
+                "edge_set": json.dumps([["A", "T"]]),
+            },
+            {
+                "dataset_id": "ds",
+                "group_id": "old",
+                "provider": "codex",
+                "edge_set": json.dumps([["A", "T"], ["B", "T"]]),
+            },
+            {
+                "dataset_id": "other",
+                "group_id": "old",
+                "provider": "claude",
+                "edge_set": json.dumps([["C", "T"]]),
+            },
+        ]
+    )
+
+    soft = edge_soft_labels(groups, votes, dataset_id="ds")
+
+    assert set(zip(soft["ref_id"], soft["target_id"])) == {("A", "T"), ("B", "T")}
+    assert "C" not in set(soft["ref_id"])
+    by_ref = soft.set_index("ref_id")
+    assert by_ref.loc["A", "soft_keep"] == pytest.approx(1.0)
+    assert by_ref.loc["B", "soft_keep"] == pytest.approx(1 / 3)
+    assert by_ref.loc["A", "unanimous"] == 1
+    assert by_ref.loc["B", "unanimous"] == 0
+
+
+def test_load_votes_keeps_dataset_provenance_in_dedup_key(tmp_path):
+    from crosswalk.resolver.votes import load_votes
+
+    paths = []
+    for dataset_id in ("ds1", "ds2"):
+        batch = tmp_path / dataset_id
+        batch.mkdir()
+        (batch / "batch.json").write_text(json.dumps({"dataset_id": dataset_id}))
+        pd.DataFrame(
+            [
+                {
+                    "group_id": "same-hash",
+                    "provider": "claude",
+                    "edge_set": "[]",
+                    "timestamp": "2026-07-12T00:00:00Z",
+                    "error": None,
+                }
+            ]
+        ).to_csv(batch / "votes.csv", index=False)
+        paths.append(batch / "votes.csv")
+
+    votes = load_votes(paths)
+
+    assert len(votes) == 2
+    assert set(votes["dataset_id"]) == {"ds1", "ds2"}
+
+
+def test_edge_soft_labels_do_not_invent_none_vote_negatives():
+    from crosswalk.resolver.votes import edge_soft_labels
+
+    groups = [
+        _group(
+            "g1",
+            [_edge("A", "T", 0.9)],
+            candidate_edges=[{"ref_id": "A", "target_id": "T"}],
+        )
+    ]
+    votes = pd.DataFrame(
+        [
+            {
+                "dataset_id": "ds",
+                "group_id": "g1",
+                "provider": "claude",
+                "edge_set": "[]",
+            }
+        ]
+    )
+
+    assert edge_soft_labels(groups, votes, dataset_id="ds").empty
 
 
 def test_evaluate_all_runs_on_small_table():
@@ -304,6 +447,57 @@ def test_evaluate_all_scores_against_hard_truth_when_training_is_smoothed():
     corrupted_truth["keep"] = np.where(corrupted_truth["keep"] == 1, 0.95, 0.05)
     with pytest.raises(ValueError, match="binary evaluation truth"):
         evaluate_all(corrupted_truth, FEATURE_COLUMNS, selector="ef1", n_splits=3, seed=0)
+
+
+def test_feature_aggregation_scopes_same_group_id_by_dataset():
+    from crosswalk.resolver.features import featurize
+
+    base = {
+        "group_id": "same-hash",
+        "ref_id": "R",
+        "target_id": "T",
+        "gers_start_frac": 0.0,
+        "gers_end_frac": 1.0,
+        "local_start_frac": 0.0,
+        "local_end_frac": 1.0,
+        "degree_ref": 1,
+        "degree_tgt": 1,
+        "is_bridge": False,
+        "is_sliver": False,
+        "oversized_group": False,
+        "match_type": "1:1",
+    }
+    df = pd.DataFrame(
+        [
+            {**base, "dataset_id": "a", "confidence": 0.9},
+            {**base, "dataset_id": "b", "confidence": 0.4},
+        ]
+    )
+
+    out = featurize(df)
+
+    assert list(out["conf_rel_max"]) == [0.0, 0.0]
+    assert list(out["n_share_ref"]) == [1, 1]
+
+
+def test_group_exact_metric_scopes_same_group_id_by_dataset():
+    import numpy as np
+
+    from crosswalk.resolver.evaluate import _eval_from_predictions
+
+    df = pd.DataFrame(
+        {
+            "dataset_id": ["a", "b"],
+            "group_id": ["same-hash", "same-hash"],
+            "keep": [1, 1],
+            "is_sliver": [False, False],
+        }
+    )
+
+    result = _eval_from_predictions("test", df, np.array([1, 0]))
+
+    assert result.n_groups == 2
+    assert result.group_exact_rate == pytest.approx(0.5)
 
 
 def test_save_model_payload_structure(tmp_path):

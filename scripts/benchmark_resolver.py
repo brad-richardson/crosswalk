@@ -34,7 +34,12 @@ import numpy as np
 import pandas as pd
 
 from crosswalk.resolver.evaluate import _eval_from_predictions, _prf
-from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
+from crosswalk.resolver.features import (
+    FEATURE_COLUMNS,
+    featurize,
+    group_key_columns,
+    group_keys,
+)
 from crosswalk.resolver.round2 import (
     featurize_extended,
     select_expected_f1,
@@ -73,7 +78,7 @@ def _oracle_conf_threshold(df: pd.DataFrame) -> tuple[float, np.ndarray]:
 
 def _model_preds_ef1(df: pd.DataFrame, proba: np.ndarray) -> np.ndarray:
     pred = np.zeros(len(df), dtype=int)
-    for _, idx in df.groupby("group_id").indices.items():
+    for _, idx in df.groupby(group_key_columns(df)).indices.items():
         pred[idx] = select_expected_f1(proba[idx])
     return pred
 
@@ -194,7 +199,7 @@ def main() -> None:
 
     raw_df = raw_df.reset_index(drop=True)
     print(
-        f"\nTable: {len(raw_df)} edges / {raw_df['group_id'].nunique()} groups / "
+        f"\nTable: {len(raw_df)} edges / {group_keys(raw_df).nunique()} groups / "
         f"{raw_df['dataset_id'].nunique()} datasets — "
         f"keep=1:{int(raw_df['keep'].sum())} keep=0:{int((raw_df['keep'] == 0).sum())}"
     )
@@ -312,7 +317,7 @@ def main() -> None:
         "> Research-only. Compares M:N group edge selection strategies on curated stitching labels."
     )
     lines.append(
-        f"> data_root={data_root} labels={labels_root} model={model_path} n_splits={args.n_splits}"
+        f"> data_root={data_root} labels={labels_root} model={model_path.name} n_splits={args.n_splits}"
     )
     lines.append("")
     lines.append("## Inventory")
@@ -323,9 +328,11 @@ def main() -> None:
             f"  - {s.get('dataset_id')}: exists={s.get('exists')} sidecar_groups={s.get('n_sidecar_groups', 0)} "
             f"labels={s.get('n_labels', 0)} rows={s.get('rows', 0)} cand_groups={s.get('build_candidate_groups', 0)} "
             f"legacy_groups={s.get('build_legacy_groups', 0)} pos={s.get('build_positives', 0)} neg={s.get('build_negatives', 0)} "
+            f"outside_candidate={s.get('build_human_selected_outside_candidate_graph', 0)} "
+            f"parquet_rows={s.get('build_candidate_parquet_rows', 0)} enriched={s.get('build_candidate_parquet_enriched', 0)} "
             f"empty_rows={s.get('build_empty_rows', 0)} empty_legacy_skipped={s.get('build_empty_legacy_skipped', 0)}"
         )
-    lines.append(f"- combined: {len(raw_df)} edges / {raw_df['group_id'].nunique()} groups")
+    lines.append(f"- combined: {len(raw_df)} edges / {group_keys(raw_df).nunique()} groups")
     lines.append(
         f"  - keep=1:{int(raw_df['keep'].sum())} keep=0:{int((raw_df['keep'] == 0).sum())}"
     )
@@ -360,7 +367,7 @@ def main() -> None:
     lines.append("## Interpretation / limitations")
     lines.append("")
     lines.append(
-        "- Factory sidecars (`release=2026-06-17.0`) have no `candidate_edges`, so under-selection is capped (64/group)."
+        "- Four labeled datasets still use legacy sidecars without `candidate_edges`, so their under-selection universe is capped (64/group); Tunis is missing entirely."
     )
     lines.append(
         "- Legacy reject-all labels on legacy groups emit zero rows (honest cross-mode handling via `empty_legacy_skipped`)."
@@ -373,17 +380,16 @@ def main() -> None:
     )
     lines.append("- `naive_keepall` = every candidate edge kept — precision floor, recall ceiling.")
     lines.append(
-        "- Production currently beats learned on clean slices at small label scale (see round2/round3 reports);"
+        "- Honest OOF F1 remains below production, while group exact is modestly higher. This is a useful prototype, not a production resolver."
     )
     lines.append(
-        "  model needs P1 `<ds>_candidates.parquet` (78 feats + signed lateral offset) + fresh stitch"
-    )
-    lines.append("  + cross-mode empty testset ≥20 to have a fair shot.")
-    lines.append(
-        "- Draft PR #411 evaluates optimizer prune/margin hypotheses on a fixed universe; #412 covers"
+        "- Typed `<ds>_candidates.parquet` data is joined fail-closed, but was locally available only for Seattle; the model still uses 33 sidecar/context features."
     )
     lines.append(
-        "  pair-feature ablation and dataset dead zones. Neither supports a production flip."
+        "- Next evidence gate: regenerate fresh candidate graphs/parquets, recover the 20 Boston + 6 Seattle positive edges outside the candidate universe, and label ≥20 reject-all groups."
+    )
+    lines.append(
+        "- Then run paired grouped-CV removal/permutation ablations by feature family; add panel votes only when candidate-display provenance makes unselected edges and NONE votes interpretable."
     )
     lines.append("")
 

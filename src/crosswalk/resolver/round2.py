@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from crosswalk.resolver.evaluate import _eval_from_predictions, _make_model, _prf
-from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
+from crosswalk.resolver.features import FEATURE_COLUMNS, featurize, group_key_columns, group_keys
 
 # Round-1 features + competition/coverage context (see featurize_extended).
 EXTENDED_FEATURE_COLUMNS: list[str] = FEATURE_COLUMNS + [
@@ -63,7 +63,7 @@ def featurize_extended(df: pd.DataFrame) -> pd.DataFrame:
     # same ref (resp. target) in the group. Positive => this edge is the
     # strongest claim on that segment.
     for side, col in (("ref_id", "ref"), ("target_id", "tgt")):
-        key = ["group_id", side]
+        key = [*group_key_columns(out), side]
         gmax = out.groupby(key)["confidence"].transform("max")
         # second-best: max of others = max overall unless this row is the max,
         # then it's the second max.
@@ -88,7 +88,7 @@ def featurize_extended(df: pd.DataFrame) -> pd.DataFrame:
         ("target_id", "local_start_frac", "local_end_frac", "tgt_span_overlap_higher"),
     ):
         vals = np.zeros(len(out))
-        for (_, _), sub in out.groupby(["group_id", side]):
+        for _, sub in out.groupby([*group_key_columns(out), side]):
             if len(sub) == 1:
                 continue
             rows = sub.sort_values("confidence", ascending=False)
@@ -157,7 +157,7 @@ def select_expected_f1_per_type(
     pm = penalty_map or PER_TYPE_EF1_PENALTY
     pred = np.zeros(len(df), dtype=int)
     mt_col = df["match_type"].to_numpy() if "match_type" in df.columns else None
-    for _, idx in df.groupby("group_id").indices.items():
+    for _, idx in df.groupby(group_key_columns(df)).indices.items():
         if mt_col is not None:
             mt = str(mt_col[idx[0]]) if len(idx) else ""
             pen = pm.get(mt, 0.0)
@@ -196,8 +196,8 @@ def run_cv2(
         if TRAIN_LABEL_COLUMN in df.columns
         else y_truth.astype(float)
     )
-    groups = df["group_id"].to_numpy()
-    n_groups = df["group_id"].nunique()
+    groups = group_keys(df).to_numpy()
+    n_groups = int(group_keys(df).nunique())
     if n_groups < 2:
         raise ValueError("grouped CV needs >= 2 groups")
     gkf = GroupKFold(n_splits=min(n_splits, n_groups))
@@ -273,7 +273,7 @@ def run_cv2(
         if per_type_ef1:
             pred = select_expected_f1_per_type(df, oof_proba)
         else:
-            for _, idx in df.groupby("group_id").indices.items():
+            for _, idx in df.groupby(group_key_columns(df)).indices.items():
                 pred[idx] = select_expected_f1(oof_proba[idx])
     elif selector == "ef1_per_type":
         pred = select_expected_f1_per_type(df, oof_proba)

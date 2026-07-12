@@ -1,4 +1,4 @@
-"""Experimental resolver training: all datasets, extended feats + eF1 + soft votes.
+"""Experimental resolver training: multi-dataset candidate-joined ablation harness.
 
 Research-only — nothing in the production pipeline imports this module
 (same guard as the rest of ``crosswalk.resolver``). Produces a joblib model
@@ -10,7 +10,7 @@ Data sources:
   - Sidecars ``data/output/*_groups.json`` if present else
     ``data/factory/release=…/dataset=*/groups.json`` (older release has no
     ``candidate_edges``, falls back to ``edges``+capped ``rejected_edges``).
-  - Panel votes ``data/agents/stitching/batches/*/votes.csv`` for soft extra.
+  - Panel votes ``data/agents/stitching/batches/*/votes.csv`` as an opt-in soft extra.
 """
 
 from __future__ import annotations
@@ -23,8 +23,14 @@ import numpy as np
 import pandas as pd
 
 from crosswalk.config import FEATURE_VERSION
-from crosswalk.resolver.extract import build_edge_table, load_sidecar_groups, load_stitching_labels
-from crosswalk.resolver.features import featurize
+from crosswalk.resolver.extract import (
+    build_edge_table,
+    discover_candidates_parquet,
+    load_candidates_parquet,
+    load_sidecar_groups,
+    load_stitching_labels,
+)
+from crosswalk.resolver.features import featurize, group_keys
 from crosswalk.resolver.round2 import (
     TRAIN_LABEL_COLUMN,
     featurize_extended,
@@ -127,6 +133,10 @@ def _build_combined_table(
         groups = load_sidecar_groups(gp)
         groups_by_ds[dataset_id] = groups
         human_df = load_stitching_labels(labels_path)
+        candidates_path = discover_candidates_parquet(gp)
+        candidates_df = (
+            load_candidates_parquet(candidates_path) if candidates_path is not None else None
+        )
         df = build_edge_table(
             groups,
             human_df,
@@ -136,12 +146,14 @@ def _build_combined_table(
             prefer_candidate_graph=prefer_candidate_graph,
             filter_rule5=filter_rule5,
             include_empty=include_empty,
+            candidates_df=candidates_df,
         )
         bs = df.attrs.get("build_stats", {}) if hasattr(df, "attrs") else {}
         per_ds_stats.append(
             {
                 "dataset_id": dataset_id,
                 "groups_path": str(groups_path),
+                "candidates_path": str(candidates_path) if candidates_path else "",
                 "exists": True,
                 "n_sidecar_groups": len(groups),
                 "n_labels": len(human_df),
@@ -172,16 +184,17 @@ def _build_soft_extra(
     if votes_df.empty:
         return None
 
-    all_groups: list[dict] = []
-    for gs in groups_by_dataset.values():
-        all_groups.extend(gs)
-
-    soft = edge_soft_labels(all_groups, votes_df)
-    if soft.empty:
+    frames: list[pd.DataFrame] = []
+    for dataset_id, groups in groups_by_dataset.items():
+        soft = edge_soft_labels(groups, votes_df, dataset_id=dataset_id)
+        if not soft.empty:
+            frames.append(soft)
+    if not frames:
         return None
+    soft = pd.concat(frames, ignore_index=True)
     if "group_id" in soft.columns and "ref_id" in soft.columns:
         soft = (
-            soft.groupby(["group_id", "ref_id", "target_id"], as_index=False).agg(
+            soft.groupby(["dataset_id", "group_id", "ref_id", "target_id"], as_index=False).agg(
                 {
                     "soft_keep": "mean",
                     "n_providers": "max",
@@ -213,7 +226,7 @@ def _build_edge_lookup_for_group(group: dict) -> dict[tuple[str, str], dict]:
 def _prepare_soft_for_train(
     soft_df: pd.DataFrame,
     groups_by_dataset: dict[str, list[dict]],
-    existing_group_ids: set[str],
+    existing_group_ids: set[tuple[str, str]],
     feature_cols: list[str],
     extended: bool,
     *,
@@ -222,25 +235,27 @@ def _prepare_soft_for_train(
     if soft_df.empty:
         return None
 
-    gmap: dict[str, dict] = {}
-    for gs in groups_by_dataset.values():
+    gmap: dict[tuple[str, str], dict] = {}
+    for dataset_id, gs in groups_by_dataset.items():
         for g in gs:
-            gmap[g["group_id"]] = g
+            gmap[(dataset_id, str(g["group_id"]))] = g
 
-    edge_lookup_cache: dict[str, dict[tuple[str, str], dict]] = {}
+    edge_lookup_cache: dict[tuple[str, str], dict[tuple[str, str], dict]] = {}
 
     rows: list[dict] = []
     for _, r in soft_df.iterrows():
+        dataset_id = str(r.get("dataset_id", ""))
         gid = str(r["group_id"])
-        if gid in existing_group_ids:
+        group_key = (dataset_id, gid)
+        if group_key in existing_group_ids:
             continue
-        g = gmap.get(gid)
+        g = gmap.get(group_key)
         if g is None:
             continue
         key = (str(r["ref_id"]), str(r["target_id"]))
-        if gid not in edge_lookup_cache:
-            edge_lookup_cache[gid] = _build_edge_lookup_for_group(g)
-        edge = edge_lookup_cache[gid].get(key)
+        if group_key not in edge_lookup_cache:
+            edge_lookup_cache[group_key] = _build_edge_lookup_for_group(g)
+        edge = edge_lookup_cache[group_key].get(key)
         if edge is None:
             continue
 
@@ -249,7 +264,7 @@ def _prepare_soft_for_train(
 
         rows.append(
             {
-                "dataset_id": "soft_vote",
+                "dataset_id": dataset_id,
                 "group_id": gid,
                 "human_group_id": gid,
                 "labeler": "panel",
@@ -396,7 +411,7 @@ def build_report_text(
     data_root: Path,
 ) -> str:
     lines: list[str] = []
-    lines.append("# Learned Stitcher Round 3 — experimental (all datasets, eF1+extended+soft)")
+    lines.append("# Learned Stitcher Round 3 — candidate-joined experimental ablation")
     lines.append("")
     lines.append(
         "> Experimental only — not wired into production. Produces `data/models/resolver_model.joblib`"
@@ -425,7 +440,7 @@ def build_report_text(
             f"  - keep=1: {int(df['keep'].sum())} / keep=0: {int((df['keep'] == 0).sum())}"
         )
         lines.append(
-            f"  - groups: {df['group_id'].nunique()} / datasets: {df['dataset_id'].nunique()}"
+            f"  - groups: {group_keys(df).nunique()} / datasets: {df['dataset_id'].nunique()}"
         )
         proven = df["provenance"].value_counts().to_dict() if "provenance" in df.columns else {}
         lines.append(f"  - provenance: {proven}")
@@ -437,16 +452,21 @@ def build_report_text(
     lines.append("### Per-dataset build stats")
     lines.append("")
     lines.append(
-        "| dataset | sidecar groups | labels | rows | candidate_groups | legacy_groups | pos | neg | empty_rows | empty_legacy_skipped |"
+        "| dataset | sidecar groups | labels | rows | candidate_groups | legacy_groups | parquet rows | enriched | missing keys | outside candidate | pos | neg | empty_rows | empty_legacy_skipped |"
     )
-    lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+    lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for s in per_ds_stats:
         if not s.get("exists", True):
-            lines.append(f"| {s['dataset_id']} | MISSING | - | - | - | - | - | - | - | - |")
+            lines.append(
+                f"| {s['dataset_id']} | MISSING | - | - | - | - | - | - | - | - | - | - | - | - |"
+            )
             continue
         lines.append(
             f"| {s['dataset_id']} | {s.get('n_sidecar_groups', 0)} | {s.get('n_labels', 0)} | {s.get('rows', 0)} "
             f"| {s.get('build_candidate_groups', 0)} | {s.get('build_legacy_groups', 0)} "
+            f"| {s.get('build_candidate_parquet_rows', 0)} | {s.get('build_candidate_parquet_enriched', 0)} "
+            f"| {s.get('build_candidate_parquet_missing_keys', 0)} "
+            f"| {s.get('build_human_selected_outside_candidate_graph', 0)} "
             f"| {s.get('build_positives', 0)} | {s.get('build_negatives', 0)} "
             f"| {s.get('build_empty_rows', 0)} | {s.get('build_empty_legacy_skipped', 0)} |"
         )
@@ -489,16 +509,23 @@ def build_report_text(
     lines.append("## Limitations / next steps")
     lines.append("")
     lines.append(
-        "- P1 parquet `<ds>_candidates.parquet` with 78 typed pair features + signed lateral offset + class/length"
+        "- P1 `<ds>_candidates.parquet` is persisted and joined with 83 typed pair features + signed lateral offset + class/length."
     )
     lines.append(
-        "  is NOT yet persisted — model uses only 25 sidecar + 8 competition/coverage features."
+        "  This prototype still trains on the 25 sidecar + 8 competition/coverage features; candidate-feature family selection is the next ablation step."
     )
     lines.append(
-        "- Factory sidecars old → no `candidate_edges`, so under-selection positives under-counted (legacy path uses edges+rejected_edges capped 64)."
+        "- Candidate parquet integrity is fail-closed (non-empty, non-null unique join keys); per-dataset missing-key counts are reported above."
+    )
+    n_parquet_datasets = sum(
+        bool(s.get("build_candidate_parquet_rows", 0)) for s in per_ds_stats if s.get("exists")
     )
     lines.append(
-        "- Fresh `crosswalk stitch` with `stitch_persist_candidate_graph=True` needed for full-candidate training."
+        f"- Typed candidate parquet was locally available for {n_parquet_datasets} dataset(s) in this run; "
+        "regenerate the remaining fresh sidecars before drawing feature-family conclusions."
+    )
+    lines.append(
+        "- Panel votes are opt-in. Only provider-selected edges are usable today because batch artifacts do not prove which unselected candidates were shown; NONE votes cannot safely create edge negatives."
     )
     lines.append(
         "- Cross-mode testset (Bogotá bike + SG footpaths NONE) needs ≥20 empty labels held out; currently partial."

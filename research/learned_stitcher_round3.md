@@ -1,60 +1,71 @@
-# Learned Stitcher Round 3 — experimental (all datasets, eF1+extended+soft)
+# Learned Stitcher Round 3 — candidate-joined experimental ablation
 
-> Experimental only — not wired into production. Produces `data/models/resolver_model.joblib`
-> and a prototype eval. Uses legacy sidecars from `data/factory/release=2026-06-17.0` when
-> `data/output/*.json` is absent, so under-selection is partially capped (64/group).
-> Decision: **NO-GO for production**; draft PR #411 invalidated the proposed heuristic defaults
-> on a fixed label universe. Keep this track experimental and guard-isolated.
+> Experimental only — not wired into production. This is a meaningful training and
+> evaluation prototype, but the current evidence is a production NO-GO. Draft PR #411
+> invalidated the proposed heuristic defaults on a fixed label universe, and this model
+> still trails the production optimizer on honest edge F1.
 
 ## Inventory
 
-- data_root: `.`
-- feature_version: 2026-07-07.2
-- feature set: extended (33) cols: confidence, conf_rel_max, conf_rel_mean, conf_rank_frac, conf_is_group_min, gers_span, local_span, max_span…
-- selector: ef1
-- total edge rows (hard labels): 990
-  - keep=1: 629 / keep=0: 361
-  - groups: 137 / datasets: 10
-  - provenance: {'clean': 599, 'split': 391}
-- soft extra rows: 561 (featurized groups not in hard set)
+- Feature version: `2026-07-07.2`
+- Feature set used by the model: 25 sidecar + 8 competition/coverage features (33 total)
+- Selector: expected-F1 (`ef1`)
+- Hard labels: 949 edges (675 keep / 274 drop), 163 groups, 12 datasets
+- Provenance: 637 clean / 312 split
+- Candidate graph coverage: 156 groups; 10 groups still use legacy capped sidecars
+- Soft panel rows: 0; votes are opt-in and were disabled for this benchmark
 
 ### Per-dataset build stats
 
-| dataset | sidecar groups | labels | rows | candidate_groups | legacy_groups | pos | neg | empty_rows | empty_legacy_skipped |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| co_bogota_bike_network | 1359 | 2 | 14 | 0 | 2 | 5 | 9 | 0 | 0 |
-| co_bogota_roads | 29355 | 8 | 14 | 0 | 3 | 6 | 8 | 0 | 1 |
-| de_berlin_roads | MISSING | - | - | - | - | - | - | - | - |
-| fi_helsinki_roads | 17652 | 5 | 3 | 0 | 1 | 2 | 1 | 0 | 1 |
-| ke_nairobi_roads | 4751 | 5 | 24 | 0 | 2 | 10 | 14 | 0 | 0 |
-| nl_amsterdam_roads | 15481 | 5 | 7 | 0 | 3 | 6 | 1 | 0 | 1 |
-| sg_singapore_footpaths | 14567 | 7 | 17 | 0 | 4 | 10 | 7 | 0 | 2 |
-| sg_singapore_roads | 6121 | 9 | 47 | 0 | 6 | 43 | 4 | 0 | 0 |
-| tn_tunis_ml_roads | MISSING | - | - | - | - | - | - | - | - |
-| us_boston_streets | 3365 | 119 | 809 | 0 | 111 | 501 | 308 | 0 | 0 |
-| us_montana_missoula | 1914 | 3 | 30 | 0 | 3 | 26 | 4 | 0 | 0 |
-| us_seattle_sidewalks | MISSING | - | - | - | - | - | - | - | - |
-| us_usfs_flathead | 131 | 5 | 25 | 0 | 5 | 20 | 5 | 0 | 0 |
+| dataset | groups | labels | rows | candidate | legacy | parquet rows | enriched | outside candidate | pos | neg |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| co_bogota_bike_network | 1,380 | 2 | 5 | 2 | 0 | 0 | 0 | 0 | 5 | 0 |
+| co_bogota_roads | 29,355 | 8 | 14 | 0 | 3 | 0 | 0 | 0 | 6 | 8 |
+| de_berlin_roads | 11,210 | 6 | 8 | 4 | 0 | 0 | 0 | 0 | 8 | 0 |
+| fi_helsinki_roads | 17,652 | 5 | 3 | 0 | 1 | 0 | 0 | 0 | 2 | 1 |
+| ke_nairobi_roads | 4,751 | 5 | 24 | 0 | 2 | 0 | 0 | 0 | 10 | 14 |
+| nl_amsterdam_roads | 16,629 | 5 | 7 | 3 | 0 | 0 | 0 | 0 | 6 | 1 |
+| sg_singapore_footpaths | 14,567 | 7 | 17 | 0 | 4 | 0 | 0 | 0 | 10 | 7 |
+| sg_singapore_roads | 6,355 | 9 | 44 | 6 | 0 | 0 | 0 | 0 | 43 | 1 |
+| tn_tunis_ml_roads | missing | - | - | - | - | - | - | - | - | - |
+| us_boston_streets | 3,649 | 119 | 679 | 111 | 0 | 0 | 0 | 20 | 482 | 197 |
+| us_montana_missoula | 2,064 | 3 | 28 | 3 | 0 | 0 | 0 | 0 | 26 | 2 |
+| us_seattle_sidewalks | 19,114 | 49 | 99 | 22 | 0 | 34,401 | 99 | 6 | 57 | 42 |
+| us_usfs_flathead | 142 | 5 | 21 | 5 | 0 | 0 | 0 | 0 | 20 | 1 |
 
-- total candidate_groups=0 legacy_groups=140
+Seattle's persisted candidate parquet joined all 99 labeled rows to all 83 typed
+candidate columns with zero missing keys. It is the only typed candidate parquet
+available locally in this run, so the 83-feature bundle is not yet in the model.
 
-## Eval (grouped CV, out-of-fold)
+## Honest grouped-CV result
 
-- model: {'model': 'xgb[extfeats]+ef1+soft', 'edges': 990, 'groups': 137, 'P': 0.867, 'R': 0.9, 'F1': 0.883, 'grp_exact': 0.672, 'F1_sliverfilt': 0.887}
-- baseline_production: {'model': 'baseline: optimizer+prune (selected)', 'edges': 990, 'groups': 137, 'P': 0.849, 'R': 0.94, 'F1': 0.892, 'grp_exact': 0.708, 'F1_sliverfilt': 0.896}
-- baseline_conf_oracle: {'model': 'baseline: conf>=0.94 (oracle-tuned)', 'edges': 990, 'groups': 137, 'P': 0.842, 'R': 0.916, 'F1': 0.877, 'grp_exact': 0.672, 'F1_sliverfilt': 0.881}
+| model | edges | groups | precision | recall | F1 | group exact |
+|---|---:|---:|---:|---:|---:|---:|
+| XGBoost, 33 features + eF1 | 949 | 163 | 0.853 | 0.899 | 0.875 | 0.748 |
+| Production optimizer | 949 | 163 | 0.845 | 0.960 | 0.899 | 0.730 |
+| Oracle-tuned confidence ≥0.98 | 949 | 163 | 0.858 | 0.911 | 0.884 | 0.687 |
 
-- oof_proba: mean=0.556
+The learned prototype trades 6.1 points of recall for 0.8 points of precision. It
+loses 0.023 edge F1 to production while gaining 0.018 group exact. In-sample eF1 is
+0.946, so the gap between fit and OOF performance is a strong small-data/overfit signal.
 
-**Headline vs production:** model F1=0.883 P=0.867 R=0.900 grp_exact=0.672 | baseline F1=0.892 P=0.849 R=0.940 exact=0.708
+## Decision and next evidence gates
 
-## Limitations / next steps
+1. Keep the model research-only. Do not wire it into production or ship the heuristic
+   thresholds from the gap-analysis hypotheses.
+2. Regenerate fresh candidate graphs and typed parquets for the four legacy datasets;
+   add Tunis. Nairobi currently reaches relational feature generation but does not
+   finish in a practical local run, so profile/chunk that stage before bulk regen.
+3. Fix candidate recall before model tuning: 20 Boston and 6 Seattle labeled positives
+   are outside the current candidate universe.
+4. Label at least 20 reliably mapped reject-all groups, then add 150–300 diverse groups
+   emphasizing non-US M:N ambiguity and the low-confidence/parallel-sibling failure modes.
+5. Run paired grouped-CV removal and permutation ablations by candidate-feature family
+   (`lateral`, geometry distance, names, class/length, graph/competition), with dataset
+   holdouts and bootstrap intervals. Promote families, not isolated correlated columns.
+6. Record the exact candidate set shown to every voting provider. Until then, selected
+   edges are usable positive evidence, but unseen/unselected edges and NONE votes cannot
+   safely become negatives.
 
-- P1 parquet `<ds>_candidates.parquet` with 78 typed pair features + signed lateral offset + class/length
-  is NOT yet persisted — model uses only 25 sidecar + 8 competition/coverage features.
-- Factory sidecars old → no `candidate_edges`, so under-selection positives under-counted (legacy path uses edges+rejected_edges capped 64).
-- Fresh `crosswalk stitch` with `stitch_persist_candidate_graph=True` needed for full-candidate training.
-- Cross-mode testset (Bogotá bike + SG footpaths NONE) needs ≥20 empty labels held out; currently partial.
-- De-anchored slice `deanchored_v1` exists (51 groups) — sliced in next eval.
-- If GO (beats tuned prune on clean + group exact), follow `research/learned_optimizer_design.md` I1
-  runtime behind `learned_resolver_overrides` + shadow `resolver_score` + S1 Spark export.
+See `research/feature_ablation_strategy_2026-07-11.md` for the removal/permutation gate
+and `research/resolver_gap_analysis_2026-07-11.md` for the underlying failure analysis.

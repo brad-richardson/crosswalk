@@ -2138,9 +2138,9 @@ def register_commands(app: typer.Typer) -> None:
             help="Panel batches root containing */votes.csv",
         ),
         with_votes: bool = typer.Option(
-            True,
+            False,
             "--with-votes/--no-votes",
-            help="Include panel soft votes as extra training groups (default: on).",
+            help="Opt in to panel soft votes as extra training groups (default: off).",
         ),
         with_extended: bool = typer.Option(
             True,
@@ -2205,7 +2205,7 @@ def register_commands(app: typer.Typer) -> None:
         data/models/resolver_model.joblib and writes
         research/learned_stitcher_round3.md.
 
-        Default: all datasets, extended features, eF1, panel soft votes.
+        Default: all datasets, extended features, eF1, curated labels only.
 
         Noisy-label aware (gap analysis 2026-07-11): confidence is 95% of signal;
         split-provenance labels hurt clean; try --no-split or --clean-only.
@@ -2268,7 +2268,7 @@ def register_commands(app: typer.Typer) -> None:
         else:
             df = featurize_base(df)
 
-        existing_gids = set(df["group_id"].astype(str).unique())
+        existing_gids = set(zip(df["dataset_id"].astype(str), df["group_id"].astype(str)))
         soft_df_raw = None
         soft_extra = None
         if with_votes:
@@ -2291,7 +2291,7 @@ def register_commands(app: typer.Typer) -> None:
                 else:
                     console.print(
                         f"[blue]Soft extra featurized: {len(soft_extra)} rows over "
-                        f"{soft_extra['group_id'].nunique()} groups (train-only)[/blue]"
+                        f"{resolver_features.group_keys(soft_extra).nunique()} groups (train-only)[/blue]"
                     )
             else:
                 console.print("[yellow]No soft votes found[/yellow]")
@@ -2320,7 +2320,7 @@ def register_commands(app: typer.Typer) -> None:
         console.print(
             f"[blue]Training set: {len(df)} hard rows "
             f"({float(df['keep'].sum()):.1f} pos / {int((df['keep'] < 0.5).sum())} neg) "
-            f"over {df['group_id'].nunique()} groups / {df['dataset_id'].nunique()} datasets; "
+            f"over {resolver_features.group_keys(df).nunique()} groups / {df['dataset_id'].nunique()} datasets; "
             f"features={len(feature_cols)}; selector={selector}"
             f"{f'; soft_extra={len(soft_extra)}' if soft_extra is not None else ''}"
             f" float_soft={float_soft} smoothing={label_smoothing}"
@@ -2352,10 +2352,12 @@ def register_commands(app: typer.Typer) -> None:
             "n_rows_hard": len(df),
             "n_pos_hard": int(df["keep"].sum()),
             "n_neg_hard": int((df["keep"] == 0).sum()),
-            "n_groups_hard": int(df["group_id"].nunique()),
+            "n_groups_hard": int(resolver_features.group_keys(df).nunique()),
             "n_datasets_hard": int(df["dataset_id"].nunique()),
             "n_rows_soft": int(len(soft_extra)) if soft_extra is not None else 0,
-            "n_groups_soft": int(soft_extra["group_id"].nunique()) if soft_extra is not None else 0,
+            "n_groups_soft": int(resolver_features.group_keys(soft_extra).nunique())
+            if soft_extra is not None
+            else 0,
             "feature_columns": list(feature_cols),
             "selector": selector,
             "with_extended": with_extended,

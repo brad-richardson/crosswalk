@@ -50,6 +50,18 @@ FEATURE_COLUMNS: list[str] = [
 ]
 
 
+def group_key_columns(df: pd.DataFrame) -> list[str]:
+    """Columns that uniquely identify a resolver group in ``df``."""
+    return ["dataset_id", "group_id"] if "dataset_id" in df.columns else ["group_id"]
+
+
+def group_keys(df: pd.DataFrame) -> pd.Series:
+    """Stable one-dimensional keys for CV splitting and group-level metrics."""
+    if "dataset_id" not in df.columns:
+        return df["group_id"].astype(str)
+    return df["dataset_id"].astype(str) + "\x1f" + df["group_id"].astype(str)
+
+
 def featurize(df: pd.DataFrame) -> pd.DataFrame:
     """Add derived feature columns to a raw edge table (see FEATURE_COLUMNS).
 
@@ -71,7 +83,8 @@ def featurize(df: pd.DataFrame) -> pd.DataFrame:
     out["match_type_MN"] = (out["match_type"] == "M:N").astype(int)
 
     # within-group relative-confidence + competition features
-    grp = out.groupby("group_id")
+    group_cols = group_key_columns(out)
+    grp = out.groupby(group_cols)
     gmax = grp["confidence"].transform("max")
     gmean = grp["confidence"].transform("mean")
     gmin = grp["confidence"].transform("min")
@@ -84,8 +97,8 @@ def featurize(df: pd.DataFrame) -> pd.DataFrame:
     ) / grp["confidence"].transform(lambda s: max(len(s) - 1, 1))
 
     # competition: how many edges in the group share this edge's ref / target
-    out["n_share_ref"] = out.groupby(["group_id", "ref_id"])["ref_id"].transform("count")
-    out["n_share_tgt"] = out.groupby(["group_id", "target_id"])["target_id"].transform("count")
+    out["n_share_ref"] = out.groupby([*group_cols, "ref_id"])["ref_id"].transform("count")
+    out["n_share_tgt"] = out.groupby([*group_cols, "target_id"])["target_id"].transform("count")
 
     out = out.replace([np.inf, -np.inf], np.nan)
     return out

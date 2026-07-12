@@ -8,6 +8,17 @@
 > sweeps also changed label retention and were not comparable. Keep production
 > defaults until fresh sidecars and more clean M:N ground truth validate a policy.
 
+> **2026-07-12 multi-dataset update:** The prototype now evaluates 949 edges in
+> 163 dataset-scoped groups across 12 datasets. It joins persisted typed candidate
+> parquets fail-closed; only Seattle has one locally (34,401 rows, all 99 labeled
+> edges enriched, zero missing keys). Honest OOF learned F1 is 0.875 versus 0.899
+> production, while group exact is 0.748 versus 0.730. This keeps the track useful
+> as an ablation harness but confirms NO-GO for production. Four datasets still use
+> legacy candidate universes, Tunis is missing, and 20 Boston + 6 Seattle positives
+> remain outside the candidate graph. Panel votes default off because historical
+> batches do not record the displayed candidate universe; selected edges are usable
+> evidence, but unselected edges and NONE votes are not safe negatives.
+
 ## Exec summary
 - Scope: Boston only, 679 edges / 108 groups (356 clean / 323 split). Prod = keep-all+prune `selected` flag.
 - Prod: F1 0.883 P0.822 R0.953 exact 0.731. Best conf oracle t=0.98 F1 0.886 (+0.003). Model OOF eF1 F1 0.878-0.885 (tie ±0.001). In-sample ceiling 0.914 / 0.796 exact → headroom exists but OOF can't use it.
