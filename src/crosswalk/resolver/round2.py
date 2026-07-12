@@ -121,6 +121,16 @@ PER_TYPE_EF1_PENALTY: dict[str, float] = {
 TRAIN_LABEL_COLUMN = "_train_keep"
 
 
+def _validated_group_columns(df: pd.DataFrame) -> list[str]:
+    columns = group_key_columns(df)
+    missing = [column for column in columns if column not in df.columns]
+    if missing or df[columns].isna().any().any():
+        raise ValueError("resolver group keys must be present and non-null")
+    if any(df[column].astype("string").str.strip().eq("").any() for column in columns):
+        raise ValueError("resolver group keys must be nonblank")
+    return columns
+
+
 def select_expected_f1(
     probs: np.ndarray,
     *,
@@ -157,7 +167,7 @@ def select_expected_f1_per_type(
     pm = penalty_map or PER_TYPE_EF1_PENALTY
     pred = np.zeros(len(df), dtype=int)
     mt_col = df["match_type"].to_numpy() if "match_type" in df.columns else None
-    for _, idx in df.groupby(group_key_columns(df)).indices.items():
+    for _, idx in df.groupby(_validated_group_columns(df)).indices.items():
         if mt_col is not None:
             mt = str(mt_col[idx[0]]) if len(idx) else ""
             pen = pm.get(mt, 0.0)
@@ -165,6 +175,42 @@ def select_expected_f1_per_type(
             pen = 0.0
         pred[idx] = select_expected_f1(proba[idx], per_type_penalty=pen)
     return pred
+
+
+def select_group_predictions(
+    df: pd.DataFrame,
+    proba: np.ndarray,
+    *,
+    selector: str,
+    threshold: float = 0.5,
+    per_type_ef1: bool = False,
+) -> np.ndarray:
+    """Apply a resolver selector to probabilities without crossing group boundaries.
+
+    Keeping selection separate from model fitting lets repeated-CV and
+    leave-one-dataset-out evaluation aggregate honest held-out probabilities
+    before making one final group decision.
+    """
+    proba = np.asarray(proba, dtype=float)
+    if proba.ndim != 1 or not np.isfinite(proba).all():
+        raise ValueError("probabilities must be a finite one-dimensional array")
+    if ((proba < 0.0) | (proba > 1.0)).any():
+        raise ValueError("probabilities must be between 0 and 1")
+    if len(proba) != len(df):
+        raise ValueError(f"probability rows ({len(proba)}) != dataframe rows ({len(df)})")
+    if not np.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+        raise ValueError("threshold must be between 0 and 1")
+    group_columns = _validated_group_columns(df)
+    if selector == "threshold":
+        return (proba >= threshold).astype(int)
+    if selector == "ef1_per_type" or (selector == "ef1" and per_type_ef1):
+        return select_expected_f1_per_type(df, proba)
+    if selector == "ef1":
+        pred = np.zeros(len(df), dtype=int)
+        for _, idx in df.groupby(group_columns).indices.items():
+            pred[idx] = select_expected_f1(proba[idx])
+        return pred
+    raise ValueError(f"unknown selector {selector!r}")
 
 
 def run_cv2(
@@ -177,15 +223,19 @@ def run_cv2(
     seed: int = 0,
     use_float_soft: bool = False,
     per_type_ef1: bool = False,
+    split_seed: int | None = None,
 ) -> dict:
     """Grouped-CV eval with pluggable feature set and per-group selector.
 
     selector: threshold|ef1|ef1_per_type.  If use_float_soft, soft_extra keeps
-    are trained as float BCE instead of binarized.  Seed propagated to model.
+    are trained as float BCE instead of binarized. Seed is propagated to the
+    model; split_seed opts into shuffled stratified group folds for repeated-CV
+    evaluation while the default preserves the historical GroupKFold split.
     """
-    from sklearn.model_selection import GroupKFold
+    from sklearn.model_selection import GroupKFold, StratifiedGroupKFold
 
     df = df.reset_index(drop=True)
+    _validated_group_columns(df)
     X = df[feature_cols].to_numpy(dtype=float)
     raw_truth = df["keep"].to_numpy(dtype=float)
     if not np.isin(raw_truth, [0.0, 1.0]).all():
@@ -200,7 +250,17 @@ def run_cv2(
     n_groups = int(group_keys(df).nunique())
     if n_groups < 2:
         raise ValueError("grouped CV needs >= 2 groups")
-    gkf = GroupKFold(n_splits=min(n_splits, n_groups))
+    folds = min(n_splits, n_groups)
+    if split_seed is None:
+        splitter = GroupKFold(n_splits=folds)
+    else:
+        # Stratification reduces the chance that small repeated folds contain
+        # only keep or only drop labels. The group key remains the hard boundary.
+        splitter = StratifiedGroupKFold(
+            n_splits=folds,
+            shuffle=True,
+            random_state=split_seed,
+        )
 
     oof_proba = np.zeros(len(df))
     extra_X = extra_y = None
@@ -227,7 +287,7 @@ def run_cv2(
                 m.set_params(random_state=s)
             return m
 
-    for tr, te in gkf.split(X, y_truth, groups):
+    for tr, te in splitter.split(X, y_truth, groups):
         Xtr, ytr = X[tr], y_train[tr]
         if extra_X is not None:
             Xtr = np.vstack([Xtr, extra_X])
@@ -266,19 +326,13 @@ def run_cv2(
         model.fit(Xtr, ytr_bin if is_float_fold else ytr)
         oof_proba[te] = model.predict_proba(X[te])[:, 1]
 
-    if selector == "threshold":
-        pred = (oof_proba >= threshold).astype(int)
-    elif selector == "ef1":
-        pred = np.zeros(len(df), dtype=int)
-        if per_type_ef1:
-            pred = select_expected_f1_per_type(df, oof_proba)
-        else:
-            for _, idx in df.groupby(group_key_columns(df)).indices.items():
-                pred[idx] = select_expected_f1(oof_proba[idx])
-    elif selector == "ef1_per_type":
-        pred = select_expected_f1_per_type(df, oof_proba)
-    else:
-        raise ValueError(f"unknown selector {selector!r}")
+    pred = select_group_predictions(
+        df,
+        oof_proba,
+        selector=selector,
+        threshold=threshold,
+        per_type_ef1=per_type_ef1,
+    )
 
     label = f"xgb[{'ext' if len(feature_cols) > len(FEATURE_COLUMNS) else 'r1'}feats]+{selector}"
     if soft_extra is not None:
@@ -286,9 +340,11 @@ def run_cv2(
     res = {
         "model": _eval_from_predictions(label, df, pred),
         "baseline_production": _eval_from_predictions(
-            "baseline: optimizer+prune (selected)", df, df["selected"].astype(int).to_numpy()
+            "baseline: optimizer+prune (selected)", df, df["selected"].to_numpy()
         ),
         "oof_proba": oof_proba,
+        "oof_prediction": pred,
+        "split_seed": split_seed,
     }
     # tuned-conf baseline over the FULL candidate set (round-1 comparator)
     best_t, best_f1 = 0.5, -1.0

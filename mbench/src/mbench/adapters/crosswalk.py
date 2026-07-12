@@ -237,6 +237,12 @@ class CrosswalkAdapter:
         # Preserve the pipeline's publication decision. The runner performs the
         # canonical non-null/allowed-value validation before evaluation.
         matches["match_decision"] = normalized_decisions
+        # Preserve explicit assignment type for decomposition-aware stitch eval.
+        # In particular, pure 1:1 rows are intentionally absent from groups.json
+        # and must not be inferred merely because an edge is absent from a
+        # possibly incomplete sidecar.
+        if "match_type" in bridge.columns:
+            matches["match_type"] = bridge["match_type"].astype("string").str.strip()
 
         if "match_type" in bridge.columns:
             match_type_counts = bridge["match_type"].value_counts().to_dict()

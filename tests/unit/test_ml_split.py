@@ -87,6 +87,52 @@ class TestCreateSegmentGroups:
 
         assert list(groups.index) == [10, 20]
 
+    def test_source_namespaces_prevent_cross_side_id_collisions(self):
+        """Equal text IDs from different networks are distinct segment nodes."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["shared", "other"],
+                "target_id": ["first", "shared"],
+            }
+        )
+
+        groups = create_segment_groups(df)
+
+        assert groups.nunique() == 2
+
+    def test_target_ids_are_namespaced_by_dataset(self):
+        """Dataset-local target IDs must not connect unrelated datasets."""
+        df = pd.DataFrame(
+            {
+                "dataset": ["city_a", "city_b"],
+                "gers_id": ["G1", "G2"],
+                "target_id": ["local-1", "local-1"],
+            }
+        )
+
+        groups = create_segment_groups(df)
+
+        assert groups.nunique() == 2
+
+    def test_component_ids_are_stable_under_row_reordering(self):
+        """Component identity must come from graph membership, not row position."""
+        df = pd.DataFrame(
+            {
+                "gers_id": ["A", "B", "B", "C", "D"],
+                "target_id": ["X", "X", "Y", "Z", "W"],
+            }
+        )
+        shuffled = df.sample(frac=1, random_state=7).reset_index(drop=True)
+
+        original = df.assign(group=create_segment_groups(df)).set_index(["gers_id", "target_id"])[
+            "group"
+        ]
+        reordered = shuffled.assign(group=create_segment_groups(shuffled)).set_index(
+            ["gers_id", "target_id"]
+        )["group"]
+
+        pd.testing.assert_series_equal(original.sort_index(), reordered.sort_index())
+
 
 class TestSegmentAwareSplit:
     """Tests for the segment-aware train/test split utility."""
@@ -183,6 +229,56 @@ class TestSegmentAwareSplit:
 
         np.testing.assert_array_equal(train1, train2)
         np.testing.assert_array_equal(test1, test2)
+
+    def test_reordering_rows_preserves_held_out_pairs(self):
+        """Filesystem/input row order must not change the logical holdout set."""
+        df = pd.DataFrame(
+            {
+                "gers_id": [
+                    "A",
+                    "A",
+                    "B",
+                    "C",
+                    "D",
+                    "E",
+                    "F",
+                    "G",
+                    "H",
+                    "I",
+                    "J",
+                    "K",
+                ],
+                "target_id": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9",
+                    "10",
+                    "11",
+                    "12",
+                ],
+                "label": ["match"] * 12,
+            }
+        )
+        shuffled = df.sample(frac=1, random_state=99).reset_index(drop=True)
+
+        _, test_idx = segment_aware_split(df, test_size=0.3, random_state=42)
+        _, shuffled_test_idx = segment_aware_split(shuffled, test_size=0.3, random_state=42)
+
+        held_out = set(
+            df.iloc[test_idx][["gers_id", "target_id"]].itertuples(index=False, name=None)
+        )
+        shuffled_held_out = set(
+            shuffled.iloc[shuffled_test_idx][["gers_id", "target_id"]].itertuples(
+                index=False, name=None
+            )
+        )
+        assert shuffled_held_out == held_out
 
     def test_different_seed_different_split(self):
         """Different random_state should produce different split."""

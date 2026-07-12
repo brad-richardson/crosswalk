@@ -127,8 +127,11 @@ once the flip conditions hold.
   at 150–300 labels WITH rejected candidates in the table. Panel soft labels
   (reliability-weighted, dissenter down-weighted) were the biggest single
   lever (+0.05 F1) — keep them in.
-- Promotion criterion: beat the tuned confidence threshold on the clean slice
-  AND move group exact-match, under the stitch gate.
+- Promotion criterion: beat production and the tuned-confidence control on the
+  clean slice AND move group exact-match under the stitch gate. Use repeated
+  grouped CV plus paired whole-group bootstrap intervals, then require the gain
+  to transfer under leave-one-dataset-out evaluation; a single five-fold point
+  estimate is not sufficient.
 - Hybrid formulation experiment (from the Meili pilot, `research/meili_baseline.md`):
   map-matching as high-recall candidate/path generator (perfect recall on all
   three benchmark datasets, native segmentation-mismatch handling) + learned

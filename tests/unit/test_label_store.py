@@ -1,9 +1,12 @@
 """Tests for label store and feature parity."""
 
+import pandas as pd
+import pytest
 from shapely.geometry import LineString
 
 from crosswalk.config import FEATURE_COLUMNS
 from crosswalk.features.compute import compute_pair_features
+from crosswalk.labeling.feature_store import FeatureStore
 from crosswalk.labeling.label_store import LabelStore
 from tests.conftest import MOCK_TOPOLOGY_FEATURES
 
@@ -237,3 +240,136 @@ class TestLabelUpdateDelete:
 
         result = store.delete_label("nonexistent", "pair")
         assert result is False
+
+
+class TestBulkLabelLoading:
+    @staticmethod
+    def _write_human_partition(human_dir, dataset_id, rows):
+        partition = human_dir / f"dataset={dataset_id}"
+        partition.mkdir(parents=True)
+        pd.DataFrame(rows).to_csv(partition / "data.csv", index=False)
+
+    def test_human_labels_return_canonical_row_order(self, tmp_path):
+        """Partition creation and CSV row order do not affect bulk row order."""
+        human_dir = tmp_path / "human"
+        self._write_human_partition(
+            human_dir,
+            "dataset_b",
+            [
+                {"gers_id": "ref-002", "target_id": "target-001", "label": "match"},
+                {"gers_id": "ref-001", "target_id": "target-003", "label": "match"},
+            ],
+        )
+        self._write_human_partition(
+            human_dir,
+            "dataset_a",
+            [
+                {"gers_id": "ref-003", "target_id": "target-002", "label": "match"},
+                {"gers_id": "ref-003", "target_id": "target-001", "label": "match"},
+            ],
+        )
+
+        rows = LabelStore.load_human_labels(human_dir)[
+            ["dataset", "gers_id", "target_id"]
+        ].itertuples(index=False, name=None)
+
+        assert list(rows) == [
+            ("dataset_a", "ref-003", "target-001"),
+            ("dataset_a", "ref-003", "target-002"),
+            ("dataset_b", "ref-001", "target-003"),
+            ("dataset_b", "ref-002", "target-001"),
+        ]
+
+    def test_load_all_returns_canonical_training_order(self, tmp_path):
+        """The joined label/feature training table has a canonical row order."""
+        labels_dir = tmp_path / "labels"
+        features = {column: 0.5 for column in FEATURE_COLUMNS}
+
+        for dataset_id, pairs in [
+            ("dataset_b", [("ref-002", "target-001"), ("ref-001", "target-003")]),
+            ("dataset_a", [("ref-003", "target-002"), ("ref-003", "target-001")]),
+        ]:
+            store = LabelStore(dataset_id, labels_dir=labels_dir)
+            for gers_id, target_id in pairs:
+                store.add(
+                    gers_id=gers_id,
+                    target_id=target_id,
+                    label="match",
+                    labeler="tester",
+                    session_id="session",
+                    original_decision="review",
+                    original_confidence=0.5,
+                    features=features,
+                )
+
+        rows = LabelStore.load_all(labels_dir, skip_errors=False)[
+            ["dataset", "gers_id", "target_id"]
+        ].itertuples(index=False, name=None)
+
+        assert list(rows) == [
+            ("dataset_a", "ref-003", "target-001"),
+            ("dataset_a", "ref-003", "target-002"),
+            ("dataset_b", "ref-001", "target-003"),
+            ("dataset_b", "ref-002", "target-001"),
+        ]
+
+    def test_strict_human_loading_rejects_missing_partition_file(self, tmp_path):
+        """Strict bulk loading fails on a declared partition without data.csv."""
+        human_dir = tmp_path / "human"
+        (human_dir / "dataset=missing").mkdir(parents=True)
+
+        with pytest.raises(FileNotFoundError, match="no data.csv"):
+            LabelStore.load_human_labels(human_dir, skip_errors=False)
+
+    def test_load_all_strict_requires_feature_partition(self, tmp_path):
+        """Strict training loading cannot drop a label dataset lacking features."""
+        labels_dir = tmp_path / "labels"
+        self._write_human_partition(
+            labels_dir / "human",
+            "dataset_a",
+            [{"gers_id": "ref-001", "target_id": "target-001", "label": "match"}],
+        )
+
+        with pytest.raises(FileNotFoundError, match="Feature partition"):
+            LabelStore.load_all(labels_dir, skip_errors=False)
+
+    def test_load_all_strict_rejects_missing_feature_join_key(self, tmp_path):
+        """Strict training loading cannot silently inner-join away a label row."""
+        labels_dir = tmp_path / "labels"
+        self._write_human_partition(
+            labels_dir / "human",
+            "dataset_a",
+            [{"gers_id": "ref-001", "target_id": "target-001", "label": "match"}],
+        )
+        feature_store = FeatureStore("dataset_a", features_dir=labels_dir / "features")
+        feature_store.add(
+            "different-ref",
+            "different-target",
+            {column: 0.5 for column in FEATURE_COLUMNS},
+        )
+        feature_store.save()
+
+        with pytest.raises(ValueError, match="missing feature join keys"):
+            LabelStore.load_all(labels_dir, skip_errors=False)
+
+    def test_load_all_strict_rejects_duplicate_feature_join_key(self, tmp_path):
+        """Strict training loading cannot multiply labels via duplicate features."""
+        labels_dir = tmp_path / "labels"
+        self._write_human_partition(
+            labels_dir / "human",
+            "dataset_a",
+            [{"gers_id": "ref-001", "target_id": "target-001", "label": "match"}],
+        )
+        feature_store = FeatureStore("dataset_a", features_dir=labels_dir / "features")
+        feature_store.add(
+            "ref-001",
+            "target-001",
+            {column: 0.5 for column in FEATURE_COLUMNS},
+        )
+        feature_store.save()
+        parquet_path = labels_dir / "features" / "dataset=dataset_a" / "data.parquet"
+        features = pd.read_parquet(parquet_path)
+        pd.concat([features, features], ignore_index=True).to_parquet(parquet_path, index=False)
+
+        with pytest.raises(ValueError, match="duplicate training join keys"):
+            LabelStore.load_all(labels_dir, skip_errors=False)

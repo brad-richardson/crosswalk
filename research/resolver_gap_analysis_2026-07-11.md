@@ -19,6 +19,16 @@
 > batches do not record the displayed candidate universe; selected edges are usable
 > evidence, but unselected edges and NONE votes are not safe negatives.
 
+> **Uncertainty/transfer update:** Five shuffled stratified grouped-CV runs put
+> model F1 below production every time. The mean-OOF decision has paired
+> whole-group bootstrap ΔF1 `-0.0271` (95% interval `[-0.0581, +0.0015]`, only
+> 3.3% bootstrap support for improvement). Leave-one-dataset-out transfer is also
+> negative under a paired dataset-cluster bootstrap: ΔF1 `-0.0204`
+> (`[-0.0874, -0.0097]`). The apparent exact-match gain is +0.0245 in both views,
+> but both intervals cross zero. This strengthens the
+> NO-GO and makes repeated grouped CV + paired bootstrap + LODO the promotion
+> harness for future iterations.
+
 ## Exec summary
 - Scope: Boston only, 679 edges / 108 groups (356 clean / 323 split). Prod = keep-all+prune `selected` flag.
 - Prod: F1 0.883 P0.822 R0.953 exact 0.731. Best conf oracle t=0.98 F1 0.886 (+0.003). Model OOF eF1 F1 0.878-0.885 (tie ±0.001). In-sample ceiling 0.914 / 0.796 exact → headroom exists but OOF can't use it.

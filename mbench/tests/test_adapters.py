@@ -183,9 +183,11 @@ class TestCrosswalkAdapter:
             "target_id",
             "confidence",
             "match_decision",
+            "match_type",
         ]
         assert output.matches["ref_id"].iloc[0] == "r1"
         assert output.matches["target_id"].iloc[0] == "t1"
+        assert output.matches["match_type"].tolist() == ["1:1", "1:N"]
         assert output.metadata["total_rows"] == 2
 
     def test_parse_output_requires_match_decision(self, tmp_path):

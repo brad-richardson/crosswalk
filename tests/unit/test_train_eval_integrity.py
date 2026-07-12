@@ -185,8 +185,73 @@ class TestCVExcludesTestRows:
             "classification_report",
             "confusion_matrix",
             "feature_importance",
+            "training_metadata",
         ):
             assert key in results
+
+        metadata = results["training_metadata"]
+        assert metadata is matcher.training_metadata
+        assert metadata["split"] == {
+            "method": "namespaced-segment-component-group-shuffle",
+            "random_state": 42,
+            "test_size": 0.3,
+            "n_groups": 40,
+        }
+        assert metadata["counts"]["human_labeled"] == 40
+        assert metadata["counts"]["training_total"] == results["n_train"]
+        assert metadata["model_params"]["random_state"] == 42
+        assert all(len(value) == 64 for value in metadata["fingerprints"].values())
+        assert set(metadata["runtime_versions"]) == {
+            "crosswalk",
+            "python",
+            "numpy",
+            "pandas",
+            "scikit_learn",
+            "xgboost",
+        }
+
+    def test_duplicate_pair_keys_fail_closed(self, tmp_path):
+        labels_dir = _make_labels_dir(tmp_path, n_human=20)
+        human_path = labels_dir / "human" / "dataset=test_ds" / "data.csv"
+        human = pd.read_csv(human_path)
+        pd.concat([human, human.iloc[[0]]], ignore_index=True).to_csv(human_path, index=False)
+
+        with pytest.raises(ValueError, match="duplicate .* keys"):
+            MLMatcher().train(labels_dir=str(labels_dir), **FAST_XGB)
+
+    def test_excluded_dataset_does_not_require_feature_partition(self, tmp_path):
+        """A deliberately excluded LOO partition is outside the strict input universe."""
+        labels_dir = _make_labels_dir(tmp_path, n_human=20)
+        excluded_dir = labels_dir / "human" / "dataset=excluded_ds"
+        excluded_dir.mkdir(parents=True)
+        pd.DataFrame(
+            {
+                "gers_id": ["excluded-gers"],
+                "target_id": ["excluded-target"],
+                "label": ["match"],
+            }
+        ).to_csv(excluded_dir / "data.csv", index=False)
+
+        results = MLMatcher().train(
+            labels_dir=str(labels_dir),
+            exclude_datasets=["excluded_ds"],
+            **FAST_XGB,
+        )
+
+        assert results["training_metadata"]["counts"]["human_labeled"] == 20
+
+    def test_legacy_random_state_maps_to_shared_seed(self, tmp_path):
+        """The old XGBoost kwarg remains compatible but now seeds the split too."""
+        labels_dir = _make_labels_dir(tmp_path, n_human=20)
+
+        results = MLMatcher().train(
+            labels_dir=str(labels_dir),
+            random_state=17,
+            **FAST_XGB,
+        )
+
+        assert results["training_metadata"]["split"]["random_state"] == 17
+        assert results["training_metadata"]["model_params"]["random_state"] == 17
 
 
 class TestAgentLabelsNeverInTestSet:
@@ -263,6 +328,37 @@ class TestAgentLabelsNeverInTestSet:
         assert len(df) == 30
         assert results["n_train"] == len(spy_split["train_idx"])
         assert results["n_train"] + results["n_test"] == 30
+
+    def test_excluded_agent_partition_does_not_block_training(self, tmp_path):
+        """Strict loading ignores malformed agent data outside the LOO universe."""
+        labels_dir = _make_labels_dir(tmp_path, n_human=30, n_agent=10)
+        (labels_dir / "agent" / "dataset=excluded_ds").mkdir(parents=True)
+
+        results = MLMatcher().train(
+            labels_dir=str(labels_dir),
+            test_size=0.3,
+            exclude_datasets=["excluded_ds"],
+            agent_weight=0.5,
+            **FAST_XGB,
+        )
+
+        assert results["training_metadata"]["counts"]["agent_train"] > 0
+
+    def test_requested_agent_label_missing_features_fails_closed(self, tmp_path):
+        """Opting into agent labels cannot silently drop an unjoined row."""
+        labels_dir = _make_labels_dir(tmp_path, n_human=30, n_agent=10)
+        parquet_path = labels_dir / "features" / "dataset=test_ds" / "data.parquet"
+        features = pd.read_parquet(parquet_path)
+        features = features[features["target_id"] != "AT0"]
+        features.to_parquet(parquet_path, index=False)
+
+        with pytest.raises(ValueError, match="agent labels are missing feature join keys"):
+            MLMatcher().train(
+                labels_dir=str(labels_dir),
+                test_size=0.3,
+                agent_weight=0.5,
+                **FAST_XGB,
+            )
 
 
 class TestAgentFeatureVersionChecked:

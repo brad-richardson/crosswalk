@@ -144,6 +144,10 @@ def _tiny_matcher():
 
 def test_matcher_save_load_round_trips_calibrator(tmp_path):
     m = _tiny_matcher()
+    m.training_metadata = {
+        "schema_version": 1,
+        "fingerprints": {"training_data_sha256": "a" * 64},
+    }
     # A non-identity calibrator so we can detect it survived the round trip.
     m.calibrator = IsotonicCalibrator(
         x_thresholds=np.array([0.0, 1.0]), y_thresholds=np.array([0.2, 0.9])
@@ -155,6 +159,7 @@ def test_matcher_save_load_round_trips_calibrator(tmp_path):
 
     loaded = MLMatcher(str(path))
     assert loaded.calibrator is not None
+    assert loaded.training_metadata == m.training_metadata
     test = np.linspace(0, 1, 20)
     np.testing.assert_allclose(
         loaded.calibrator.transform(test), m.calibrator.transform(test), atol=1e-12

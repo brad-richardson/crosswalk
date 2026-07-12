@@ -3,7 +3,7 @@
 LEAKAGE PREVENTION — READ BEFORE CHANGING
 =========================================
 This script holds out the EXACT same test set that ``MLMatcher.train()`` uses
-BEFORE any tuning happens:
+for the configured seed (42 by default) BEFORE any tuning happens:
 
 1. Labels are loaded and preprocessed identically to ``train()``:
    filter to {match, no_match}, the same ``_check_feature_versions()`` gate
@@ -12,20 +12,20 @@ BEFORE any tuning happens:
    matters — the split indices are
    computed on the post-validation DataFrame, so any preprocessing drift
    between this script and ``train()`` changes which rows land in the test set.
-2. ``segment_aware_split(df, test_size=0.2, random_state=42)`` is applied and
+2. ``segment_aware_split(df, test_size=0.2, random_state=<seed>)`` is applied and
    the test rows are DISCARDED. The Optuna study never sees them.
 3. The inner GroupKFold cross-validation runs only over the training portion,
    with segment groups subset to the training rows (mirroring how ``train()``
    subsets ``groups`` for its in-training CV).
 
 Consequently, hyperparameters produced by this script have NEVER seen the
-seed-42 test set, and the ``test_accuracy`` / classification report that
+configured-seed test set, and the ``test_accuracy`` / classification report that
 ``train()`` prints afterwards is an honest holdout estimate.
 
-WARNING: This guarantee is anchored to ``train()``'s defaults
-(``test_size=0.2``, ``random_state=42``). If you change the seed or test_size
-in ``MLMatcher.train()``, the holdout set changes and params tuned by this
-script are no longer guaranteed to be independent of it — re-run tuning.
+WARNING: This guarantee is anchored to matching ``test_size`` and ``seed``
+values between tuning and training (defaults: 0.2 and 42). If either changes,
+the holdout set changes and previously tuned params are no longer guaranteed
+to be independent of it — re-run tuning with the same values.
 
 The objective mirrors deployment as closely as possible: no early stopping
 (``train()`` does not early-stop), per-fold ``scale_pos_weight`` computed from
@@ -42,7 +42,7 @@ FEATURE SETS
 ``SPARK_PORTABLE_FEATURES`` exactly the way ``crosswalk export-spark-model``
 does it (``train(exclude_features=...)`` restricts ``feature_names`` BEFORE
 ``_validate_training_pairs()``, so the post-validation row set — and hence the
-seed-42 split — matches the exported model's training run). The objective
+configured-seed split — matches the exported model's training run). The objective
 additionally subtracts a size penalty of 0.00001 F1 per tree above 100
 (``n_estimators``) so tuning favors compact models for Spark deployment.
 The leakage-free protocol (split, discard, inner CV) is identical.
@@ -84,7 +84,11 @@ except ImportError as e:
     ) from e
 
 from crosswalk.config import FEATURE_COLUMNS, METRIC_AVERAGE, SPARK_PORTABLE_FEATURES
-from crosswalk.matching.ml import MLMatcher, segment_aware_split
+from crosswalk.matching.ml import (
+    MLMatcher,
+    _canonicalize_training_frame,
+    segment_aware_split,
+)
 
 # Size penalty for the spark feature set: 0.00001 F1 per tree above 100.
 # Matches the penalty used for the original Spark-portable tuning so the
@@ -100,6 +104,7 @@ def objective(
     groups: np.ndarray,
     n_splits: int = 5,
     size_penalty_per_tree: float = 0.0,
+    seed: int = 42,
 ) -> float:
     """Optuna objective: mean F1 over segment-grouped CV folds (train rows only).
 
@@ -122,7 +127,7 @@ def objective(
         "booster": "gbtree",
         "n_jobs": -1,
         "verbosity": 0,
-        "random_state": 42,
+        "random_state": seed,
         "n_estimators": trial.suggest_int("n_estimators", 100, 1000),
         "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
         "max_depth": trial.suggest_int("max_depth", 3, 10),
@@ -228,12 +233,16 @@ def run_tuning(
     allow_stale_features: bool = False,
     feature_set: str = "full",
     epsilon: float | None = None,
+    seed: int = 42,
 ):
-    """Run hyperparameter tuning on the training portion of the seed-42 split."""
+    """Run hyperparameter tuning on the training portion of a fixed-seed split."""
     from crosswalk.labeling.label_store import LabelStore
 
     logger.info("Loading data...")
-    df = LabelStore.load_all(Path(labels_dir))
+    # Tuning must use the complete declared input set.  A skipped/corrupt
+    # partition would silently change the configured-seed split and invalidate trial
+    # comparisons.
+    df = LabelStore.load_all(Path(labels_dir), skip_errors=False)
 
     # --- Mirror MLMatcher.train() preprocessing exactly ---
     # Any divergence here changes the row set the split is computed on, which
@@ -246,7 +255,7 @@ def run_tuning(
         # Mirror `crosswalk export-spark-model`: train() restricts feature_names
         # (FEATURE_COLUMNS order, minus non-portable features) BEFORE
         # _validate_training_pairs(), so validation's all-NaN check — and thus
-        # the seed-42 split's row set — matches the exported model's run.
+        # the configured-seed split's row set — matches the exported model's run.
         matcher.feature_names = [f for f in FEATURE_COLUMNS if f in SPARK_PORTABLE_FEATURES]
         size_penalty_per_tree = SPARK_SIZE_PENALTY_PER_TREE
         logger.info(
@@ -264,17 +273,18 @@ def run_tuning(
     # would produce params train() then refuses to reproduce.
     matcher._check_feature_versions(df, allow_stale_features=allow_stale_features)
     df = matcher._validate_training_pairs(df, max_hausdorff_m=1000.0)
+    df = _canonicalize_training_frame(df, source="Tuning")
 
-    # --- Hold out the seed-42 test set BEFORE tuning (leakage prevention) ---
+    # --- Hold out the configured-seed test set BEFORE tuning (leakage prevention) ---
     # Same call as train(): test rows are discarded, never seen by Optuna.
     train_idx, test_idx, groups = segment_aware_split(
-        df, test_size=0.2, random_state=42, return_groups=True
+        df, test_size=0.2, random_state=seed, return_groups=True
     )
     df_train = df.iloc[train_idx]
     # Subset groups to training rows (train_idx is positional), same as train()
     groups_train = groups.iloc[train_idx].to_numpy()
     logger.info(
-        f"Held out {len(test_idx)} test rows (seed=42, test_size=0.2) — "
+        f"Held out {len(test_idx)} test rows (seed={seed}, test_size=0.2) — "
         f"tuning on {len(df_train)} training rows only"
     )
 
@@ -300,7 +310,7 @@ def run_tuning(
     logger.info(f"Starting optimization with {n_trials} trials...")
     study = optuna.create_study(
         direction="maximize",
-        sampler=optuna.samplers.TPESampler(seed=42),  # Reproducible search
+        sampler=optuna.samplers.TPESampler(seed=seed),
     )
 
     study.optimize(
@@ -311,6 +321,7 @@ def run_tuning(
             groups_train,
             n_splits=n_splits,
             size_penalty_per_tree=size_penalty_per_tree,
+            seed=seed,
         ),
         n_trials=n_trials,
         show_progress_bar=True,
@@ -354,7 +365,10 @@ def run_tuning(
         "feature_set": feature_set,
         "n_features": len(matcher.feature_names),
         "size_penalty_per_tree": size_penalty_per_tree,
-        "protocol": "tuned on seed-42/test_size-0.2 training portion only (test set never seen)",
+        "seed": seed,
+        "protocol": (
+            f"tuned on seed-{seed}/test_size-0.2 training portion only (test set never seen)"
+        ),
     }
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
@@ -376,6 +390,12 @@ if __name__ == "__main__":
     parser.add_argument("--labels", default="labels", help="Path to labels directory")
     parser.add_argument("--output", default="best_params.json", help="Output path for best params")
     parser.add_argument("--trials", type=int, default=100, help="Number of trials")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Shared seed for the holdout split, XGBoost folds, and Optuna sampler",
+    )
     parser.add_argument(
         "--feature-set",
         choices=["full", "spark"],
@@ -406,4 +426,5 @@ if __name__ == "__main__":
         args.allow_stale_features,
         args.feature_set,
         args.epsilon,
+        args.seed,
     )

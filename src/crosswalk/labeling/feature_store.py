@@ -5,6 +5,7 @@ keyed by (gers_id, target_id). Features are versioned to track which
 feature computation logic was used.
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,25 @@ FEATURE_KEY_COLUMNS = [
     "target_id",
     "feature_version",
 ]
+
+# These keys define the canonical order of bulk-loaded training rows.  Sorting
+# after concatenation makes model splits independent of filesystem iteration
+# order while preserving the order of exact duplicate rows (mergesort is
+# stable).
+_BULK_SORT_COLUMNS = ["dataset", "gers_id", "target_id", "feature_version"]
+
+
+def _sort_bulk_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Return bulk-loaded rows in a stable, canonical order."""
+    sort_columns = [column for column in _BULK_SORT_COLUMNS if column in df.columns]
+    if not sort_columns or df.empty:
+        return df.reset_index(drop=True)
+    return df.sort_values(
+        sort_columns,
+        kind="mergesort",
+        na_position="last",
+        key=lambda values: values.astype("string"),
+    ).reset_index(drop=True)
 
 
 @dataclass
@@ -202,7 +222,11 @@ class FeatureStore:
         temp_path.replace(self.parquet_path)
 
     @staticmethod
-    def load_all(features_dir: Path = DEFAULT_FEATURES_DIR) -> pd.DataFrame:
+    def load_all(
+        features_dir: Path = DEFAULT_FEATURES_DIR,
+        skip_errors: bool = True,
+        required_datasets: Collection[str] | None = None,
+    ) -> pd.DataFrame:
         """Load all feature partitions.
 
         Uses Hive partitioning to read all dataset partitions
@@ -210,6 +234,12 @@ class FeatureStore:
 
         Args:
             features_dir: Directory containing Hive-partitioned feature parquets
+            skip_errors: If True (default), warn and skip malformed partitions.
+                If False, fail when a declared partition is missing its parquet
+                file or cannot be read. Training and tuning should pass False.
+            required_datasets: If provided, load only these dataset partitions.
+                In strict mode every requested partition must exist and load;
+                unrelated archival/orphan directories are ignored.
 
         Returns:
             DataFrame with all features and 'dataset' column
@@ -218,23 +248,44 @@ class FeatureStore:
         columns = FEATURE_KEY_COLUMNS + FEATURE_COLUMNS + ["dataset"]
 
         if not features_dir.exists():
+            if not skip_errors and required_datasets:
+                raise FileNotFoundError(f"Feature partition directory is missing: {features_dir}")
             return pd.DataFrame(columns=columns)
 
         dfs = []
 
-        for partition_dir in features_dir.glob("dataset=*"):
+        if required_datasets is None:
+            partition_dirs = sorted(features_dir.glob("dataset=*"), key=lambda path: path.name)
+        else:
+            partition_dirs = [
+                features_dir / f"dataset={dataset_id}"
+                for dataset_id in sorted({str(value) for value in required_datasets})
+            ]
+        for partition_dir in partition_dirs:
             if not partition_dir.is_dir():
+                if not skip_errors:
+                    raise FileNotFoundError(
+                        f"Feature partition is missing or is not a directory: {partition_dir}"
+                    )
                 continue
-            dataset_id = partition_dir.name.split("=")[1]
+            dataset_id = partition_dir.name.removeprefix("dataset=")
             parquet_path = partition_dir / "data.parquet"
-            if parquet_path.exists():
-                try:
-                    df = pd.read_parquet(parquet_path)
-                    df["dataset"] = dataset_id
-                    dfs.append(df)
-                except Exception as e:
+            if not parquet_path.exists():
+                if skip_errors:
+                    logger.warning(f"Feature partition has no data.parquet: {partition_dir}")
+                    continue
+                raise FileNotFoundError(f"Feature partition has no data.parquet: {partition_dir}")
+
+            try:
+                df = pd.read_parquet(parquet_path)
+                df["dataset"] = dataset_id
+                dfs.append(df)
+            except Exception as e:
+                if skip_errors:
                     logger.warning(f"Failed to load {parquet_path}: {e}")
+                else:
+                    raise
 
         if dfs:
-            return pd.concat(dfs, ignore_index=True)
+            return _sort_bulk_rows(pd.concat(dfs, ignore_index=True))
         return pd.DataFrame(columns=columns)
