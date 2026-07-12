@@ -4,9 +4,9 @@ Compares bridge output against curated stitching labels to measure whether the
 optimizer selects the correct edges within M:N groups. This is the mbench analog
 of the crosswalk-side ``crosswalk agent stitch-eval`` and shares its key machinery:
 
-- **Group mapping robust to group_id churn** (``map_labels_to_groups``): grouping
-  hashes change whenever the pipeline regroups, so labels are mapped to current
-  groups by exact group_id AND by edge-overlap against the groups sidecar.
+- **Decomposition-aware mapping** (``map_labels_to_fragments``): grouping hashes
+  change whenever the pipeline regroups, so pair labels are recovered across all
+  current sidecar groups and pure 1:1 bridge fragments touched by curated edges.
 - **Sliver-aware metrics**: both raw and sliver-filtered agreement are reported.
   Junction-sliver edges (near-zero physical overlap) are dropped from BOTH the
   predicted and curated edge sets before the filtered comparison, so agreement is
@@ -71,8 +71,7 @@ class StitchEvalResult:
     set_boundary_precision: float = 0.0
     set_coverage: float = 0.0
     set_metrics_by_labeler: dict = field(default_factory=dict)
-    # Mapping-health diagnostics. These are observational only: scoring still
-    # uses ``edges`` and the existing mapping algorithm in this release.
+    # Mapping-health diagnostics for decomposition-aware pair-label recovery.
     mapping_diagnostics_available: bool = False
     pair_labels_total: int = 0
     pair_labels_mapped: int = 0
@@ -274,55 +273,85 @@ def _edge_prf(pred: EdgeSet, truth: EdgeSet) -> tuple[float, float, float]:
     return prec, rec, f1
 
 
-def map_labels_to_groups(
-    stitch_labels: pd.DataFrame,
-    group_candidate_edges: dict[str, EdgeSet],
-) -> dict[int, str]:
-    """Map each labeled row to a current sidecar group_id.
+def _group_source_edges(group: dict, source: str) -> EdgeSet:
+    """Read and validate one edge-list source from a groups-sidecar record."""
+    raw_edges = group.get(source) or []
+    if not isinstance(raw_edges, list):
+        raise ValueError(f"group {group.get('group_id')} {source} must be a list")
+    parsed: list[Edge] = []
+    for index, edge in enumerate(raw_edges):
+        if not isinstance(edge, dict):
+            raise ValueError(f"group {group.get('group_id')} {source}[{index}] must be an object")
+        ref_id = edge.get("ref_id")
+        target_id = edge.get("target_id")
+        if (
+            ref_id is None
+            or target_id is None
+            or not str(ref_id).strip()
+            or not str(target_id).strip()
+        ):
+            raise ValueError(f"group {group.get('group_id')} {source}[{index}] has a null/blank id")
+        parsed.append((str(ref_id), str(target_id)))
+    return frozenset(parsed)
 
-    Robust to group_id churn: grouping hashes are hashes of the exact ref/target
-    id sets, so component shifts break exact-id recovery. A label maps to the
-    current group containing the most of its selected edges (edge-overlap), with
-    a verbatim group_id match preferred when that group still exists and shares an
-    edge. Labels whose edges no longer survive in any group are dropped.
+
+def _edge_fragment_index(fragment_edges: dict[str, EdgeSet]) -> dict[Edge, frozenset[str]]:
+    index: dict[Edge, set[str]] = defaultdict(set)
+    for fragment_id, edges in fragment_edges.items():
+        for edge in edges:
+            index[edge].add(fragment_id)
+    return {edge: frozenset(fragment_ids) for edge, fragment_ids in index.items()}
+
+
+def _effective_edge_fragments(
+    edge: Edge,
+    fragment_indexes: tuple[dict[Edge, frozenset[str]], ...],
+) -> frozenset[str]:
+    """Return owners from the first recovery source that contains the edge."""
+    for index in fragment_indexes:
+        if owners := index.get(edge):
+            return owners
+    return frozenset()
+
+
+def map_labels_to_fragments(
+    stitch_labels: pd.DataFrame,
+    fragment_indexes: tuple[dict[Edge, frozenset[str]], ...],
+    real_group_ids: frozenset[str],
+) -> dict[int, frozenset[str]]:
+    """Map each pair label to every current assignment fragment it touches.
+
+    A historical group may decompose into several current M:N groups and/or
+    ordinary 1:1 bridge rows. Selecting one "best" current group loses correct
+    fragments and makes tied mappings depend on unrelated group ids. Non-empty
+    labels therefore map to the UNION of fragments touched by their curated
+    edges. Ownership precedence is selected edge / bridge singleton, then the
+    uncapped candidate graph, then legacy rejected edges. This prevents repeated
+    rejected-edge records from pulling unrelated groups into a label footprint.
 
     Reject-all labels (empty ``selected_edges``, i.e. "no edges should be
-    selected") carry no edges to recover by overlap, so they survive ONLY when
-    their original ``group_id`` still exists verbatim in the current sidecar
-    (mirrors crosswalk's ``recover_empty_reject_all``). Keeping the recoverable
-    ones matters: they are real "no edges" ground truth and should influence
-    exact-match / F1.
+    selected") still survive ONLY when their original ``group_id`` exists
+    verbatim in the real sidecar. Synthetic singleton fragments must never make
+    an edge-less label look recoverable.
 
-    Returns ``{row_index: group_id}``.
+    Returns ``{row_index: frozenset(fragment_id, ...)}``.
     """
-    edge_groups: dict[Edge, set[str]] = defaultdict(set)
-    for gid, edges in group_candidate_edges.items():
-        for e in edges:
-            edge_groups[e].add(gid)
-
-    mapping: dict[int, str] = {}
+    mapping: dict[int, frozenset[str]] = {}
     for idx, row in stitch_labels.iterrows():
         hes = _row_edge_set(row, idx)
         hgid = str(row.get("group_id"))
         if not hes:
             # Reject-all label: recoverable only by verbatim group_id match.
-            if hgid in group_candidate_edges:
-                mapping[idx] = hgid
+            if hgid in real_group_ids:
+                mapping[idx] = frozenset({hgid})
             continue
-        counts: dict[str, int] = defaultdict(int)
-        for e in hes:
-            for gid in edge_groups.get(e, ()):
-                counts[gid] += 1
-        if not counts:
-            continue  # edges no longer survive in any current group
-        # #367: sort candidates before max() so a count tie breaks on the
-        # lexicographically smallest group_id, not dict/set iteration order
-        # (hash-seed-dependent for str keys — same root cause as #354's
-        # recover_labeled_groups wobble).
-        best = max(sorted(counts), key=counts.get)
-        # Prefer a verbatim group_id match when it still overlaps this label.
-        target = hgid if counts.get(hgid, 0) > 0 else best
-        mapping[idx] = target
+        fragments = frozenset(
+            fragment_id
+            for edge in hes
+            for fragment_id in _effective_edge_fragments(edge, fragment_indexes)
+        )
+        if fragments:
+            mapping[idx] = fragments
     return mapping
 
 
@@ -361,7 +390,7 @@ def map_set_labels_to_groups(
                 counts[gid] += 1
         if not counts:
             continue
-        # Same deterministic tie-break as map_labels_to_groups above (#367):
+        # Deterministic tie-break for membership-only SET recovery (#367):
         # sort before max() so ties resolve to the smallest group_id.
         best = max(sorted(counts), key=counts.get)
         mapping[idx] = hgid if counts.get(hgid, 0) > 0 else best
@@ -370,15 +399,10 @@ def map_set_labels_to_groups(
 
 def _pair_mapping_health(
     pair_labels: pd.DataFrame,
-    group_candidate_edges: dict[str, EdgeSet],
-    mapping: dict[int, str],
+    fragment_indexes: tuple[dict[Edge, frozenset[str]], ...],
+    mapping: dict[int, frozenset[str]],
 ) -> dict[str, int | float]:
-    """Classify pair-label mapping without altering the scoring mapping."""
-    edge_groups: dict[Edge, set[str]] = defaultdict(set)
-    for gid, edges in group_candidate_edges.items():
-        for edge in edges:
-            edge_groups[edge].add(gid)
-
+    """Classify pair-label survival against the decomposition-aware fragments."""
     clean = partial = split = reject_all_total = reject_all_unrecoverable = 0
     for idx, row in pair_labels.iterrows():
         curated = _row_edge_set(row, idx)
@@ -388,8 +412,12 @@ def _pair_mapping_health(
                 reject_all_unrecoverable += 1
             continue
 
-        surviving = [edge for edge in curated if edge_groups.get(edge)]
-        current_groups = {gid for edge in surviving for gid in edge_groups[edge]}
+        surviving = [edge for edge in curated if _effective_edge_fragments(edge, fragment_indexes)]
+        current_groups = {
+            fragment_id
+            for edge in surviving
+            for fragment_id in _effective_edge_fragments(edge, fragment_indexes)
+        }
         if not surviving:
             continue
         if len(current_groups) > 1:
@@ -510,15 +538,55 @@ def evaluate_stitch_groups(
 
     bridge_edges = set(zip(bridge["ref_id"].astype(str), bridge["target_id"].astype(str)))
 
-    group_candidate_edges: dict[str, EdgeSet] = {}
-    group_slivers: dict[str, EdgeSet] = {}
+    group_selected_edges: dict[str, EdgeSet] = {}
     group_members: dict[str, frozenset[str]] = {}
+    fragment_primary_edges: dict[str, EdgeSet] = {}
+    fragment_candidate_edges: dict[str, EdgeSet] = {}
+    fragment_rejected_edges: dict[str, EdgeSet] = {}
+    fragment_predictions: dict[str, EdgeSet] = {}
+    fragment_slivers: dict[str, EdgeSet] = {}
     for g in groups:
         gid = str(g.get("group_id"))
-        edges = frozenset((str(e["ref_id"]), str(e["target_id"])) for e in g.get("edges", []))
-        group_candidate_edges[gid] = edges
-        group_slivers[gid] = group_sliver_edges(g)
-        group_members[gid] = frozenset(r for r, _ in edges) | frozenset(t for _, t in edges)
+        selected = _group_source_edges(g, "edges")
+        candidate = _group_source_edges(g, "candidate_edges")
+        rejected = _group_source_edges(g, "rejected_edges")
+        slivers = group_sliver_edges(g)
+        group_selected_edges[gid] = selected
+        group_members[gid] = frozenset(r for r, _ in selected) | frozenset(t for _, t in selected)
+        fragment_primary_edges[gid] = selected
+        fragment_candidate_edges[gid] = candidate
+        fragment_rejected_edges[gid] = rejected
+        fragment_predictions[gid] = selected & bridge_edges
+        fragment_slivers[gid] = slivers
+
+    # The groups sidecar intentionally omits pure 1:1 assignments. Represent
+    # each EXPLICITLY TYPED 1:1 bridge row outside sidecar `edges` as a singleton
+    # fragment so a decomposed group remains evaluable. Never infer singleton
+    # status from absence alone: that would let a partial/broken sidecar turn
+    # missing N:M groups into apparently valid 1:1 recovery.
+    sidecar_selected_edges = frozenset(
+        edge for selected in group_selected_edges.values() for edge in selected
+    )
+    if "match_type" in bridge.columns:
+        one_to_one_mask = bridge["match_type"].astype("string").str.strip().eq("1:1").fillna(False)
+        one_to_one_edges = set(
+            zip(
+                bridge.loc[one_to_one_mask, "ref_id"].astype(str),
+                bridge.loc[one_to_one_mask, "target_id"].astype(str),
+            )
+        )
+    else:
+        one_to_one_edges = set()
+    used_fragment_ids = set(fragment_primary_edges)
+    for position, edge in enumerate(sorted(one_to_one_edges - sidecar_selected_edges)):
+        fragment_id = f"__bridge_singleton__:{position}"
+        while fragment_id in used_fragment_ids:
+            fragment_id += ":"
+        used_fragment_ids.add(fragment_id)
+        singleton = frozenset({edge})
+        fragment_primary_edges[fragment_id] = singleton
+        fragment_predictions[fragment_id] = singleton
+        fragment_slivers[fragment_id] = frozenset()
 
     # Split by semantics: SET labels are scored on membership/boundary/coverage
     # and MUST NOT enter the edge-F1 pools (they assert no pair-level truth).
@@ -530,8 +598,24 @@ def evaluate_stitch_groups(
         pair_labels = stitch_labels
         set_labels = stitch_labels.iloc[0:0]
 
-    mapping = map_labels_to_groups(pair_labels, group_candidate_edges)
-    mapping_health = _pair_mapping_health(pair_labels, group_candidate_edges, mapping)
+    fragment_indexes = tuple(
+        _edge_fragment_index(fragment_edges)
+        for fragment_edges in (
+            fragment_primary_edges,
+            fragment_candidate_edges,
+            fragment_rejected_edges,
+        )
+    )
+    mapping = map_labels_to_fragments(
+        pair_labels,
+        fragment_indexes,
+        frozenset(group_selected_edges),
+    )
+    mapping_health = _pair_mapping_health(
+        pair_labels,
+        fragment_indexes,
+        mapping,
+    )
 
     raw_records: list[tuple[EdgeSet, EdgeSet]] = []
     filt_records: list[tuple[EdgeSet, EdgeSet]] = []
@@ -540,20 +624,24 @@ def evaluate_stitch_groups(
     total_extra = 0
     n_sliver_affected = 0
 
-    for idx, gid in mapping.items():
+    for idx, fragment_ids in mapping.items():
         row = stitch_labels.loc[idx]
         curated = _row_edge_set(row, idx)
-        candidate = group_candidate_edges[gid]
-        # Predicted edge set for this group = bridge selections among the group's
-        # candidate edges (i.e. what the optimizer kept within this component).
-        pred = frozenset(e for e in candidate if e in bridge_edges)
+        # Score the union of every current fragment touched by the curated edge
+        # set. This is invariant to a historical group splitting into several
+        # sidecar groups and/or pure 1:1 bridge assignments.
+        pred = frozenset(
+            edge for fragment_id in fragment_ids for edge in fragment_predictions[fragment_id]
+        )
 
         raw_records.append((pred, curated))
         by_labeler_raw[_labeler_class(row.get("labeler"))].append((pred, curated))
         total_curated += len(curated)
         total_extra += len(pred - curated)
 
-        slivers = group_slivers.get(gid, frozenset())
+        slivers = frozenset(
+            edge for fragment_id in fragment_ids for edge in fragment_slivers[fragment_id]
+        )
         pred_f = pred - slivers
         curated_f = curated - slivers
         filt_records.append((pred_f, curated_f))
@@ -582,7 +670,7 @@ def evaluate_stitch_groups(
         row = set_labels.loc[idx]
         ref_members = _parse_id_list(row.get("ref_ids"))
         tgt_members = _parse_id_list(row.get("target_ids"))
-        candidate = group_candidate_edges[gid]
+        candidate = group_selected_edges[gid]
         pred = frozenset(e for e in candidate if e in bridge_edges)
         rec = set_label_metrics(pred, ref_members, tgt_members)
         set_records.append(rec)

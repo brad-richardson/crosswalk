@@ -315,6 +315,43 @@ def test_thirty_empty_edge_groups_cannot_pass_as_reject_all(tmp_path):
     assert "mapping diagnostics" in out.message
 
 
+def test_uncovered_non_1to1_bridge_rows_cannot_mask_sidecar_export_loss():
+    """A partial sidecar must not reinterpret uncovered M:N rows as 1:1.
+
+    Otherwise a single unrelated valid group plus an intact bridge could map all
+    labels through synthetic fragments and let an armed gate pass despite losing
+    the actual groups export.
+    """
+    bridge = pd.DataFrame(
+        {
+            "ref_id": [f"r{i}" for i in range(30)],
+            "target_id": [f"t{i}" for i in range(30)],
+            "confidence": [0.9] * 30,
+            "match_type": ["M:N"] * 30,
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "group_id": [f"old{i}" for i in range(30)],
+            "selected_edges": [
+                json.dumps([{"ref_id": f"r{i}", "target_id": f"t{i}"}]) for i in range(30)
+            ],
+        }
+    )
+    groups = [{"group_id": "unrelated", "edges": [{"ref_id": "rx", "target_id": "tx"}]}]
+
+    result = evaluate_stitch_groups(bridge, labels, groups=groups)
+    out = evaluate_gate(
+        "boston",
+        result,
+        GateFloors(30, 0.0, 0.0, armed=True, min_mapping_rate=0.90),
+    )
+
+    assert result.pair_labels_mapped == 0
+    assert out.status == STATUS_FAIL
+    assert "mapping regression" in out.message
+
+
 def test_gate_no_config_is_non_blocking():
     out = evaluate_gate("nowhere", _result(67, 0.10, 0.10), None)
     assert out.status == STATUS_NO_CONFIG
@@ -467,7 +504,7 @@ def test_committed_toml_has_boston_gate():
     assert floors["us_boston_streets"].armed is True
     assert floors["us_boston_streets"].min_mapping_rate == pytest.approx(0.90)
     assert floors["us_boston_streets"].min_labels_total == 106
-    # Re-derived 2026-07-05 post set-semantics reinterpretation (#295/#298):
-    # baseline F1 0.8858 / exact 0.5946 over 111/113 mapped pair labels.
+    # Re-derived 2026-07-12 with decomposition-aware pair recovery:
+    # baseline F1 0.9142 / exact 0.5893 over 112/113 mapped pair labels.
     assert floors["us_boston_streets"].f1_filtered_floor == pytest.approx(0.83)
     assert floors["us_boston_streets"].exact_filtered_floor == pytest.approx(0.50)

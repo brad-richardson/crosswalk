@@ -152,8 +152,10 @@ exact-match against the per-dataset floors in `mbench/datasets.toml`
 Without `--gate` the stitch metrics are still computed and printed (non-blocking).
 The requested gate fails closed when its gate table is missing or malformed.
 Results also report mapping-health counts (clean, partial, split, lost, and
-recoverable/unrecoverable reject-all labels) and the mapping rate. These are
-diagnostics only; scoring still uses the sidecar's existing `edges` universe.
+recoverable/unrecoverable reject-all labels) and the mapping rate. Pair-label
+recovery may use `candidate_edges` / `rejected_edges`, but those rows never
+become predictions: scoring unions only current group `edges` selected in the
+bridge plus explicitly typed `1:1` bridge fragments.
 An armed gate requires those diagnostics, so a missing, malformed, or empty
 groups sidecar fails instead of falling back to legacy scoring. An unarmed
 configured gate without diagnostics can still **fail** its floors on legacy
@@ -193,7 +195,12 @@ logic) is unit-tested in CI on a committed miniature fixture
 
 **Auto-arming.** Each `[gate.<dataset>]` block sets `min_mapped_groups`: the
 floor is enforced only once at least that many curated labels map to current
-pipeline groups (mapping is by edge-overlap, robust to group_id churn). Below
+assignment fragments. Pair recovery is decomposition-aware: it unions every
+current sidecar group touched by the curated edges and explicit `1:1` bridge
+rows omitted from the groups sidecar. Recovery ownership is selected edge,
+then uncapped candidate graph, then legacy rejected edge; predictions remain
+only the group's selected `edges` plus explicit `1:1` bridge selections.
+Reject-all labels remain verbatim-real-group only. Below
 that the dataset reports `skip_unarmed` (non-blocking). This means the gate goes
 live automatically as the label base grows — no code change or second PR. Once
 a baseline is established, set `armed = true`; an armed dataset falling below
@@ -203,12 +210,12 @@ population even when enough easy groups survive to exceed `min_mapped_groups`.
 An optional `min_labels_total` independently protects against deleting the
 label population while maintaining a perfect mapping rate; it counts pair AND
 set labels so pair→set semantic conversions don't read as deletions. Boston
-uses mapping rate `0.90` against its current 111/113 (0.9823) mapped pair-label
-baseline and `min_labels_total = 106` (~90% retention of its 118 curated
-labels: 113 pair + 5 set). As of
-2026-07-05 (post-#295/#298 set-semantics reinterpretation), `us_boston_streets`
-is armed (111 mapped pair groups, floors F1 0.83 / exact 0.50, baseline
-F1 0.8858 / exact 0.5946; its 3 set labels are reported separately and not
+uses mapping rate `0.90` against its current 112/113 (0.9912) mapped pair-label
+baseline and `min_labels_total = 106` (~89% retention of its 119 curated
+labels: 113 pair + 6 set). As of
+2026-07-12, `us_boston_streets`
+is armed (112 mapped pair labels, floors F1 0.83 / exact 0.50, baseline
+F1 0.9142 / exact 0.5893; its 6 set labels are reported separately and not
 gated); `us_seattle_sidewalks` (20 mapped pair groups, all panel-labeled) has no
 gate block configured yet.
 

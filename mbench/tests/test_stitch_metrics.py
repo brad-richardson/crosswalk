@@ -240,7 +240,16 @@ def test_reject_all_label_retained_on_group_id_match(groups_sidecar):
     'no edges' ground-truth case to exact-match / F1.
     """
     # Bridge selected NOTHING for g_current -> matches the reject-all label.
-    bridge = pd.DataFrame({"ref_id": ["rX"], "target_id": ["tX"], "confidence": [0.9]})
+    bridge = pd.DataFrame(
+        {
+            "ref_id": ["rX"],
+            "target_id": ["tX"],
+            "confidence": [0.9],
+            # A real synthetic singleton exists, but must not contaminate or
+            # recover this edge-less label.
+            "match_type": ["1:1"],
+        }
+    )
     labels = pd.DataFrame(
         {
             "group_id": ["g_current"],
@@ -328,6 +337,187 @@ def test_mapping_health_reports_clean_partial_and_split(groups_sidecar):
     assert result.pair_labels_mapped_partial == 1
     assert result.pair_labels_mapped_split == 1
     assert result.pair_labels_lost == 0
+
+
+def test_pair_label_scores_union_of_decomposed_fragments():
+    groups = [
+        {
+            "group_id": "g1",
+            "edges": [
+                {"ref_id": "r1", "target_id": "t1"},
+                {"ref_id": "extra", "target_id": "t1"},
+            ],
+        },
+        {
+            "group_id": "g2",
+            "edges": [{"ref_id": "r2", "target_id": "t2"}],
+        },
+    ]
+    bridge = pd.DataFrame(
+        {
+            "ref_id": ["r1", "extra", "r2"],
+            "target_id": ["t1", "t1", "t2"],
+            "confidence": [0.9, 0.8, 0.9],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "group_id": ["old_combined"],
+            "selected_edges": [
+                json.dumps(
+                    [
+                        {"ref_id": "r1", "target_id": "t1"},
+                        {"ref_id": "r2", "target_id": "t2"},
+                    ]
+                )
+            ],
+        }
+    )
+
+    result = evaluate_stitch_groups(bridge, labels, groups=groups)
+
+    assert result.groups_evaluated == 1
+    assert result.recall == pytest.approx(1.0)
+    assert result.precision == pytest.approx(2 / 3)
+    assert result.total_extra_edges == 1
+    assert result.pair_labels_mapped_split == 1
+
+
+def test_pair_label_recovers_selected_singleton_outside_sidecar():
+    groups = [{"group_id": "unrelated", "edges": [{"ref_id": "rx", "target_id": "tx"}]}]
+    bridge = pd.DataFrame(
+        {
+            "ref_id": ["r1"],
+            "target_id": ["t1"],
+            "confidence": [0.99],
+            "match_type": ["1:1"],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "group_id": ["old_group"],
+            "selected_edges": [json.dumps([{"ref_id": "r1", "target_id": "t1"}])],
+        }
+    )
+
+    result = evaluate_stitch_groups(bridge, labels, groups=groups)
+
+    assert result.groups_evaluated == 1
+    assert result.exact_match_rate == pytest.approx(1.0)
+    assert result.pair_labels_mapped_clean == 1
+    assert result.pair_labels_lost == 0
+
+
+@pytest.mark.parametrize("match_type", ["N:1", "1:N", "M:N", None])
+def test_uncovered_non_1to1_bridge_edge_does_not_mask_partial_sidecar(match_type):
+    groups = [{"group_id": "unrelated", "edges": [{"ref_id": "rx", "target_id": "tx"}]}]
+    bridge_data = {"ref_id": ["r1"], "target_id": ["t1"], "confidence": [0.99]}
+    if match_type is not None:
+        bridge_data["match_type"] = [match_type]
+    bridge = pd.DataFrame(bridge_data)
+    labels = pd.DataFrame(
+        {
+            "group_id": ["old_group"],
+            "selected_edges": [json.dumps([{"ref_id": "r1", "target_id": "t1"}])],
+        }
+    )
+
+    result = evaluate_stitch_groups(bridge, labels, groups=groups)
+
+    assert result.groups_evaluated == 0
+    assert result.pair_labels_mapped == 0
+    assert result.pair_labels_lost == 1
+
+
+@pytest.mark.parametrize("recovery_source", ["candidate_edges", "rejected_edges"])
+def test_pair_label_maps_through_full_recovery_footprint(recovery_source):
+    group = {
+        "group_id": "g1",
+        "edges": [{"ref_id": "selected", "target_id": "t1"}],
+        recovery_source: [{"ref_id": "curated", "target_id": "t2"}],
+    }
+    bridge = pd.DataFrame({"ref_id": ["selected"], "target_id": ["t1"], "confidence": [0.9]})
+    labels = pd.DataFrame(
+        {
+            "group_id": ["old_group"],
+            "selected_edges": [json.dumps([{"ref_id": "curated", "target_id": "t2"}])],
+        }
+    )
+
+    result = evaluate_stitch_groups(bridge, labels, groups=[group])
+
+    assert result.groups_evaluated == 1
+    assert result.recall == pytest.approx(0.0)
+    assert result.precision == pytest.approx(0.0)
+    assert result.total_extra_edges == 1
+    assert result.pair_labels_mapped_clean == 1
+
+
+def test_selected_fragment_ownership_beats_foreign_candidate_attribution():
+    groups = [
+        {
+            "group_id": "selected_owner",
+            "edges": [{"ref_id": "r1", "target_id": "t1"}],
+        },
+        {
+            "group_id": "candidate_only",
+            "edges": [{"ref_id": "false", "target_id": "t2"}],
+            "candidate_edges": [{"ref_id": "r1", "target_id": "t1"}],
+        },
+    ]
+    bridge = pd.DataFrame(
+        {
+            "ref_id": ["r1", "false"],
+            "target_id": ["t1", "t2"],
+            "confidence": [0.9, 0.8],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "group_id": ["old_group"],
+            "selected_edges": [json.dumps([{"ref_id": "r1", "target_id": "t1"}])],
+        }
+    )
+
+    result = evaluate_stitch_groups(bridge, labels, groups=groups)
+
+    assert result.exact_match_rate == pytest.approx(1.0)
+    assert result.total_extra_edges == 0
+    assert result.pair_labels_mapped_clean == 1
+
+
+def test_candidate_owner_beats_repeated_legacy_rejected_attribution():
+    groups = [
+        {
+            "group_id": "candidate_owner",
+            "edges": [{"ref_id": "candidate_extra", "target_id": "t1"}],
+            "candidate_edges": [{"ref_id": "curated", "target_id": "truth"}],
+        },
+        {
+            "group_id": "foreign_rejected",
+            "edges": [{"ref_id": "foreign_extra", "target_id": "t2"}],
+            "rejected_edges": [{"ref_id": "curated", "target_id": "truth"}],
+        },
+    ]
+    bridge = pd.DataFrame(
+        {
+            "ref_id": ["candidate_extra", "foreign_extra"],
+            "target_id": ["t1", "t2"],
+            "confidence": [0.9, 0.8],
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "group_id": ["old_group"],
+            "selected_edges": [json.dumps([{"ref_id": "curated", "target_id": "truth"}])],
+        }
+    )
+
+    result = evaluate_stitch_groups(bridge, labels, groups=groups)
+
+    assert result.groups_evaluated == 1
+    assert result.total_extra_edges == 1
+    assert result.pair_labels_mapped_clean == 1
 
 
 # ---------------------------------------------------------------------------
