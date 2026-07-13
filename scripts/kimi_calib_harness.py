@@ -131,18 +131,10 @@ def build_opencode_config(provider_policy: dict[str, Any]) -> dict[str, Any]:
         "model": "openrouter/moonshotai/kimi-k2.6",
         "provider": {
             "openrouter": {
-                "models": {
-                    "moonshotai/kimi-k2.6": {
-                        "options": {
-                            "provider": provider_policy
-                        }
-                    }
-                }
+                "models": {"moonshotai/kimi-k2.6": {"options": {"provider": provider_policy}}}
             }
         },
-        "agent": {
-            "vote": vote_agent
-        },
+        "agent": {"vote": vote_agent},
     }
 
 
@@ -171,7 +163,9 @@ def verify_isolation(provider_policy: dict[str, Any]) -> None:
     models = prov.get("models", {}).get("moonshotai/kimi-k2.6", {})
     opts = models.get("options", {}).get("provider", {})
     if opts != provider_policy:
-        raise RuntimeError(f"Isolation verification mismatch: expected {provider_policy} got {opts}")
+        raise RuntimeError(
+            f"Isolation verification mismatch: expected {provider_policy} got {opts}"
+        )
     print(f"[verify] Isolation OK: {provider_policy}")
 
 
@@ -220,7 +214,14 @@ def run_one_prompt(
         confidence = None
         reasoning = None
         if parsed:
-            choice = str(parsed.get("choice", "")).strip().upper().replace("OPTION", "").strip().strip(".")
+            choice = (
+                str(parsed.get("choice", ""))
+                .strip()
+                .upper()
+                .replace("OPTION", "")
+                .strip()
+                .strip(".")
+            )
             confidence = parsed.get("confidence")
             reasoning = parsed.get("reasoning", "")[:500]
         return {
@@ -266,7 +267,9 @@ def main():
     ap.add_argument("--timeout", type=int, default=240)
     ap.add_argument("--verify", action="store_true")
     ap.add_argument("--list-candidates", action="store_true")
-    ap.add_argument("--full-sweep", action="store_true", help="sweep remaining candidates on veto pack")
+    ap.add_argument(
+        "--full-sweep", action="store_true", help="sweep remaining candidates on veto pack"
+    )
     args = ap.parse_args()
 
     if args.list_candidates:
@@ -294,7 +297,9 @@ def main():
             choice = res.get("choice")
             settled = SETTLED["8bf6c63b"]
             ok = choice == settled
-            print(f" -> choice={choice} expected={settled} ok={ok} latency={res['latency_s']:.1f}s rc={res['returncode']}")
+            print(
+                f" -> choice={choice} expected={settled} ok={ok} latency={res['latency_s']:.1f}s rc={res['returncode']}"
+            )
             if not ok:
                 print(f"    reason={res['reasoning']!r} stderr={res['stderr'][:300]}")
             results.append(
@@ -313,7 +318,9 @@ def main():
         passed = [r for r in results if r["passed_veto"]]
         print(f"Veto survivors: {len(passed)}/{len(results)}")
         for p in passed:
-            print(f"  {p['provider']} {p['tag']} choice={p['result']['choice']} latency={p['result']['latency_s']:.1f}s")
+            print(
+                f"  {p['provider']} {p['tag']} choice={p['result']['choice']} latency={p['result']['latency_s']:.1f}s"
+            )
         return
 
     # Single run

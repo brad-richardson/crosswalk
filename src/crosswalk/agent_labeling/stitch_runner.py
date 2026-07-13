@@ -2020,9 +2020,11 @@ def run_batch(
             if not gemini_rows.empty:
                 gemini_spec = next((p for p in panel if p.name == "gemini"), None)
                 allowed_routes = set(gemini_spec.routes) if gemini_spec is not None else set()
-                recorded_routes = set(
-                    gemini_rows["invocation_route"].fillna("").astype(str)
-                ) if "invocation_route" in gemini_rows else set()
+                recorded_routes = (
+                    set(gemini_rows["invocation_route"].fillna("").astype(str))
+                    if "invocation_route" in gemini_rows
+                    else set()
+                )
                 complete = (
                     complete
                     and "invocation_route" in gemini_rows
