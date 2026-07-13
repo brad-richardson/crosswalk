@@ -2300,6 +2300,208 @@ def test_v4_panel_remains_reproducible():
     assert [*v4, sr.MUSE] == sr.DEFAULT_PANEL
 
 
+def test_v6_candidate_is_lean_claude_codex_muse_trio():
+    """v6 is opt-in and removes Kimi without forcing a replacement seat."""
+    v6 = sr.get_panel("v6-candidate")
+    assert v6 is sr.PANEL_V6_CANDIDATE
+    assert [p.name for p in v6] == ["claude", "codex", "muse"]
+    assert [p.model for p in v6] == [
+        "claude-opus-4-8",
+        "gpt-5.6-terra",
+        "meta/muse-spark-1.1",
+    ]
+    assert v6[2] is sr.MUSE
+    assert {"kimi", "gemini"}.isdisjoint(p.name for p in v6)
+    assert len({p.name for p in v6}) == 3
+    # Candidate work must not silently change today's blessed default.
+    assert sr.get_panel("default") is sr.DEFAULT_PANEL
+    assert sr.get_panel("v5") is sr.DEFAULT_PANEL
+    # Gemini remains available only on explicit four-seat calibration panels.
+    assert [p.name for p in sr.get_panel("v6-agy-calibration")] == [
+        "claude",
+        "codex",
+        "gemini",
+        "muse",
+    ]
+    assert sr.get_panel("v6-agy-calibration")[2].routes == (sr.GEMINI_ROUTE_AGY,)
+    assert sr.get_panel("v6-flex-calibration")[2].routes == (sr.GEMINI_ROUTE_OPENROUTER_FLEX,)
+
+
+def test_gemini_primary_route_records_agy(monkeypatch, tmp_path):
+    calls = {"agy": 0, "openrouter": 0}
+
+    def fake_agy(*args, **kwargs):
+        calls["agy"] += 1
+        return '{"choice":"A","confidence":0.9,"reasoning":"agy"}'
+
+    def fake_openrouter(*args, **kwargs):
+        calls["openrouter"] += 1
+        raise AssertionError("fallback should not run")
+
+    monkeypatch.setattr(sr, "invoke_agy", fake_agy)
+    monkeypatch.setattr(sr, "invoke_opencode", fake_openrouter)
+    result = sr.invoke_gemini("p", tmp_path, ["A"], sr.GEMINI_MODEL)
+    assert result.route == sr.GEMINI_ROUTE_AGY
+    assert '"choice":"A"' in result.raw
+    assert calls == {"agy": 1, "openrouter": 0}
+
+
+def test_gemini_quota_fallback_opens_sticky_wave_circuit(monkeypatch, tmp_path):
+    calls = {"agy": 0, "openrouter": 0}
+
+    def quota_capped(*args, **kwargs):
+        calls["agy"] += 1
+        return ""  # observed agy quota-cap behavior: exit 0 + empty stdout
+
+    def flex(*args, **kwargs):
+        calls["openrouter"] += 1
+        return '{"choice":"A","confidence":0.8,"reasoning":"flex"}'
+
+    monkeypatch.setattr(sr, "invoke_agy", quota_capped)
+    monkeypatch.setattr(sr, "invoke_opencode", flex)
+    state = sr.ProviderRouteState()
+    first = sr.invoke_gemini("p", tmp_path, ["A"], sr.GEMINI_MODEL, route_state=state)
+    second = sr.invoke_gemini("p", tmp_path, ["A"], sr.GEMINI_MODEL, route_state=state)
+    assert first.route == second.route == sr.GEMINI_ROUTE_OPENROUTER_FLEX
+    assert calls == {"agy": 1, "openrouter": 2}
+    assert sr.GEMINI_ROUTE_AGY in state.unavailable
+
+
+def test_gemini_flex_only_calibration_never_touches_agy(monkeypatch, tmp_path):
+    def unexpected_agy(*args, **kwargs):
+        raise AssertionError("flex-only calibration must not consume agy quota")
+
+    monkeypatch.setattr(sr, "invoke_agy", unexpected_agy)
+    monkeypatch.setattr(
+        sr,
+        "invoke_opencode",
+        lambda *a, **k: '{"choice":"A","confidence":0.8,"reasoning":"flex"}',
+    )
+    result = sr.invoke_gemini(
+        "p",
+        tmp_path,
+        ["A"],
+        sr.GEMINI_MODEL,
+        routes=(sr.GEMINI_ROUTE_OPENROUTER_FLEX,),
+    )
+    assert result.route == sr.GEMINI_ROUTE_OPENROUTER_FLEX
+
+
+def test_gemini_context_overflow_falls_back_without_poisoning_later_groups(monkeypatch, tmp_path):
+    calls = {"agy": 0, "openrouter": 0}
+
+    def overflow(*args, **kwargs):
+        calls["agy"] += 1
+        raise sr.GroupScopedProviderError("context window")
+
+    def flex(*args, **kwargs):
+        calls["openrouter"] += 1
+        return '{"choice":"A","confidence":0.8,"reasoning":"flex"}'
+
+    monkeypatch.setattr(sr, "invoke_agy", overflow)
+    monkeypatch.setattr(sr, "invoke_opencode", flex)
+    state = sr.ProviderRouteState()
+    sr.invoke_gemini("p1", tmp_path, ["A"], sr.GEMINI_MODEL, route_state=state)
+    sr.invoke_gemini("p2", tmp_path, ["A"], sr.GEMINI_MODEL, route_state=state)
+    assert calls == {"agy": 2, "openrouter": 2}
+    assert sr.GEMINI_ROUTE_AGY not in state.unavailable
+
+
+def test_gemini_dual_route_failure_hard_fails_panel(monkeypatch):
+    monkeypatch.setattr(sr, "invoke_agy", lambda *a, **k: "")
+
+    def flex_down(*args, **kwargs):
+        raise RuntimeError("flex unavailable")
+
+    monkeypatch.setattr(sr, "invoke_opencode", flex_down)
+    with pytest.raises(sr.ProviderInvocationError, match="Halting the run"):
+        sr.run_provider_on_group(
+            sr.GEMINI,
+            "g",
+            None,
+            "p",
+            ["A"],
+            {"A": [(R1, T1)]},
+            invocation_budget_s=0,
+            route_state=sr.ProviderRouteState(),
+        )
+
+
+def test_gemini_vote_records_actual_route(monkeypatch):
+    def fake_gemini(*args, **kwargs):
+        return sr.InvocationResult(
+            '{"choice":"A","confidence":0.9,"reasoning":"ok"}',
+            sr.GEMINI_ROUTE_OPENROUTER_FLEX,
+        )
+
+    monkeypatch.setitem(sr._INVOKERS, "gemini", fake_gemini)
+    vote = sr.run_provider_on_group(sr.GEMINI, "g", None, "p", ["A"], {"A": [(R1, T1)]})
+    assert vote.choice == "A"
+    assert vote.invocation_route == sr.GEMINI_ROUTE_OPENROUTER_FLEX
+    assert sr._vote_row(vote)["invocation_route"] == sr.GEMINI_ROUTE_OPENROUTER_FLEX
+
+
+def test_gemini_flex_endpoint_is_pinned_without_openrouter_rerouting():
+    config = json.loads((Path(__file__).parents[2] / "opencode.json").read_text())
+    policy = config["provider"]["openrouter"]["models"][sr.GEMINI_MODEL]["options"]["provider"]
+    assert policy == {
+        "only": ["google-ai-studio/flex"],
+        "allow_fallbacks": False,
+    }
+    isolated = sr._gemini_flex_opencode_config(sr.GEMINI_MODEL)
+    assert (
+        isolated["provider"]["openrouter"]["models"][sr.GEMINI_MODEL]["options"]["provider"]
+        == policy
+    )
+    assert isolated["agent"]["vote"]["tools"]
+    assert not any(isolated["agent"]["vote"]["tools"].values())
+
+
+def test_gemini_flex_injects_isolated_route_config(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_openrouter(*args, **kwargs):
+        captured.update(kwargs)
+        return '{"choice":"A","confidence":0.8,"reasoning":"flex"}'
+
+    monkeypatch.setattr(sr, "invoke_opencode", fake_openrouter)
+    result = sr.invoke_gemini(
+        "p",
+        tmp_path,
+        ["A"],
+        sr.GEMINI_MODEL,
+        routes=(sr.GEMINI_ROUTE_OPENROUTER_FLEX,),
+    )
+    assert result.route == sr.GEMINI_ROUTE_OPENROUTER_FLEX
+    config = captured["config_content"]
+    assert config["model"] == f"openrouter/{sr.GEMINI_MODEL}"
+    assert (
+        config["provider"]["openrouter"]["models"][sr.GEMINI_MODEL]["options"]["provider"]
+        == sr._GEMINI_FLEX_PROVIDER_POLICY
+    )
+
+
+def test_gemini_route_order_changes_panel_invocation_signature():
+    from crosswalk.agent_labeling.stitch_provenance import invocation_signature
+
+    reversed_routes = sr.ProviderSpec(
+        name="gemini",
+        model=sr.GEMINI_MODEL,
+        opencode_agent="vote",
+        routes=tuple(reversed(sr.GEMINI.routes)),
+    )
+    kwargs = {
+        "timeout": None,
+        "collect_feedback": False,
+        "invocation_budget_s": 300.0,
+        "effective_timeouts": [240],
+        "runtime_contract_sha256": "a" * 64,
+    }
+    assert invocation_signature([sr.GEMINI], **kwargs) != invocation_signature(
+        [reversed_routes], **kwargs
+    )
+
+
 def test_get_panel_unknown_name_is_a_hard_error():
     """Panel choice is era-load-bearing (it decides the export labeler
     generation), so a typo must error listing the valid names — never silently
@@ -2455,6 +2657,28 @@ def test_invoke_opencode_isolates_db_per_invocation(monkeypatch, tmp_path):
     assert env["META_API_KEY"] == "sentinel-key"
     # The per-invocation temp DB dir is cleaned up once the call returns.
     assert not db_path.parent.exists()
+
+
+def test_invoke_opencode_injects_explicit_config_content(monkeypatch, tmp_path):
+    import subprocess as sp
+
+    gdir = tmp_path / "grp"
+    gdir.mkdir()
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["env"] = kwargs["env"]
+        return sp.CompletedProcess(
+            cmd,
+            0,
+            stdout='{"choice":"A","confidence":0.9,"reasoning":"ok"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    explicit = {"model": "openrouter/google/gemini-3.5-flash"}
+    sr.invoke_opencode("P", gdir, [], "openrouter/google/gemini-3.5-flash", config_content=explicit)
+    assert json.loads(captured["env"]["OPENCODE_CONFIG_CONTENT"]) == explicit
 
 
 def test_invoke_opencode_cleans_db_dir_on_timeout(monkeypatch, tmp_path):
@@ -2942,6 +3166,66 @@ def test_run_batch_resume_skips_completed_groups(tmp_path, monkeypatch):
     # Final output carries BOTH groups.
     assert set(cons_df["group_id"]) == {"g1", "g2"}
     assert set(votes_df["group_id"]) == {"g1", "g2"}
+
+
+def test_run_batch_resume_requires_valid_gemini_route_provenance(tmp_path, monkeypatch):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    calls = {"n": 0}
+
+    def fake_gemini(*args, **kwargs):
+        calls["n"] += 1
+        return sr.InvocationResult(
+            '{"choice":"A","confidence":0.9,"reasoning":"ok"}',
+            sr.GEMINI_ROUTE_OPENROUTER_FLEX,
+        )
+
+    monkeypatch.setitem(sr._INVOKERS, "gemini", fake_gemini)
+    panel = [sr.GEMINI]
+    sr.run_batch(batch_dir, panel=panel)
+    assert calls["n"] == 1
+
+    calls["n"] = 0
+    resumed, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
+    assert calls["n"] == 0
+    assert set(resumed["invocation_route"]) == {sr.GEMINI_ROUTE_OPENROUTER_FLEX}
+
+    partial = pd.read_csv(batch_dir / "votes.partial.csv")
+    partial["invocation_route"] = "unknown-route"
+    partial.to_csv(batch_dir / "votes.partial.csv", index=False)
+    calls["n"] = 0
+    repaired, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
+    assert calls["n"] == 1
+    assert set(repaired["invocation_route"]) == {sr.GEMINI_ROUTE_OPENROUTER_FLEX}
+
+
+def test_run_batch_resume_requires_route_allowed_by_current_gemini_policy(tmp_path, monkeypatch):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    calls = {"n": 0}
+
+    def fake_gemini(*args, **kwargs):
+        calls["n"] += 1
+        return sr.InvocationResult(
+            '{"choice":"A","confidence":0.9,"reasoning":"ok"}',
+            sr.GEMINI_ROUTE_AGY,
+        )
+
+    monkeypatch.setitem(sr._INVOKERS, "gemini", fake_gemini)
+    panel = [sr.GEMINI_AGY_ONLY]
+    sr.run_batch(batch_dir, panel=panel)
+    assert calls["n"] == 1
+
+    partial = pd.read_csv(batch_dir / "votes.partial.csv")
+    partial["invocation_route"] = sr.GEMINI_ROUTE_OPENROUTER_FLEX
+    partial.to_csv(batch_dir / "votes.partial.csv", index=False)
+    calls["n"] = 0
+
+    repaired, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
+    assert calls["n"] == 1
+    assert set(repaired["invocation_route"]) == {sr.GEMINI_ROUTE_AGY}
 
 
 def test_run_batch_size_gates_over_backstop_group(tmp_path, monkeypatch):

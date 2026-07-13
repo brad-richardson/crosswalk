@@ -140,6 +140,8 @@ from .stitch_provenance import (
     validate_manifest_against_batch,
 )
 from .stitch_runner import (
+    GEMINI_ROUTE_AGY,
+    GEMINI_ROUTE_OPENROUTER_FLEX,
     Vote,
     _edge_classes_for,
     _load_group_context,
@@ -212,6 +214,18 @@ PANEL_QUORUM_NONE_LABELER = "panel_quorum_none_v5"
 PANEL_DECOMPOSED_LABELER = "panel_unanimous_decomposed_v5"
 PANEL_QUORUM_DECOMPOSED_LABELER = "panel_quorum_decomposed_v5"
 
+# v6-candidate tags. These exist before promotion so an explicitly approved
+# candidate export can never be mislabeled as v5. The composition remains OUT
+# of STANDARD_PANEL_VOTERS until calibration passes, so stitch-export still
+# requires --allow-nonstandard-panel. DEFAULT_PANEL and the unsuffixed labeler
+# constants continue to point at the blessed v5 production panel.
+PANEL_LABELER_V6 = "panel_unanimous_v6"
+PANEL_QUORUM_LABELER_V6 = "panel_quorum_v6"
+PANEL_NONE_LABELER_V6 = "panel_unanimous_none_v6"
+PANEL_QUORUM_NONE_LABELER_V6 = "panel_quorum_none_v6"
+PANEL_DECOMPOSED_LABELER_V6 = "panel_unanimous_decomposed_v6"
+PANEL_QUORUM_DECOMPOSED_LABELER_V6 = "panel_quorum_decomposed_v6"
+
 #: Blessed (provider, model) voter compositions, keyed by labeler era. The gate
 #: keys on the PAIR, not the provider name alone: the opencode transport has
 #: driven Gemini Flash (no-agy quota-outage waves) and Qwen3-VL (v3-candidate)
@@ -260,6 +274,17 @@ PANEL_VOTERS_V5 = frozenset(
     }
 )
 
+# Candidate v6: lean three-seat Claude/Codex/Muse. Calibration found no routing
+# lift from replacing Kimi with Gemini, so Gemini remains experimental and is
+# not part of this labeler generation's voter identity.
+PANEL_VOTERS_V6 = frozenset(
+    {
+        ("claude", "claude-opus-4-8"),
+        ("codex", "gpt-5.6-terra"),
+        ("muse", "meta/muse-spark-1.1"),
+    }
+)
+
 #: Era -> blessed voter set. A batch matching an era's set exactly is STANDARD
 #: for that era: it passes the export gate and its labels are stamped with that
 #: era's labeler tags (v3-era batches keep minting ``*_v3`` labels on
@@ -269,6 +294,13 @@ STANDARD_PANEL_VOTERS: dict[str, frozenset[tuple[str, str]]] = {
     "v3": PANEL_VOTERS_V3,
     "v4": PANEL_VOTERS_V4,
     "v5": PANEL_VOTERS_V5,
+}
+
+# Known candidate compositions resolve to their own labeler generation but do
+# NOT pass nonstandard_panel_batches. This separates "we know how to stamp it"
+# from "it passed the production calibration gate".
+CANDIDATE_ERA_VOTERS: dict[frozenset[tuple[str, str]], str] = {
+    PANEL_VOTERS_V6: "v6",
 }
 
 #: STAMPING-ONLY historical compositions -> labeler era. These compositions
@@ -329,7 +361,7 @@ def _batch_voters(batch_dir: Path) -> set[tuple[str, str]] | None:
 
 
 def batch_panel_era(batch_dir: Path) -> str | None:
-    """Return the labeler era ("v3"/"v4"/"v5") a batch's voter composition belongs to.
+    """Return the labeler era ("v3"/"v4"/"v5"/"v6") for a batch composition.
 
     Resolution order: the blessed sets (:data:`STANDARD_PANEL_VOTERS`), then the
     stamping-only historical map (:data:`HISTORICAL_ERA_VOTERS`) — compositions
@@ -350,7 +382,8 @@ def batch_panel_era(batch_dir: Path) -> str | None:
     for era, blessed in STANDARD_PANEL_VOTERS.items():
         if voters == blessed:
             return era
-    return HISTORICAL_ERA_VOTERS.get(frozenset(voters))
+    frozen = frozenset(voters)
+    return CANDIDATE_ERA_VOTERS.get(frozen) or HISTORICAL_ERA_VOTERS.get(frozen)
 
 
 def nonstandard_panel_batches(
@@ -718,7 +751,7 @@ def plan_exports(
     Pure w.r.t. the label store: reads human labels but writes nothing. Call
     :func:`write_exports` with the returned report to persist.
 
-    ``stamp_era`` ("v3"/"v4"/"v5") is a FILL-IN for era-less batches only: each
+    ``stamp_era`` ("v3"/"v4"/"v5"/"v6") fills era-less batches only: each
     batch is first resolved via :func:`batch_panel_era`, and ``stamp_era``
     applies solely to batches whose composition resolves to NO era (unknown
     compositions, which :func:`write_exports` otherwise refuses). A batch that
@@ -1348,6 +1381,14 @@ LABELERS_BY_ERA: dict[str, EraLabelers] = {
         none_quorum=PANEL_QUORUM_NONE_LABELER,
         decomposed_quorum=PANEL_QUORUM_DECOMPOSED_LABELER,
     ),
+    "v6": EraLabelers(
+        PANEL_LABELER_V6,
+        PANEL_NONE_LABELER_V6,
+        PANEL_DECOMPOSED_LABELER_V6,
+        accept_quorum=PANEL_QUORUM_LABELER_V6,
+        none_quorum=PANEL_QUORUM_NONE_LABELER_V6,
+        decomposed_quorum=PANEL_QUORUM_DECOMPOSED_LABELER_V6,
+    ),
 }
 
 
@@ -1579,6 +1620,17 @@ def write_vote_provenance(
             raise ValueError(f"strict provenance requires ballots for {where}")
         if "provider" not in vote_group or vote_group["provider"].astype(str).duplicated().any():
             raise ValueError(f"strict provenance requires one ballot per provider for {where}")
+        gemini_ballots = vote_group[vote_group["provider"].astype(str) == "gemini"]
+        if not gemini_ballots.empty:
+            if "invocation_route" not in gemini_ballots:
+                raise ValueError(f"Gemini ballot is missing invocation_route for {where}")
+            actual_routes = set(gemini_ballots["invocation_route"].map(_cell_text))
+            allowed_routes = {GEMINI_ROUTE_AGY, GEMINI_ROUTE_OPENROUTER_FLEX}
+            if not actual_routes or "" in actual_routes or not actual_routes <= allowed_routes:
+                raise ValueError(
+                    f"Gemini ballot has invalid invocation_route for {where}: "
+                    f"{sorted(actual_routes)}"
+                )
 
         vote_fields = {
             "evidence_id",

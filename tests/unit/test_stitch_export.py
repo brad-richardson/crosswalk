@@ -49,6 +49,7 @@ VOTES_COLUMNS = [
     "latency_s",
     "timestamp",
     "error",
+    "invocation_route",
     "pack_feedback",
 ]
 
@@ -115,6 +116,11 @@ _V5_VOTERS = [
     ("claude", "claude-opus-4-8"),
     ("codex", "gpt-5.6-terra"),
     ("kimi", "openrouter/moonshotai/kimi-k2.6"),
+    ("muse", "meta/muse-spark-1.1"),
+]
+_V6_VOTERS = [
+    ("claude", "claude-opus-4-8"),
+    ("codex", "gpt-5.6-terra"),
     ("muse", "meta/muse-spark-1.1"),
 ]
 # The 2026-07-07 transport-swap composition (commit 80dbe1f): Gemini via
@@ -1124,6 +1130,37 @@ def test_vote_provenance_strict_mode_links_ballots_consensus_and_menu(tmp_path):
     }
 
 
+def test_vote_provenance_strict_mode_requires_known_gemini_invocation_route(tmp_path):
+    from crosswalk.agent_labeling.stitch_runner import GEMINI_ROUTE_OPENROUTER_FLEX
+
+    batch, _group = _make_linked_evidence_batch(tmp_path, "gemini-route", "g1")
+    votes_path = batch / "votes.csv"
+    votes = pd.read_csv(votes_path)
+    votes["invocation_route"] = votes["invocation_route"].fillna("").astype(object)
+    agy = votes["provider"] == "agy"
+    votes.loc[agy, "provider"] = "gemini"
+    votes.loc[agy, "model"] = "google/gemini-3.5-flash"
+    votes.loc[agy, "invocation_route"] = ""
+    votes.to_csv(votes_path, index=False)
+
+    with pytest.raises(ValueError, match="invocation_route"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes-bad",
+            require_evidence=True,
+        )
+
+    votes.loc[agy, "invocation_route"] = GEMINI_ROUTE_OPENROUTER_FLEX
+    votes.to_csv(votes_path, index=False)
+    assert write_vote_provenance(
+        [batch],
+        DATASET,
+        votes_dir=tmp_path / "votes-good",
+        require_evidence=True,
+    )[:2] == (3, 1)
+
+
 def test_vote_provenance_strict_mode_refuses_regenerated_menu_after_ballot(tmp_path):
     batch, group = _make_linked_evidence_batch(tmp_path, "regenerated", "g1")
     group["alternatives"] = [{"edges": [{"ref_id": "r1", "target_id": "t2"}]}]
@@ -1545,6 +1582,45 @@ def test_standard_v3_v4_v5_batches_pass(tmp_path):
     v5 = tmp_path / "batch_v5"
     _write_votes_csv(v5, _V5_VOTERS)
     assert nonstandard_panel_batches([v3, v4, v5]) == {}
+
+
+def test_v6_candidate_has_own_era_but_remains_nonstandard(tmp_path):
+    """Known stamping and production blessing are separate decisions."""
+    from crosswalk.agent_labeling.stitch_export import (
+        PANEL_VOTERS_V6,
+        batch_panel_era,
+        nonstandard_panel_batches,
+    )
+
+    v6 = tmp_path / "batch_v6_candidate"
+    _write_votes_csv(v6, _V6_VOTERS)
+    assert frozenset(_V6_VOTERS) == PANEL_VOTERS_V6
+    assert batch_panel_era(v6) == "v6"
+    assert nonstandard_panel_batches([v6]) == {"batch_v6_candidate": set(_V6_VOTERS)}
+
+
+def test_explicitly_approved_v6_candidate_export_uses_v6_labeler(tmp_path, labels_dir):
+    from crosswalk.agent_labeling.stitch_export import PANEL_LABELER_V6, batch_panel_era
+
+    batch = make_batch(
+        tmp_path / "v6_candidate",
+        DATASET,
+        [
+            {
+                "group_id": "g_v6",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+                "route_reason": "unanimous",
+            }
+        ],
+        voters=_V6_VOTERS,
+    )
+    assert batch_panel_era(batch) == "v6"
+    report = plan_exports([batch], DATASET, labels_dir)
+    assert [(g.group_id, g.panel_era) for g in report.exported] == [("g_v6", "v6")]
+    assert write_exports(report, DATASET, labels_dir) == 1
+    stored = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    assert list(stored["labeler"]) == [PANEL_LABELER_V6]
 
 
 def test_default_panel_voters_match_runner_default_panel():

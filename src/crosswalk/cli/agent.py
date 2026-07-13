@@ -1404,7 +1404,11 @@ def run_stitch_panel(
         "trio with kimi swapped for muse — superseded by v5), or "
         "'quad-candidate' (alias of the v5 default: the calibration "
         "composition that became v5). Non-blessed compositions are refused by "
-        "stitch-export without --allow-nonstandard-panel.",
+        "stitch-export without --allow-nonstandard-panel. 'v6-candidate' is the "
+        "lean Claude + Codex + Muse trio; it remains nonstandard until its "
+        "calibration gate passes. 'v6-agy-calibration' and "
+        "'v6-flex-calibration' isolate the two Gemini routes on the same logical "
+        "fourth seat for experimental parity testing.",
     ),
     opencode_model: str = typer.Option(
         None,
@@ -1505,6 +1509,9 @@ def run_stitch_panel(
             # run under (e.g. on the v4/meta-candidate CLI path), reverting them to
             # the agentic ``build`` default and its answer-stalling tool loop.
             opencode_agent=p.opencode_agent,
+            # Route order is ballot-changing provenance for the v6 Gemini
+            # seat; preserve it through every CLI model/effort override.
+            routes=p.routes,
         )
 
     try:
@@ -1934,7 +1941,8 @@ def export_stitch_panel(
             "Export even when a batch's votes.csv (provider, model) voter set "
             "matches no blessed panel composition (v5: claude+codex/gpt-5.6-terra"
             "+kimi/Kimi+muse/Muse Spark; v4: that trio without muse; v3: "
-            "claude+codex/gpt-5.5+agy). Labels are "
+            "claude+codex/gpt-5.5+agy). The known v6 candidate also requires "
+            "this flag until calibration promotes it. Labels are "
             "still stamped with the panel_* labelers, so only use this "
             "after an explicit provenance decision. A composition with no known "
             "era additionally needs --stamp-era to say WHICH labeler generation "
@@ -1945,7 +1953,7 @@ def export_stitch_panel(
         None,
         "--stamp-era",
         help=(
-            "Declare the labeler era ('v3', 'v4', or 'v5') for batches whose "
+            "Declare the labeler era ('v3', 'v4', 'v5', or 'v6') for batches whose "
             "composition resolves to NO era. FILL-IN only: batches that "
             "resolve to a blessed or known-historical era always keep their "
             "own era — this flag never re-stamps them. Required when any "
