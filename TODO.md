@@ -102,29 +102,71 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ## Stitch Ground Truth
 
-### HIGH: Stitch Ground Truth Store
+### DONE: Stitch Ground Truth Store and Review Flow
 
 **Priority:** HIGH
-**Status:** Design complete, not yet implemented
+**Status:** Implemented
 
-Pair labels (`labels/human/`) are now recall-biased ("any subsegment = match"), which is good for ML training but means "match" no longer implies "should be in the bridge file." We need a separate ground truth that captures correct *assignments*, not just pair identity.
+Stitching assignment truth is separate from pairwise identity labels and lives
+under `labels/stitching/dataset={id}/data.csv`. The implemented workflow now
+includes current group/candidate generation, evidence packs, multi-agent panel
+voting and consensus, safe automatic export, drift-aware human-review queues,
+reject-all labels, and stitch evaluation in core/mbench. Panel disagreement,
+low confidence, unsafe class combinations, and size-gated cases route to human
+review rather than silently becoming labels.
 
-**Format:** Same pairwise CSV as human labels (`HUMAN_LABEL_COLUMNS`), stored at `labels/stitch/dataset={id}/data.csv`. Key columns: `gers_id`, `target_id`, `label`, plus alignment fractions (`ref_start_pct`, `ref_end_pct`, `target_start_pct`, `target_end_pct`). A `metadata.json` tracks curated scope for partial coverage.
+PR #426 made new judgments provenance-complete and fail-closed: the exact
+upstream candidate universe, displayed option menu, pack inputs, batch source,
+ballots, invocation, and consensus policy must agree before a panel label can
+be exported. Ambiguous historical stitching labels remain quarantined in
+[`research/stitching_deferred_audit.md`](research/stitching_deferred_audit.md).
 
-**Semantic difference from pair labels:**
-- `labels/human/`: "Is this the same road?" (pair identity, recall-biased)
-- `labels/stitch/`: "Should this pair with these fractions be in the bridge?" (correct assignment)
+**Location:** `src/crosswalk/labeling/stitching_store.py`,
+`src/crosswalk/agent_labeling/`, `src/crosswalk/web/routes/stitching.py`,
+`mbench/src/mbench/eval/stitch_metrics.py`
 
-A pair can be `match` in `labels/human/` but absent from `labels/stitch/` (because a better assignment exists).
+### HIGH: Expand Candidate-Backed Stitch Ground Truth
 
-**Implementation path:**
-1. Data layer: stitch truth loading/saving (thin wrapper around `LabelStore` patterns)
-2. Evaluation: `evaluate_stitch()` comparing bridge output vs stitch truth — precision/recall/F1 scoped to curated IDs, alignment fraction error
-3. CLI: `crosswalk stitch eval` or `crosswalk analyze stitch --ground-truth`
-4. Bootstrap: seed from stitch bridge output, curate a neighborhood
-5. Later: graph overlay UI for visual curation
+**Priority:** HIGH
+**Status:** Ready to execute with the existing panel and human fallback; this
+is a data-production/voting task, not new review infrastructure.
 
-**Location:** `src/crosswalk/labeling/`, `src/crosswalk/validation/`, `src/crosswalk/cli/`
+**Immediate goal:** Grow the adjudication-clean corpus to 200–300 diverse
+groups, including at least 20 reliably mapped reject-all groups whose exact
+current candidate universes are preserved. Do not use legacy empty labels or
+the quarantined split/collision cases as clean negative truth.
+
+**Work order:**
+
+1. Regenerate fresh uncapped group sidecars and typed candidate parquets for
+   Bogotá roads, Helsinki, and Singapore footpaths; generate Tunis. Profile and
+   run Nairobi in bounded chunks rather than attempting another unbounded local
+   pass.
+2. Build stratified voting batches emphasizing M:N interchanges, 1:N/N:1
+   corridors, short connectors, complementary spans, low-margin alternatives,
+   parallel siblings, cross-mode/reject-all cases, bridge-backbone edges,
+   datasets without useful names/classes, and optimizer/panel disagreements.
+3. Run the existing flow: `crosswalk agent stitch-batch`, `crosswalk agent
+   stitch-run`, and `crosswalk agent stitch-export`. Refresh the drift-aware
+   stitching queue and adjudicate every panel disagreement, NONE verdict, and
+   other `human_review` route with a human; panel votes are acquisition
+   evidence, not the untouched test set.
+4. Record wave manifests, candidate/evidence hashes, per-stratum counts,
+   consensus/routing outcomes, and human overrides. Stop and regenerate rather
+   than accepting stale or provenance-incomplete packs.
+5. Before model tuning, freeze group-level train/tune/confirmation partitions
+   and at least one dataset-held-out confirmation slice. Keep the deferred
+   collision/split cases as a separate sensitivity analysis.
+6. Compare production optimizer-only, learned resolver-only, and a hybrid
+   learned rank/prune + deterministic-constraint approach. Report edge F1,
+   group exactness, reject-all accuracy, REVIEW coverage, grouped OOF, LODO,
+   and bootstrap intervals; do not promote unless the untouched confirmation
+   set improves without a material candidate-recall regression.
+
+**Supporting detail:**
+[`research/resolver_candidate_persistence_2026-07-11.md`](research/resolver_candidate_persistence_2026-07-11.md),
+[`research/learned_stitcher_round3.md`](research/learned_stitcher_round3.md), and
+[`research/resolver_benchmark.md`](research/resolver_benchmark.md).
 
 ### Medium: Precision/Recall Tuning for Balanced Matching
 
