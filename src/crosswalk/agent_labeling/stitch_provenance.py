@@ -436,6 +436,7 @@ def invocation_signature(
                     "effort": provider.effort,
                     "timeout": provider.timeout,
                     "opencode_agent": provider.opencode_agent,
+                    "routes": list(provider.routes),
                 }
                 for provider in panel
             ],

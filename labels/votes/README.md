@@ -40,6 +40,9 @@ re-exporting the same batches is a no-op.
   stores the corresponding menu (including `NONE`), every displayed edge, and
   the full upstream source-candidate list, so an unselected or pruned edge can
   be interpreted without recovering the ignored batch.
+- Route-aware logical voters also carry `invocation_route`. In the v6 Gemini
+  candidate this distinguishes an `agy` ballot from the OpenRouter AI Studio
+  flex fallback without treating the two transports as separate panel votes.
 - Legacy packs can be archived with `source_artifacts.status` explicitly marked
   unavailable. That preserves what was displayed without claiming a model or
   sidecar identity that the old pack never recorded.

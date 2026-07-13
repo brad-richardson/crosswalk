@@ -13,6 +13,10 @@ distinguishable end-to-end (see :func:`compute_consensus`).
 Votes are audit data and are stored under the batch dir (``votes.csv``),
 deliberately separate from ``labels/``. This module writes NOTHING into
 ``labels/stitching/`` — export policy is decided after the validation gate.
+
+The opt-in ``v6-candidate`` is a lean three-seat Claude/Codex/Muse panel. The
+route-aware Gemini 3.5 Flash voter remains available through explicit agy and
+OpenRouter AI Studio flex calibration panels, but is not a v6 production seat.
 """
 
 from __future__ import annotations
@@ -95,6 +99,11 @@ class ProviderSpec:
     # ZERO tools forces a pure-text vote from the already-attached pack. Ignored
     # by every non-opencode invoker.
     opencode_agent: str | None = None
+    # Ordered physical routes behind a logical voter. Empty for ordinary
+    # single-transport voters. This is invocation provenance (hashed by
+    # invocation_signature), not a second panel seat: a fallback must never
+    # contribute an additional correlated ballot.
+    routes: tuple[str, ...] = ()
 
 
 def resolve_timeout(spec: ProviderSpec, timeout: int | None) -> int:
@@ -219,6 +228,38 @@ OPENCODE_KIMI = ProviderSpec(
 # committed), so the rename rewrites nothing on disk.
 MUSE = ProviderSpec(name="muse", model="meta/muse-spark-1.1", timeout=480, opencode_agent="vote")
 
+# Experimental Gemini calibration voter: one LOGICAL Gemini 3.5 Flash seat with
+# two physical routes. agy uses the user's Google quota first; a provider-scoped failure
+# opens a wave-local circuit and falls back to the paid OpenRouter AI Studio
+# flex endpoint. The route actually used is recorded on the Vote. Keeping the
+# canonical model independent of transport makes the panel composition stable,
+# while ``routes`` makes the ordered policy part of panel_invocation_sha256.
+GEMINI_MODEL = "google/gemini-3.5-flash"
+GEMINI_AGY_MODEL = "Gemini 3.5 Flash (Medium)"
+GEMINI_ROUTE_AGY = "agy/google-ai-studio"
+GEMINI_ROUTE_OPENROUTER_FLEX = "openrouter/google-ai-studio/flex"
+_GEMINI_FLEX_PROVIDER_POLICY = {
+    "only": ["google-ai-studio/flex"],
+    "allow_fallbacks": False,
+}
+GEMINI = ProviderSpec(
+    name="gemini",
+    model=GEMINI_MODEL,
+    opencode_agent="vote",
+    routes=(GEMINI_ROUTE_AGY, GEMINI_ROUTE_OPENROUTER_FLEX),
+)
+GEMINI_AGY_ONLY = ProviderSpec(
+    name="gemini",
+    model=GEMINI_MODEL,
+    routes=(GEMINI_ROUTE_AGY,),
+)
+GEMINI_FLEX_ONLY = ProviderSpec(
+    name="gemini",
+    model=GEMINI_MODEL,
+    opencode_agent="vote",
+    routes=(GEMINI_ROUTE_OPENROUTER_FLEX,),
+)
+
 # Panel v4 — the FORMER production default (2026-07-09 bless, #397; superseded
 # by the v5 quad below on 2026-07-10). Kept as a named panel ("v4") so v4-era
 # waves can be reproduced exactly, like "v3"/"v2":
@@ -266,6 +307,21 @@ PANEL_V4 = [
 # PANEL_VOTERS_V5 in stitch_export moves in lockstep (CI-asserted).
 DEFAULT_PANEL = [*PANEL_V4, MUSE]
 
+# Explicitly opt-in until the calibration gate in
+# research/kimi_openrouter_routing_2026-07-12.md passes. The smoke replays found
+# no auto-accept lift from a fourth Gemini seat, so v6 removes Kimi without a
+# replacement and keeps the inexpensive Muse diversity voter.
+PANEL_V6_CANDIDATE = [
+    ProviderSpec(name="claude", model="claude-opus-4-8", effort="medium"),
+    ProviderSpec(name="codex", model="gpt-5.6-terra", effort="medium"),
+    MUSE,
+]
+# Route experiments deliberately remain four-wide so Gemini's marginal panel
+# effect can be compared against the lean v6 baseline without changing the
+# established Claude/Codex/Muse seats.
+PANEL_V6_AGY_CALIBRATION = [*PANEL_V6_CANDIDATE[:2], GEMINI_AGY_ONLY, MUSE]
+PANEL_V6_FLEX_CALIBRATION = [*PANEL_V6_CANDIDATE[:2], GEMINI_FLEX_ONLY, MUSE]
+
 # Named panel configurations. DEFAULT_PANEL (v5) is the default; historical
 # compositions stay addressable so old batches can be reproduced exactly.
 #
@@ -274,8 +330,8 @@ DEFAULT_PANEL = [*PANEL_V4, MUSE]
 # swaps agy for the opencode/Qwen voter so a wave can proceed 3-wide. NOTE:
 # panel composition is part of export-label provenance — stitch-export keys its
 # gate on (provider, model) pairs, so labels from any non-blessed composition
-# (no-agy, v3-candidate, v4-candidate, meta-candidate) are refused without
-# --allow-nonstandard-panel.
+# (no-agy, v3-candidate, v4-candidate, meta-candidate, and the v6 candidates)
+# are refused without --allow-nonstandard-panel.
 PANELS: dict[str, list[ProviderSpec]] = {
     "default": DEFAULT_PANEL,
     "v5": DEFAULT_PANEL,
@@ -309,6 +365,9 @@ PANELS: dict[str, list[ProviderSpec]] = {
     # calibration waves stay reproducible; SUPERSEDED by "v5" as the name to
     # use going forward.
     "quad-candidate": DEFAULT_PANEL,
+    "v6-candidate": PANEL_V6_CANDIDATE,
+    "v6-agy-calibration": PANEL_V6_AGY_CALIBRATION,
+    "v6-flex-calibration": PANEL_V6_FLEX_CALIBRATION,
 }
 
 
@@ -382,6 +441,24 @@ class Vote:
     option_menu_sha256: str = ""
     chosen_option_id: str = ""
     panel_invocation_sha256: str = ""
+    # Physical transport/endpoint that produced this logical voter's ballot.
+    # Blank for legacy/single-route voters; required for Gemini calibration seats.
+    invocation_route: str = ""
+
+
+@dataclass
+class ProviderRouteState:
+    """Wave-local circuit state for logical voters with fallback routes."""
+
+    unavailable: set[str] = field(default_factory=set)
+
+
+@dataclass(frozen=True)
+class InvocationResult:
+    """Raw provider output plus the physical route that produced it."""
+
+    raw: str
+    route: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -848,6 +925,7 @@ def invoke_opencode(
     timeout: int = 240,
     effort: str = "",
     agent: str = "",
+    config_content: dict | None = None,
 ) -> str:
     """Invoke the opencode CLI (OpenRouter-backed). Reads images by path via -f.
 
@@ -891,6 +969,12 @@ def invoke_opencode(
     # the environment (META_API_KEY, OpenRouter creds, PATH, ...).
     db_dir = tempfile.mkdtemp(prefix="opencode_db_")
     env = {**os.environ, "OPENCODE_DB": str(Path(db_dir) / "opencode.db")}
+    if config_content is not None:
+        # OPENCODE_CONFIG_CONTENT is merged at highest precedence. The
+        # route-aware Gemini caller supplies every ballot-changing key so a
+        # stale project/user config cannot silently reroute a ballot while
+        # provenance still claims AI Studio flex. Unrelated config may remain.
+        env["OPENCODE_CONFIG_CONTENT"] = json.dumps(config_content)
     try:
         result = subprocess.run(
             cmd,
@@ -909,6 +993,134 @@ def invoke_opencode(
     return result.stdout
 
 
+def _gemini_flex_opencode_config(model: str) -> dict:
+    """Complete isolated OpenCode config for the provenanced flex route."""
+    model_key = model.removeprefix("openrouter/")
+    return {
+        "model": f"openrouter/{model_key}",
+        "provider": {
+            "openrouter": {
+                "models": {
+                    model_key: {
+                        "options": {"provider": _GEMINI_FLEX_PROVIDER_POLICY},
+                    }
+                }
+            }
+        },
+        "agent": {
+            "vote": {
+                "description": (
+                    "Tool-less stitch-panel voter: answer ONLY from the attached "
+                    "evidence pack, never call tools."
+                ),
+                "mode": "primary",
+                "tools": {
+                    name: False
+                    for name in (
+                        "write",
+                        "edit",
+                        "bash",
+                        "read",
+                        "glob",
+                        "grep",
+                        "list",
+                        "webfetch",
+                        "task",
+                        "todowrite",
+                        "todoread",
+                        "patch",
+                    )
+                },
+            }
+        },
+    }
+
+
+def invoke_gemini(
+    prompt: str,
+    group_dir: Path,
+    letters: list[str],
+    model: str,
+    timeout: int = 240,
+    effort: str = "",
+    agent: str = "vote",
+    route_state: ProviderRouteState | None = None,
+    routes: tuple[str, ...] = GEMINI.routes,
+) -> InvocationResult:
+    """Invoke one logical Gemini voter with agy -> OpenRouter flex fallback.
+
+    A provider-scoped agy failure opens a wave-local circuit so later groups go
+    straight to OpenRouter instead of repeatedly paying for a known exhausted
+    quota or broken CLI. Context overflow is group-scoped and therefore does
+    not poison agy for later groups, but the current group still gets a chance
+    through OpenRouter's larger context. OpenRouter errors propagate to the
+    runner's existing backed-off retry/halt path; dual-route failure never
+    silently degrades the panel.
+    """
+    if model != GEMINI_MODEL:
+        raise ValueError(f"route-aware Gemini seat is pinned to {GEMINI_MODEL!r}, got {model!r}")
+    supported = {GEMINI_ROUTE_AGY, GEMINI_ROUTE_OPENROUTER_FLEX}
+    if not routes or not set(routes) <= supported or len(routes) != len(set(routes)):
+        raise ValueError(f"invalid Gemini route policy: {routes!r}")
+
+    state = route_state if route_state is not None else ProviderRouteState()
+    last_error: BaseException | None = None
+    for index, route in enumerate(routes):
+        has_fallback = index + 1 < len(routes)
+        if route in state.unavailable:
+            last_error = RuntimeError(f"Gemini route circuit is open: {route}")
+            continue
+
+        if route == GEMINI_ROUTE_AGY:
+            try:
+                raw = invoke_agy(prompt, group_dir, letters, GEMINI_AGY_MODEL, timeout, effort)
+                if not raw or not raw.strip():
+                    raise RuntimeError("empty output (exit 0) — provider likely quota-capped")
+                return InvocationResult(raw=raw, route=route)
+            except GroupScopedProviderError as exc:
+                last_error = exc
+                # Context overflow is tied to this pack; CLI response timeout is a
+                # provider-health signal and opens the circuit.
+                if exc.kind == AbstainReason.TIMEOUT:
+                    state.unavailable.add(route)
+            except subprocess.TimeoutExpired as exc:
+                last_error = exc
+                state.unavailable.add(route)
+            except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
+                last_error = exc
+                state.unavailable.add(route)
+        else:
+            openrouter_model = model if model.startswith("openrouter/") else f"openrouter/{model}"
+            try:
+                raw = invoke_opencode(
+                    prompt,
+                    group_dir,
+                    letters,
+                    openrouter_model,
+                    timeout,
+                    effort,
+                    agent=agent,
+                    config_content=_gemini_flex_opencode_config(openrouter_model),
+                )
+                return InvocationResult(raw=raw, route=route)
+            except (
+                GroupScopedProviderError,
+                subprocess.SubprocessError,
+                OSError,
+                RuntimeError,
+            ) as exc:
+                last_error = exc
+
+        if has_fallback:
+            logger.warning(
+                f"gemini route {route} failed ({last_error}); falling back to {routes[index + 1]}"
+            )
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"all Gemini routes unavailable: {routes!r}")
+
+
 _INVOKERS = {
     "claude": invoke_claude,
     "codex": invoke_codex,
@@ -925,6 +1137,7 @@ _INVOKERS = {
     "opencode": invoke_opencode,
     "kimi": invoke_opencode,
     "muse": invoke_opencode,
+    "gemini": invoke_gemini,
 }
 
 
@@ -1006,6 +1219,7 @@ def run_provider_on_group(
     retries: int = 1,
     collect_feedback: bool = False,
     invocation_budget_s: float = 300.0,
+    route_state: ProviderRouteState | None = None,
 ) -> Vote:
     """Run one provider on one group; abstain on bad output, hard-fail if down.
 
@@ -1046,6 +1260,7 @@ def run_provider_on_group(
             retries,
             collect_feedback,
             invocation_budget_s=invocation_budget_s,
+            route_state=route_state,
         )
     finally:
         if tmp_ctx is not None:
@@ -1065,6 +1280,7 @@ def _attempt_provider(
     retries,
     collect_feedback=False,
     invocation_budget_s: float = 300.0,
+    route_state: ProviderRouteState | None = None,
 ) -> Vote:
     """Run one provider, distinguishing two failure classes with opposite fates:
 
@@ -1101,33 +1317,37 @@ def _attempt_provider(
             raw=raw[:2000],
             error=error,
             abstain_reason=reason,
+            invocation_route=last_route,
         )
 
     last_parse_err = ""
     last_raw = ""
+    last_route = ""
     parse_attempts = 0
     deadline = time.monotonic() + invocation_budget_s
     backoff = 5.0
-    # invoke_opencode is the only invoker that accepts an ``agent`` (the tool-less
-    # ``vote`` agent both Kimi and Muse run under); pass it only when set so the
-    # other invokers keep their 6-arg signature and the residual Qwen call stays
-    # byte-identical. Key on the RESOLVED INVOKER, not ``provider.name``: Kimi
-    # ("kimi") and Muse ("muse") both dispatch through invoke_opencode under
-    # distinct names, so a name-based check (e.g. ``name == "opencode"``) would
-    # miss them and silently strip the ``vote`` agent, burning the turn on
-    # auto-rejected tool calls. Any spec whose invoker is invoke_opencode and that
-    # sets ``opencode_agent`` gets it threaded through.
-    extra_kwargs = (
-        {"agent": provider.opencode_agent}
-        if invoker is invoke_opencode and provider.opencode_agent
-        else {}
-    )
+    # The OpenCode invoker and route-aware Gemini wrapper accept an ``agent``.
+    # Pass it only to those resolved callables so other invokers retain their
+    # historical six-argument signature. Key on the callable, not provider name:
+    # Kimi and Muse use distinct logical names on the same OpenCode transport.
+    extra_kwargs = {}
+    if invoker in (invoke_opencode, invoke_gemini) and provider.opencode_agent:
+        extra_kwargs["agent"] = provider.opencode_agent
+    if invoker is invoke_gemini:
+        extra_kwargs["route_state"] = route_state
+        extra_kwargs["routes"] = provider.routes
     while True:
         start = time.monotonic()
         try:
-            raw = invoker(
+            result = invoker(
                 prompt, group_dir, letters, provider.model, timeout, provider.effort, **extra_kwargs
             )
+            if isinstance(result, InvocationResult):
+                raw = result.raw
+                last_route = result.route
+            else:
+                raw = result
+                last_route = ""
         except GroupScopedProviderError as e:
             # Deterministic for this (group, provider): same prompt, same fate.
             # Abstain loudly and let the run continue. The exception's ``kind``
@@ -1218,6 +1438,7 @@ def _attempt_provider(
                 timestamp=datetime.now(UTC).isoformat(),
                 raw=raw[:2000],
                 pack_feedback=_extract_pack_feedback(raw) if collect_feedback else "",
+                invocation_route=last_route,
             )
         except ValueError as e:
             parse_attempts += 1
@@ -1238,6 +1459,7 @@ def run_panel_on_group(
     timeout: int | None = None,
     collect_feedback: bool = False,
     invocation_budget_s: float = 300.0,
+    route_state: ProviderRouteState | None = None,
 ) -> list[Vote]:
     """Run the full panel on one group in parallel (one thread per provider).
 
@@ -1266,6 +1488,7 @@ def run_panel_on_group(
             timeout,
             collect_feedback=collect_feedback,
             invocation_budget_s=invocation_budget_s,
+            route_state=route_state,
         )
 
     with ThreadPoolExecutor(max_workers=len(panel)) as ex:
@@ -1594,6 +1817,7 @@ VOTES_COLUMNS = [
     "latency_s",
     "timestamp",
     "error",
+    "invocation_route",
     "pack_feedback",
     "evidence_id",
     "evidence_pack_sha256",
@@ -1639,6 +1863,7 @@ def _vote_row(v: Vote) -> dict:
         "latency_s": v.latency_s,
         "timestamp": v.timestamp,
         "error": v.error,
+        "invocation_route": v.invocation_route,
         "pack_feedback": v.pack_feedback,
         "evidence_id": v.evidence_id,
         "evidence_pack_sha256": v.evidence_pack_sha256,
@@ -1787,6 +2012,24 @@ def run_batch(
                 and actual_voters == expected_voters
                 and len(cons_group) == 1
             )
+            gemini_rows = (
+                vote_group[vote_group["provider"].astype(str) == "gemini"]
+                if "provider" in vote_group
+                else vote_group.iloc[0:0]
+            )
+            if not gemini_rows.empty:
+                gemini_spec = next((p for p in panel if p.name == "gemini"), None)
+                allowed_routes = set(gemini_spec.routes) if gemini_spec is not None else set()
+                recorded_routes = set(
+                    gemini_rows["invocation_route"].fillna("").astype(str)
+                ) if "invocation_route" in gemini_rows else set()
+                complete = (
+                    complete
+                    and "invocation_route" in gemini_rows
+                    and bool(allowed_routes)
+                    and recorded_routes <= allowed_routes
+                    and "" not in recorded_routes
+                )
 
             def _all_equal(frame: pd.DataFrame, column: str, expected: str) -> bool:
                 return (
@@ -1887,6 +2130,7 @@ def run_batch(
                         confidence=float(row["confidence"]),
                         reasoning=_text(row.get("reasoning")),
                         edge_set=option_edges[_text(row["choice"])],
+                        invocation_route=_text(row.get("invocation_route")),
                     )
                     for row in vote_group.to_dict("records")
                 ]
@@ -1964,6 +2208,11 @@ def run_batch(
     # several in a row say nothing about the provider. Any successful vote (or a
     # non-timeout abstain) resets the count.
     consecutive_timeouts: dict[str, int] = {}
+    # One state object spans the wave, so a quota-capped/broken primary route
+    # is tried once and then bypassed for every later group. It is deliberately
+    # process-local: a fresh --resume run probes the primary route again in case
+    # quota or infrastructure recovered.
+    route_state = ProviderRouteState()
     for i, gdir in enumerate(pending):
         gid = gdir.name
         logger.info(f"[{i + 1}/{len(pending)}] panel on group {gid}")
@@ -1974,6 +2223,7 @@ def run_batch(
             timeout,
             collect_feedback=collect_feedback,
             invocation_budget_s=invocation_budget_s,
+            route_state=route_state,
         )
         manifest = evidence_by_id[gid]
         evidence = manifest["evidence"]
