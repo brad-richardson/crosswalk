@@ -1041,7 +1041,7 @@ async def stitching_select(
 
             # Guard against silently recording an empty (label-corrupting)
             # selection. Distinguish intent by the active-pill fields:
-            #   - Both empty  -> deliberate reject-all; store [] normally.
+            #   - Both empty -> reject-all; require explicit confirmation below.
             #   - Non-empty but zero candidate edges matched -> inconsistent
             #     submission (e.g. a client-side regression that drops the pill
             #     IDs, or active pills that share no edge). Refuse rather than
@@ -1049,9 +1049,7 @@ async def stitching_select(
             #     The union is counted here too, so a pair whose only edge is
             #     rejected is treated as a real match, not an inconsistency.
             #
-            # Checked BEFORE sliver exclusion so an all-sliver selection is not
-            # misread as an inconsistent submit — it is a legitimate (if empty)
-            # result once the slivers are dropped.
+            # This also runs before any display-only sliver handling.
             if candidate_edges and not matched and (ref_set or target_set):
                 logger.warning(
                     "Rejected inconsistent stitching submit for group %s: "
@@ -1062,26 +1060,19 @@ async def stitching_select(
                 )
                 return HTMLResponse("Inconsistent selection", status_code=400)
 
-            # De-anchored empty-submit guard: de-anchored mode now starts fully
-            # selected, so an empty submit means the reviewer cleared every
-            # pill (e.g. via the None bulk buttons). That is far stronger
-            # intent than the old blank-slate default, but a reject-all label
-            # still lands in the exact eval slice this mode exists to keep
-            # clean, so keep requiring the explicit confirmation flag (the
-            # client shows a confirm dialog and sets it) before storing it.
+            # Reject-all is an exact pair-semantics truth claim in every review
+            # mode. Require the explicit confirmation flag server-side for any
+            # empty submission; routing/UI state must never be enough to mint it.
             if (
-                deanchored
-                and not ref_set
+                not ref_set
                 and not target_set
                 and confirm_reject_all.strip().lower() not in {"true", "1", "on", "yes"}
             ):
                 logger.warning(
-                    "Refused unconfirmed empty de-anchored submit for group %s",
+                    "Refused unconfirmed reject-all submit for group %s",
                     group_id,
                 )
-                return HTMLResponse(
-                    "Empty de-anchored selection requires confirmation", status_code=400
-                )
+                return HTMLResponse("Reject-all selection requires confirmation", status_code=400)
 
             if ref_set or target_set:
                 # SET label: store membership only. selected_edges stays empty;

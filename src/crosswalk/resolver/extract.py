@@ -38,8 +38,8 @@ Data reality (verified 2026-07, see the prototype writeup + the round-3 design
   to current sidecar groups by edge overlap (group_id churns on any component
   shift) via ``stitch_eval.recover_labeled_groups`` — reused here verbatim.
 * **Empty-set (reject-all) labels** — pair-semantics rows with
-  ``selected_edges == []`` (the design §2.4a gap, exported since the
-  unanimous-NONE export landed) — carry no edges to overlap on, so they map by
+  ``selected_edges == []`` (human-confirmed now; historical panel-NONE rows
+  remain readable) — carry no edges to overlap on, so they map by
   verbatim ``group_id`` only (same rule as ``stitch_eval.
   recover_empty_reject_all``). On the candidate-graph path they emit every
   (rule-5-filtered, non-``selected_elsewhere``) candidate edge with ``keep=0``

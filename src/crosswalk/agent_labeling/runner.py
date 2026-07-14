@@ -14,6 +14,12 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 
+from .matching_rubric import (
+    CANONICAL_RULES_DOC,
+    MATCH_IDENTITY_RUBRIC,
+    PAIR_LABEL_RUBRIC,
+)
+
 # ---------------------------------------------------------------------------
 # Variant configuration
 # ---------------------------------------------------------------------------
@@ -233,78 +239,22 @@ def prepare_batch_prompt(
     variant_filename = vcfg.get("filename", f"{variant}.png")
     img_desc = IMAGE_DESCRIPTIONS.get(variant, f"{variant_filename}: image variant")
 
-    # Section 1: Task description
-    prompt = """You are labeling transportation network segment matches in batch mode.
+    # Sections 1-3: canonical task + output contract.  The rubric text is shared
+    # with the group option-picker and exact-matched to the canonical doc in CI.
+    prompt = f"""You are labeling transportation network segment matches in batch mode.
 Segments may be roads, sidewalks, bike lanes, trails, or other features in road/pedestrian/cycling networks.
 
-TASK: For each candidate pair, determine whether the blue (reference) and red (target) segments represent the SAME PHYSICAL TRAVELED WAY with the SAME NETWORK ROLE. A match requires the same role in the network, not just overlapping geometry.
+TASK: For each candidate pair, determine whether the blue (reference) and red (target) segments satisfy the canonical match-identity contract below.
+Canonical source: {CANONICAL_RULES_DOC}
 
-A "match" means: the aligned overlapping portions represent the same physical traveled way (same road in the real world), even if segmentation, naming, or classification differ.
+{MATCH_IDENTITY_RUBRIC}
 
-A "no_match" means: not the correct correspondence — either a different physical feature, or the correct corresponding feature is a different candidate.
+{PAIR_LABEL_RUBRIC}
 
-"""
-
-    # Section 2: Label definitions
-    prompt += """LABELS:
-- match: Same physical traveled way with same network role and spatial overlap (small gaps from GPS noise, digitization offset, or simplification do not disqualify)
-- no_match: Different features, different network roles, or segments with no spatial overlap (not even accounting for GPS noise or digitization offset)
-- unsure: Ambiguous cases where reasonable people would disagree
-
-NETWORK ROLES (constrains what can match):
-- ALONG: Longitudinal movement (road mainlines, bike lanes, sidewalks, intersection-internal slices). Matches only ALONG.
-- ACROSS: Crossing movement (crosswalks, rail crossings). Never matches ALONG or TURN.
-- TURN: Hierarchy/facility transitions (ramps, slip roads, curb ramps — not regular turns). Matches only same role+intent.
-
-"""
-
-    # Section 3: Critical rules
-    prompt += """CRITICAL RULES:
-1. GEOMETRY FIRST: Always start with the image. If lines clearly overlap/follow the same path, it's likely a match. If they don't visually overlap, it's likely no_match regardless of names or metadata.
-2. CLASS LABELS ARE WEAK EVIDENCE: Different classes (footway vs tertiary, residential vs secondary) don't preclude match - datasets classify the same road differently.
-3. LENGTH DIFFERENCES OK: One segment can be longer (subsegment matches count as match).
-4. PARALLEL BUT SEPARATE = NO MATCH: Lines that run SIDE BY SIDE (visually offset) are different features even if they share a street name.
-5. SMALL OFFSET OK: 3-5m offset from GPS/digitization error is acceptable IF lines follow same path.
-6. NAMES ARE SUPPORTING EVIDENCE ONLY: Same name does NOT guarantee match. Two segments can share a street name but be different spans of that street or different features alongside it. Different names don't prevent match either.
-7. ML FEATURES ARE CONTEXT ONLY: The metadata includes computed ML features (hausdorff_distance, buffer_iou, etc.) for context, but do not rely on them as the primary basis for your decision. Many of these candidates are subjective cases where the features may not be well-tuned for the dataset. Focus on the image and primary attributes (geometry, names, classes) over raw feature values.
-
-DATASET REPRESENTATION DIFFERENCES:
-- The reference dataset (Overture) often uses a single centerline for divided roads, while local datasets may have separate segments for each carriageway (split carriageways).
-- A centerline matched to one carriageway of a split road = match (same physical road, different representation).
-- Opposite carriageways of a divided road matched to each other = no_match (physically separate lanes; each should match to its own reference segment).
-
-BIKE LANE DECISION GUIDE:
-- Painted bike lane / sharrows / flexpost-separated lane (same pavement surface) = same feature as road → match to road, no_match to cycleway
-- Raised/curbed bike lane or separated cycle track (different surface/grade) = separate feature → no_match to road, match to cycleway
-- If facility type is unclear from data and image, prefer unsure over guessing
-
-ML FEATURE REFERENCE (rough thresholds for context):
-- buffer_iou: >0.7 suggests match, <0.3 suggests no_match
-- overlap_ratio: >0.8 suggests match, <0.3 suggests no_match
-- hausdorff_distance: <15m suggests match, >50m suggests no_match
-- heading_delta: <10 degrees suggests match, >45 degrees suggests no_match
-These are guidelines only - always defer to the image over raw numbers.
-
-INTERSECTION RULE:
-- Overlap only at/inside an intersection is NOT sufficient for a match when roles differ (e.g., crosswalk overlapping a road).
-- For same-role overlaps near intersections: if any subsegment represents the same physical traveled way, it is a match regardless of length. Pair matching is recall-biased — over-matching is acceptable.
-
-NO_MATCH EXAMPLES:
-- Two lines running parallel but visually offset (separate infrastructure)
-- Northbound vs southbound lanes of divided highway
-- Road centerline vs adjacent sidewalk (different surface and grade - raised curb separates them)
-- Main road vs adjacent service road/alley
-- Perpendicular/intersecting segments
-- Segments that share an intersection endpoint but continue in different directions
-- Road mainline vs crosswalk at intersection (ALONG vs ACROSS)
-- Road mainline vs turn lane/ramp (ALONG vs TURN)
-
-MATCH EXAMPLES:
-- Lines that overlap on the same path (even with different class labels)
-- Same road with 3-5m digitization offset along its length
-- Segments of different lengths that share any overlapping portion
-- Centerline matched to one carriageway of a divided road
-- Same feature with different names or abbreviations
+CRITICAL RULES:
+1. Start with the image and aligned geometry, then use direction, topology, names, classes, and metadata to determine physical identity and role.
+2. Treat names, class tags, and ML features as supporting evidence only. Dataset schemas can describe the same facility differently.
+3. If the facility type, separation, direction, or network role is not visible or inferable, use unsure rather than inventing an answer.
 
 """
 
@@ -318,9 +268,9 @@ MATCH EXAMPLES:
     # Section 5: Few-shot examples
     if few_shot_examples:
         prompt += """---
-FEW-SHOT EXAMPLES:
+ILLUSTRATIVE RECORDED EXAMPLES:
 
-Below are labeled examples for you to learn from. For each example, read its metadata.yaml and view its image to understand the labeling pattern.
+These recorded labels are useful examples but may contain human error. Apply the canonical rubric independently; when an example conflicts with the rubric or current evidence, the rubric wins. For each example, read its metadata.yaml and view its image.
 
 """
         for i, ex in enumerate(few_shot_examples, 1):
@@ -329,8 +279,8 @@ Directory: examples/{ex["ref_id"]}__{ex["target_id"]}/
 Image: examples/{ex["ref_id"]}__{ex["target_id"]}/{variant_filename}
 Read the metadata.yaml in that directory, then view the image above.
 
-Correct label for this example:
-{ex["ref_id"]},{ex["target_id"]},{ex["label"]},1.0,ground truth example
+Recorded label for this example:
+{ex["ref_id"]},{ex["target_id"]},{ex["label"]},1.0,illustrative recorded label
 
 """
 

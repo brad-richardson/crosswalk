@@ -435,9 +435,11 @@ valid (non-abstaining) votes agree and at least 3 are valid**
 which a single abstention (e.g. a voter timeout) blocked an otherwise-clean
 3-of-4 agreement. The two accept tiers stay distinguishable end-to-end: a full
 4/4 accept is `unanimous` (labeler `panel_unanimous_v5`), a 3-of-4 accept over
-an abstention is `quorum` (route reason `quorum`; labeler `panel_quorum_v5`;
-reject-all analog `quorum_none` -> `panel_quorum_none_v5`; a recomposed
-decomposed group with ANY quorum-accepted sub-verdict mints
+an abstention is `quorum` (route reason `quorum`; labeler `panel_quorum_v5`).
+The analogous `quorum_none` remains human review because NONE can also mean no
+exact offered option or insufficient evidence; only a human-confirmed empty
+selection becomes reject-all truth. A recomposed decomposed group with ANY
+quorum-accepted sub-verdict mints
 `panel_quorum_decomposed_v5`). Quorum forgives **abstention only, never
 disagreement** — a dissenting valid vote still routes to human review — and the
 size / class-consistency / low-confidence gates all still apply on top,

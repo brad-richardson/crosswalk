@@ -446,8 +446,8 @@ def test_consensus_quad_quorum_none_routes_to_human():
 
     A NONE verdict never auto-accepts on either tier (same as unanimous-NONE);
     the distinct ``quorum_none`` reason keeps the abstention visible so the
-    export path can mint the quorum-NONE reject-all labeler (panel_quorum_none_v5),
-    never the unanimous one.
+    human-review queue can distinguish it without treating NONE as reject-all
+    truth.
     """
     votes = [
         _vote("claude", "NONE"),

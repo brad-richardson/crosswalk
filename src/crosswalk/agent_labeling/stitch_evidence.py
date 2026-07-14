@@ -33,7 +33,7 @@ from shapely.geometry import LineString, MultiLineString
 from shapely.geometry import shape as shape_from_geojson
 from shapely.ops import nearest_points
 
-from ..config import settings
+from ..config import SLIVER_ABS_OVERLAP_M, SLIVER_SPAN_THRESHOLD, settings
 from ..matching.sliver import (
     edge_overlap_m,
     edge_sliver_tag,
@@ -52,6 +52,11 @@ from .image_renderer import (
     _geo_to_pixel,
     _make_bbox_square,
     _to_linestring,
+)
+from .matching_rubric import (
+    CANONICAL_RULES_DOC,
+    MATCH_IDENTITY_RUBRIC,
+    STITCH_ASSIGNMENT_RUBRIC,
 )
 from .stitch_provenance import build_evidence_record, safe_group_id, write_evidence_manifest
 
@@ -697,10 +702,10 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines: list[str] = []
     lines.append(
         "You are curating ground truth for a road-network conflation optimizer.\n"
-        "A 'stitching group' is a cluster of candidate matches between REFERENCE road\n"
-        "segments (blue, labeled R1, R2, ...) and TARGET road segments (red, labeled\n"
-        "T1, T2, ...). Your job: pick the ONE assignment option whose highlighted edges\n"
-        "best represent the true same-physical-road correspondences in the group."
+        "A 'stitching group' is a cluster of candidate matches between REFERENCE\n"
+        "transportation segments (blue, labeled R1, R2, ...) and TARGET segments (red,\n"
+        "labeled T1, T2, ...). Your job: determine the exact final accepted edge set, then\n"
+        "pick the ONE assignment option that contains all and only those edges."
     )
     lines.append("")
     lines.append("HOW TO READ THE IMAGES:")
@@ -711,7 +716,9 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     )
     lines.append("- One image PER OPTION below. In an option image, the segments included in")
     lines.append("  that option are drawn bright/solid; excluded group segments are faded/dashed.")
-    lines.append("  Pick the option whose bright segments overlap/follow the SAME physical roads.")
+    lines.append(
+        "  Use these images to judge the exact edge set; do not choose the closest picture."
+    )
     lines.append("- Some edges carry a 'junction zoom' image: a close-up centred on where")
     lines.append("  those two segments meet, so you can see the actual overlap at the junction.")
     lines.append("- Every candidate edge is described ONCE in the EDGES legend below, each given a")
@@ -721,21 +728,27 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("  edges whose ids it lists.)")
     lines.append("")
     lines.append("GUIDANCE:")
-    lines.append("- A correct edge R#->T# means the reference and target segment are the same")
-    lines.append("  physical traveled way (overlapping geometry, same path). Small offsets ok.")
-    lines.append("- Parallel-but-separate roads, opposite carriageways, and perpendicular")
-    lines.append("  crossings are NOT correct edges even if they touch at a junction.")
-    lines.append("- An edge tagged SLIVER below is a junction artifact: the two segments share")
-    lines.append("  almost no physical overlap (a road end merely clips another at a corner).")
-    lines.append("  Prefer an option that excludes it; it is almost never a correct edge.")
+    lines.append(f"Canonical source: {CANONICAL_RULES_DOC}")
+    lines.append("")
+    lines.append(MATCH_IDENTITY_RUBRIC)
+    lines.append("")
+    lines.append(STITCH_ASSIGNMENT_RUBRIC)
+    lines.append("")
+    lines.append("EVIDENCE-SPECIFIC NOTES:")
+    lines.append("- A SLIVER tag is a geometry-derived warning, not an identity verdict. It means")
+    lines.append(
+        "  both aligned spans cover less than "
+        f"{SLIVER_SPAN_THRESHOLD:.0%} of their segments and the absolute overlap is under "
+        f"{SLIVER_ABS_OVERLAP_M:g}m."
+    )
+    lines.append("  Exclude an endpoint clip or different continuation, but do not reject a")
+    lines.append("  same-direction, same-role, corridor-supported edge solely because of the tag.")
     lines.append("- 'overlap~Xm' on an edge is the absolute length the two segments physically")
-    lines.append("  share (aligned span x segment length). It is the same measurement the SLIVER")
-    lines.append("  rule uses; a small overlap means the segments only touch near a junction.")
+    lines.append("  share (aligned span x segment length). Small overlap is evidence to inspect,")
+    lines.append("  not proof that the segments merely touch or that the edge is wrong.")
     lines.append("- An edge tagged BORDERLINE covers only a small fraction of BOTH its segments")
-    lines.append("  — near the SLIVER threshold but not below it. It is the contested")
-    lines.append("  junction-kiss case: it may be a real short connector OR an artifact. There is")
-    lines.append("  no default — judge it from the geometry, the junction zoom, the overlap~Xm")
-    lines.append("  value, and the structural context.")
+    lines.append("  but does not meet the strict SLIVER rule. BORDERLINE is display-only and")
+    lines.append("  deliberately neutral; judge identity and resolution from the full context.")
     lines.append("- Edges may carry neutral structural context from the road graph (these are")
     lines.append("  facts, not verdicts, and favor neither including nor excluding an edge):")
     lines.append("  'deg R#/T#' is how many road segments meet at that edge's ref/target endpoint")
@@ -744,18 +757,10 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("  R#/T#' names the corridor (continuous through-road) each side belongs to, so")
     lines.append("  two segments sharing a corridor tend to be one physical through-route. Use")
     lines.append("  these to reason about continuation vs junction-kiss, not as a rule by itself.")
-    lines.append("- A pedestrian-class segment (footway/sidewalk/path) is a DIFFERENT physical")
-    lines.append("  feature than a road-class segment (residential/primary/service/...), even")
-    lines.append("  when it runs right alongside one. Never match a footway/sidewalk/path to a")
-    lines.append("  road class just because they are parallel or nearby. If an option's only")
-    lines.append("  advantage is that it adds such a cross-mode edge, prefer the option without")
-    lines.append("  it, or NONE.")
     lines.append("- The optimizer's own proposed option is labeled below; it is often but not")
     lines.append(
         "  always correct. Judge from the geometry, not from which one is the optimizer's."
     )
-    lines.append("- Choose NONE only if NO option is a good representation (e.g. the correct")
-    lines.append("  assignment would need edges no option contains, or all options are wrong).")
     lines.append("")
     lines.append(
         f"GROUP {metadata['group_id']}  (match_type={metadata['match_type']}, "
@@ -800,11 +805,11 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
                 extra.append(f"overlap~{e['overlap_m']}m")
             etag = e.get("tag")
             if etag == "SLIVER":
-                extra.append("SLIVER(junction artifact, ~0 overlap)")
+                extra.append("SLIVER(low-span/low-absolute-overlap warning)")
             elif etag == "BORDERLINE":
-                # Fraction-based band: don't claim "small overlap" — on long
-                # segments the absolute overlap~Xm printed alongside can be large.
-                extra.append("BORDERLINE(junction-kiss, low span fraction)")
+                # Fraction-based display band: on long segments the absolute
+                # overlap~Xm printed alongside can still be large.
+                extra.append("BORDERLINE(low span fraction, display-only)")
             struct_s = _edge_struct_str(e)
             if struct_s:
                 extra.append(f"[{struct_s}]")

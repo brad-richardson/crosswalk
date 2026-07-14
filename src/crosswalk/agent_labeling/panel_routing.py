@@ -25,8 +25,8 @@ Size-gate overlay: the export path has a hard backstop
 (``settings.stitch_export_backstop_max_edges``) — no verdict on a group whose
 candidate-edge count exceeds it can ever mint a label
 (:func:`stitch_export._gate_group` enforces the backstop on the candidate
-count on BOTH the structural path and the legacy no-structure-fields fallback;
-:func:`stitch_export._gate_empty_group` likewise for reject-alls). An ``auto_accept``
+count on BOTH the structural path and the legacy no-structure-fields fallback).
+An ``auto_accept``
 verdict on such a group would therefore vanish: not in the human queue (it did
 not route to ``human_review``) and blocked at export. :func:`compute_consensus
 <stitch_runner.compute_consensus>` now demotes those verdicts at vote time, and
@@ -50,6 +50,13 @@ size-gated verdict, a low-confidence one is NOT blocked at export, so without th
 overlay it would silently auto-export on the next ``stitch-export``). The
 low-confidence overlay runs AFTER the size gate — ``size_gated`` wins when both
 apply.
+
+Selected-sliver overlay: ``SLIVER`` is warning evidence rather than a categorical
+no-match, so the panel may legitimately select one. The exporter nevertheless
+holds any exact selection containing a tagged sliver for human confirmation.
+Historical and current ``auto_accept`` rows must receive the same read-time
+demotion here or they would be blocked from export without ever entering the
+review queue. The selected edge is preserved exactly; only routing changes.
 
 Quorum-floor overlay: :func:`compute_consensus <stitch_runner.compute_consensus>`
 only mints ``auto_accept`` at ``n_valid >= 3``; a historical/hand-edited/corrupt
@@ -86,6 +93,7 @@ import yaml
 from ..config import settings
 from ..filenames import PROJECT_ROOT
 from ..matching.group_decomposition import parent_group_id_of
+from ..matching.sliver import annotate_group_sliver_flags
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +147,8 @@ REASON_UNANIMOUS_NONE = "unanimous_none"
 #: never a dissenting valid vote.
 REASON_QUORUM = "quorum"
 #: All valid votes were NONE at quorum with >=1 abstention — the quorum analog
-#: of ``unanimous_none`` (routes to ``human_review``; exportable as a
-#: reject-all empty-set label under the quorum-NONE labeler).
+#: of ``unanimous_none``. It remains ``human_review``; panel NONE never mints
+#: reject-all truth without an explicit human confirmation.
 REASON_QUORUM_NONE = "quorum_none"
 #: Majority with dissenting valid vote(s); suffix is the minority summary,
 #: e.g. ``dissent:codex=B`` or ``dissent:codex=F,agy=A``.
@@ -174,6 +182,10 @@ REASON_SIZE_GATED = "size_gated"
 #: minimum is effectively the calibrated voter's self-report — a low value there
 #: flagged wrong unanimous verdicts the panel review found.
 REASON_LOW_CONFIDENCE = "low_confidence"
+#: Export exactness gate: the accepted option contains a geometry-tagged sliver.
+#: The edge is not deleted or treated as a no-match; the exact selection is held
+#: for a human so an export block cannot create a routing void.
+REASON_CONTAINS_SLIVER = "contains_sliver"
 #: A decomposed group (#367 Mode B) at least one of whose sub-problems the panel
 #: routed to ``human_review``. The sub-problem verdicts key on sub-problem ids
 #: (``{parent}__p...``) that are not sidecar groups, so the PARENT is surfaced to
@@ -333,6 +345,9 @@ def humanize_route_reason(code: str) -> str:
         # Low-confidence gate: stamped by compute_consensus (and the read-time
         # overlay) when the calibrated voter's confidence was too low.
         REASON_LOW_CONFIDENCE: "low panel confidence — below the auto-accept floor",
+        REASON_CONTAINS_SLIVER: (
+            "accepted set contains low-overlap warning evidence — confirm the exact set"
+        ),
         # Decomposition (#367 Mode B): a sub-problem the panel could not
         # auto-accept blocks the whole-group label — review the group as a whole.
         REASON_SUBPROBLEM_FAILED: (
@@ -448,6 +463,59 @@ def _batch_min_confidences(batch_dir: Path) -> dict[str, float | None]:
     return out
 
 
+def _batch_groups(batch_dir: Path) -> dict[str, Mapping]:
+    """Return well-formed ``batch.json`` groups keyed by nonblank group id."""
+    try:
+        payload = json.loads((batch_dir / "batch.json").read_text())
+    except (OSError, UnicodeDecodeError, ValueError):
+        return {}
+    if not isinstance(payload, Mapping):
+        return {}
+    groups: dict[str, Mapping] = {}
+    for group in payload.get("groups", []):
+        if not isinstance(group, Mapping):
+            continue
+        gid = str(group.get("group_id", "") or "").strip()
+        if gid:
+            groups[gid] = group
+    return groups
+
+
+def _selected_edge_pairs(value) -> set[tuple[str, str]]:
+    """Parse a consensus ``edge_set`` cell into exact id pairs, fail closed."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return set()
+    if not isinstance(value, list):
+        return set()
+    pairs: set[tuple[str, str]] = set()
+    for edge in value:
+        if isinstance(edge, (list, tuple)) and len(edge) == 2:
+            ref_id, target_id = edge
+        elif isinstance(edge, Mapping):
+            ref_id = edge.get("ref_id", edge.get("ref"))
+            target_id = edge.get("target_id", edge.get("target"))
+        else:
+            continue
+        if ref_id is not None and target_id is not None:
+            pairs.add((str(ref_id), str(target_id)))
+    return pairs
+
+
+def _selection_contains_sliver(group: Mapping, edge_set) -> bool:
+    """Whether an exact consensus selection includes a tagged sliver edge."""
+    selected = _selected_edge_pairs(edge_set)
+    if not selected:
+        return False
+    annotated, _ = annotate_group_sliver_flags(dict(group))
+    return any(
+        edge.get("is_sliver") and (str(edge.get("ref_id")), str(edge.get("target_id"))) in selected
+        for edge in annotated
+    )
+
+
 def _dataset_batch_dirs(dataset: str, batches_root: Path) -> list[Path]:
     """Batch dirs belonging to ``dataset``, oldest consensus.csv first.
 
@@ -501,6 +569,12 @@ def latest_panel_consensus(
     never re-surfaces a minted label. A blank/NaN confidence on a valid vote
     counts as below the floor; a group with no confidence evidence is left
     untouched.
+
+    Selected-sliver overlay: an ``auto_accept`` whose exact edge set includes a
+    geometry-tagged sliver is returned as ``human_review`` /
+    ``route_reason="contains_sliver"``. This mirrors the export hold without
+    deleting the selected edge, ensuring the group reaches a human rather than
+    disappearing between the export and review paths.
     """
     rows: dict[str, dict] = {}
     origins: dict[str, Path] = {}
@@ -516,6 +590,7 @@ def latest_panel_consensus(
     backstop = settings.stitch_export_backstop_max_edges
     conf_floor = settings.stitch_min_voter_confidence
     min_conf_by_batch: dict[Path, dict[str, float | None]] = {}
+    groups_by_batch: dict[Path, dict[str, Mapping]] = {}
     for gid, row in rows.items():
         if str(row.get("routing", "") or "").strip() != ROUTING_AUTO_ACCEPT:
             continue  # already human-routed; keep the (more specific) reason
@@ -545,6 +620,15 @@ def latest_panel_consensus(
             if min_conf is not None and (math.isnan(min_conf) or min_conf < conf_floor):
                 row["routing"] = ROUTING_HUMAN_REVIEW
                 row["route_reason"] = REASON_LOW_CONFIDENCE
+                continue
+        # Exactness-preserving sliver gate. The exporter holds the same row;
+        # demoting it here is what guarantees the hold has a human destination.
+        if batch_dir not in groups_by_batch:
+            groups_by_batch[batch_dir] = _batch_groups(batch_dir)
+        group = groups_by_batch[batch_dir].get(gid)
+        if group is not None and _selection_contains_sliver(group, row.get("edge_set")):
+            row["routing"] = ROUTING_HUMAN_REVIEW
+            row["route_reason"] = REASON_CONTAINS_SLIVER
     return rows
 
 

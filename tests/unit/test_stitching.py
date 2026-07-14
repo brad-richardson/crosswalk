@@ -3250,10 +3250,11 @@ class TestStitchingSelectRoute:
 
 
 class TestStitchingSliverExclusion:
-    """Set-semantics submits record MEMBERSHIP, so ``exclude_slivers`` no longer
-    changes what is stored (there are no per-pair edges to drop). It still rides
-    along for the client's confidence display. The explicit OPTION path is a
-    curated exact edge set and is unaffected either way."""
+    """The legacy ``exclude_slivers`` field is a storage no-op.
+
+    The current UI no longer sends it: SLIVER is warning evidence, not a filter.
+    Old clients remain safe, and exact OPTION selections are stored verbatim.
+    """
 
     DATASET = "test_ds"
 
@@ -3717,13 +3718,12 @@ class TestStitchingUiHooks:
             assert 'data-cls="residential"' in html
             assert 'data-name="Main St"' in html
             assert 'data-cls="footway"' in html
-            # Sliver-edge exclusion control (feature 3): default-unchecked
-            # checkbox + hidden field defaulting to exclude ("true") + indicator.
-            assert 'id="include-slivers-toggle"' in html
-            assert "onSliverToggle()" in html
-            assert 'id="exclude-slivers-field"' in html
-            assert 'name="exclude_slivers"' in html
-            assert 'value="true"' in html
+            # Sliver tags are passive evidence: show an indicator, never an
+            # exclusion control that disagrees with SET-membership storage.
+            assert "SLIVER warnings" in html
+            assert "low-span / low-absolute-overlap evidence" in html
+            assert 'id="include-slivers-toggle"' not in html
+            assert 'id="exclude-slivers-field"' not in html
             assert 'id="sliver-indicator"' in html
             # Per-edge sliver flag is exposed to the client for the live count
             # and coverage-gap overlay (features 2 & 3).
@@ -4640,9 +4640,8 @@ class TestDeAnchoredMode:
         finally:
             self._stop(patches)
 
-    def test_normal_mode_empty_submit_needs_no_confirmation(self):
-        """Normal mode keeps its original semantics: both pill fields empty is a
-        deliberate deselection of the pre-seed and stores [] without any flag."""
+    def test_empty_normal_mode_submit_requires_confirmation(self):
+        """Reject-all is an exact truth claim regardless of review mode."""
         from unittest.mock import MagicMock
 
         recorder = MagicMock()
@@ -4660,8 +4659,33 @@ class TestDeAnchoredMode:
                     "deanchored": "0",
                 },
             )
+            assert resp.status_code == 400
+            recorder.assert_not_called()
+        finally:
+            self._stop(patches)
+
+    def test_confirmed_empty_normal_mode_submit_stores_reject_all(self):
+        from unittest.mock import MagicMock
+
+        recorder = MagicMock()
+        client, patches = self._client(recorder=recorder)
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gda1",
+                    "group_index": 0,
+                    "included_refs": "",
+                    "included_targets": "",
+                    "selected_edges": "",
+                    "deanchored": "0",
+                    "confirm_reject_all": "1",
+                },
+            )
             assert resp.status_code == 200
             assert recorder.call_args.kwargs["selected_edges"] == []
+            assert recorder.call_args.kwargs["session_id"] is None
         finally:
             self._stop(patches)
 
@@ -4675,10 +4699,7 @@ class TestDeAnchoredMode:
 
 
 class TestRejectedSliverExclusion:
-    """Under set semantics, sliver exclusion is a storage no-op: a manual submit
-    records the full active-pill MEMBERSHIP whether exclude_slivers is on or off
-    (there are no per-pair edges to drop). The flag still drives the client's
-    confidence display only."""
+    """Legacy sliver flags never mutate manual SET membership."""
 
     DATASET = "test_ds"
 
