@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import copy
 import json
+from types import SimpleNamespace
 
 import pytest
 
+from crosswalk.agent_labeling import stitch_provenance as sp
 from crosswalk.agent_labeling.stitch_provenance import (
     DELIVERY_MODE_NATIVE_ATTACHMENT,
     DELIVERY_MODE_PROMPT_PATH,
@@ -179,6 +181,31 @@ def test_validation_rejects_expected_mode_or_transport_mismatch():
             _manifest(),
             expected_transport="opencode:-f",
         )
+
+
+def test_invocation_signature_changes_with_delivery_schema(monkeypatch):
+    panel = [
+        SimpleNamespace(
+            name="claude",
+            model="m",
+            effort="medium",
+            timeout=240,
+            opencode_agent="",
+            routes=(),
+        )
+    ]
+    kwargs = {
+        "timeout": None,
+        "collect_feedback": False,
+        "invocation_budget_s": 300.0,
+        "effective_timeouts": [240],
+        "runtime_contract_sha256": "a" * 64,
+    }
+    before = sp.invocation_signature(panel, **kwargs)
+
+    monkeypatch.setattr(sp, "DELIVERY_SCHEMA_VERSION", sp.DELIVERY_SCHEMA_VERSION + 1)
+
+    assert sp.invocation_signature(panel, **kwargs) != before
 
 
 @pytest.mark.parametrize(

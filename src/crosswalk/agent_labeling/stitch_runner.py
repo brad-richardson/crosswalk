@@ -1064,6 +1064,7 @@ def invoke_gemini(
     agent: str = "vote",
     route_state: ProviderRouteState | None = None,
     routes: tuple[str, ...] = GEMINI.routes,
+    evidence_manifest: dict | None = None,
 ) -> InvocationResult:
     """Invoke one logical Gemini voter with agy -> OpenRouter flex fallback.
 
@@ -1085,6 +1086,12 @@ def invoke_gemini(
     last_error: BaseException | None = None
     last_route = ""
     for index, route in enumerate(routes):
+        # The first, agentic route may write files into its scratch directory.
+        # Re-verify the exact managed attachment set before EVERY physical route
+        # so a fallback can never submit mutated or newly-created images while
+        # the ballot later claims the original manifest bytes.
+        if evidence_manifest is not None:
+            _preflight_native_attachment_assets(group_dir, letters, evidence_manifest)
         last_route = route
         has_fallback = index + 1 < len(routes)
         if route in state.unavailable:
@@ -1472,20 +1479,18 @@ def run_provider_on_group(
     scratch_dir = group_dir
     run_prompt = prompt
     tmp_ctx = None
-    if evidence_manifest is not None and group_dir is None:
-        raise EvidenceProvenanceError(
-            "evidence delivery provenance requires a group directory for preflight"
-        )
-    if group_dir is not None:
-        scratch_dir, run_prompt, tmp_ctx = _scratch_pack(
-            group_dir,
-            prompt,
-            evidence_manifest=evidence_manifest,
-        )
-        if evidence_manifest is not None:
-            _preflight_native_attachment_assets(scratch_dir, letters, evidence_manifest)
-
     try:
+        if evidence_manifest is not None and group_dir is None:
+            raise EvidenceProvenanceError(
+                "evidence delivery provenance requires a group directory for preflight"
+            )
+        if group_dir is not None:
+            scratch_dir, run_prompt, tmp_ctx = _scratch_pack(
+                group_dir,
+                prompt,
+                evidence_manifest=evidence_manifest,
+            )
+
         vote = _attempt_provider(
             provider,
             group_id,
@@ -1500,6 +1505,7 @@ def run_provider_on_group(
             collect_feedback,
             invocation_budget_s=invocation_budget_s,
             route_state=route_state,
+            evidence_manifest=evidence_manifest,
         )
         if evidence_manifest is not None:
             delivery_mode, transport = _delivery_mode_transport(
@@ -1533,6 +1539,7 @@ def _attempt_provider(
     collect_feedback=False,
     invocation_budget_s: float = 300.0,
     route_state: ProviderRouteState | None = None,
+    evidence_manifest: dict | None = None,
 ) -> Vote:
     """Run one provider, distinguishing two failure classes with opposite fates:
 
@@ -1588,7 +1595,14 @@ def _attempt_provider(
     if invoker is invoke_gemini:
         extra_kwargs["route_state"] = route_state
         extra_kwargs["routes"] = provider.routes
+        extra_kwargs["evidence_manifest"] = evidence_manifest
     while True:
+        # Parse retries and backed-off provider retries reuse one scratch dir.
+        # Re-hash the native attachment set immediately before every attempt so
+        # a prior agentic attempt cannot mutate the evidence behind a later
+        # successful ballot.
+        if evidence_manifest is not None:
+            _preflight_native_attachment_assets(group_dir, letters, evidence_manifest)
         start = time.monotonic()
         try:
             result = invoker(

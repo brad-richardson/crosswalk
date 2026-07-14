@@ -2368,6 +2368,41 @@ def test_gemini_quota_fallback_opens_sticky_wave_circuit(monkeypatch, tmp_path):
     assert sr.GEMINI_ROUTE_AGY in state.unavailable
 
 
+def test_gemini_fallback_rejects_images_mutated_by_primary_route(monkeypatch, tmp_path):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    group_dir = _write_min_pack(batch_dir, "g1")
+    manifest = load_evidence_manifest(group_dir)
+    prompt = (group_dir / "prompt.txt").read_text()
+    scratch, rewritten, scratch_ctx = sr._scratch_pack(group_dir, prompt, manifest)
+    flex_called = False
+
+    def mutating_agy(*args, **kwargs):
+        (scratch / "overview.png").write_bytes(b"mutated by primary route")
+        return ""  # provider failure would ordinarily fall back to flex
+
+    def flex(*args, **kwargs):
+        nonlocal flex_called
+        flex_called = True
+        return '{"choice":"A","confidence":0.8,"reasoning":"flex"}'
+
+    monkeypatch.setattr(sr, "invoke_agy", mutating_agy)
+    monkeypatch.setattr(sr, "invoke_opencode", flex)
+    try:
+        with pytest.raises(EvidenceProvenanceError, match="native attachment.*manifest"):
+            sr.invoke_gemini(
+                rewritten,
+                scratch,
+                ["A"],
+                sr.GEMINI_MODEL,
+                evidence_manifest=manifest,
+            )
+    finally:
+        scratch_ctx.cleanup()
+
+    assert not flex_called
+
+
 def test_gemini_flex_only_calibration_never_touches_agy(monkeypatch, tmp_path):
     def unexpected_agy(*args, **kwargs):
         raise AssertionError("flex-only calibration must not consume agy quota")
@@ -3174,6 +3209,71 @@ def test_manifest_hash_mismatch_fails_before_provider_invocation(monkeypatch, tm
             evidence_manifest=manifest,
         )
     assert not invoked
+
+
+def test_attempt_preflight_failure_cleans_invocation_scratch(monkeypatch, tmp_path):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    group_dir = _write_min_pack(batch_dir, "g1")
+    manifest = load_evidence_manifest(group_dir)
+    scratch_path = None
+    invoked = False
+
+    def failing_preflight(scratch, letters, evidence_manifest):
+        nonlocal scratch_path
+        scratch_path = Path(scratch)
+        raise EvidenceProvenanceError("forced native attachment mismatch")
+
+    def fake_invoker(*args, **kwargs):
+        nonlocal invoked
+        invoked = True
+        return '{"choice":"A","confidence":1,"reasoning":"ok"}'
+
+    monkeypatch.setattr(sr, "_preflight_native_attachment_assets", failing_preflight)
+    monkeypatch.setitem(sr._INVOKERS, "claude", fake_invoker)
+    with pytest.raises(EvidenceProvenanceError, match="forced native attachment mismatch"):
+        sr.run_provider_on_group(
+            sr.ProviderSpec("claude", "m"),
+            "g1",
+            group_dir,
+            (group_dir / "prompt.txt").read_text(),
+            ["A"],
+            {"A": []},
+            evidence_manifest=manifest,
+        )
+
+    assert scratch_path is not None
+    assert not scratch_path.exists()
+    assert not invoked
+
+
+def test_parse_retry_rejects_images_mutated_by_prior_attempt(monkeypatch, tmp_path):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    group_dir = _write_min_pack(batch_dir, "g1")
+    manifest = load_evidence_manifest(group_dir)
+    calls = 0
+
+    def mutating_invalid_vote(prompt, scratch, letters, model, timeout, effort=""):
+        nonlocal calls
+        calls += 1
+        (Path(scratch) / "overview.png").write_bytes(b"mutated during parse attempt")
+        return '{"choice":"NOT_AN_OPTION","confidence":1,"reasoning":"bad"}'
+
+    monkeypatch.setitem(sr._INVOKERS, "agy", mutating_invalid_vote)
+    with pytest.raises(EvidenceProvenanceError, match="native attachment.*manifest"):
+        sr.run_provider_on_group(
+            sr.ProviderSpec("agy", "m"),
+            "g1",
+            group_dir,
+            (group_dir / "prompt.txt").read_text(),
+            ["A"],
+            {"A": []},
+            retries=1,
+            evidence_manifest=manifest,
+        )
+
+    assert calls == 1
 
 
 def test_abstain_records_delivery_for_actual_gemini_route(monkeypatch, tmp_path):
