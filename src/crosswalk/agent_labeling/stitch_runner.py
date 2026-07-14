@@ -51,11 +51,18 @@ from .panel_routing import (
     derive_route_reason,
 )
 from .stitch_provenance import (
+    DELIVERY_MODE_NATIVE_ATTACHMENT,
+    DELIVERY_MODE_PROMPT_PATH,
+    EvidenceProvenanceError,
     batch_group_map,
+    build_evidence_delivery_record,
+    canonical_evidence_delivery_json,
     consensus_policy_signature,
     invocation_signature,
     load_evidence_manifest,
+    managed_image_descriptors,
     sha256_file,
+    validate_evidence_delivery_record,
     validate_manifest_against_batch,
 )
 
@@ -444,6 +451,10 @@ class Vote:
     # Physical transport/endpoint that produced this logical voter's ballot.
     # Blank for legacy/single-route voters; required for Gemini calibration seats.
     invocation_route: str = ""
+    # Canonical JSON describing the exact manifest-hashed images made
+    # addressable to this invocation and the CLI delivery mechanism. This is a
+    # delivery assertion, never a claim that the remote model consumed them.
+    evidence_delivery: str = ""
 
 
 @dataclass
@@ -690,9 +701,16 @@ class GroupScopedProviderError(RuntimeError):
     ``kind=AbstainReason.TIMEOUT``, counts toward the consecutive-timeout breaker.
     """
 
-    def __init__(self, message: str, *, kind: AbstainReason = AbstainReason.CONTEXT_OVERFLOW):
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: AbstainReason = AbstainReason.CONTEXT_OVERFLOW,
+        invocation_route: str = "",
+    ):
         super().__init__(message)
         self.kind = kind
+        self.invocation_route = invocation_route
 
 
 def _check_exit(provider: str, result: subprocess.CompletedProcess) -> None:
@@ -1065,7 +1083,9 @@ def invoke_gemini(
 
     state = route_state if route_state is not None else ProviderRouteState()
     last_error: BaseException | None = None
+    last_route = ""
     for index, route in enumerate(routes):
+        last_route = route
         has_fallback = index + 1 < len(routes)
         if route in state.unavailable:
             last_error = RuntimeError(f"Gemini route circuit is open: {route}")
@@ -1117,6 +1137,10 @@ def invoke_gemini(
             )
 
     if last_error is not None:
+        # Preserve the physical route on a group-scoped failure so an ABSTAIN
+        # ballot can still carry honest delivery provenance. Exception objects
+        # are mutable, including subprocess.TimeoutExpired.
+        last_error.invocation_route = last_route  # type: ignore[attr-defined]
         raise last_error
     raise RuntimeError(f"all Gemini routes unavailable: {routes!r}")
 
@@ -1146,25 +1170,177 @@ _INVOKERS = {
 # ---------------------------------------------------------------------------
 
 
-def _scratch_pack(group_dir: Path, prompt: str) -> tuple[Path, str, tempfile.TemporaryDirectory]:
+_PROMPT_PNG_FIELD_RE = re.compile(
+    r"^(?P<prefix>[ \t]*(?:-[ \t]+)?(?:overview|junction zoom|image):[ \t]*)"
+    r"(?P<path>.*?\.png)(?P<suffix>[ \t]*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_PROMPT_PNG_TOKEN_RE = re.compile(
+    r"(?P<path>(?:(?:[A-Za-z]:)?[\\/]|\.{1,2}[\\/])?"
+    r"[^\s\"'`<>{}\[\](),;]+?\.png)",
+    re.IGNORECASE,
+)
+_URI_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+
+
+def _managed_image_name(name: str) -> bool:
+    """Whether ``name`` belongs to the generated evidence-image namespace."""
+    return (
+        name == "overview.png"
+        or (name.startswith("option_") and name.endswith(".png"))
+        or (name.startswith("zoom_") and name.endswith(".png"))
+    )
+
+
+def _png_ref_name(ref: str) -> str:
+    """Return a PNG reference's basename for both POSIX and Windows prompts."""
+    return ref.strip().replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _rewrite_prompt_png_refs(prompt: str, scratch: Path, managed_names: set[str]) -> str:
+    """Relocate references to this pack's managed PNGs into ``scratch``.
+
+    Packs are sometimes renamed after generation, so the absolute directory
+    embedded in a historical prompt is not a reliable identity. Managed image
+    basenames are pack-local and unique; rewriting by basename supports stale
+    absolute paths as well as the relative names used in prompt prose. Explicit
+    image fields are handled separately so paths containing spaces remain
+    supported.
+    """
+
+    def relocate(ref: str) -> str:
+        if _URI_RE.match(ref.strip()):
+            return ref
+        name = _png_ref_name(ref)
+        if name in managed_names:
+            return str(scratch / name)
+        return ref
+
+    def field_repl(match: re.Match) -> str:
+        return f"{match.group('prefix')}{relocate(match.group('path'))}{match.group('suffix')}"
+
+    rewritten = _PROMPT_PNG_FIELD_RE.sub(field_repl, prompt)
+    return _PROMPT_PNG_TOKEN_RE.sub(lambda match: relocate(match.group("path")), rewritten)
+
+
+def _prompt_png_refs(prompt: str) -> set[str]:
+    """Extract explicit and inline local/remote PNG references from a prompt."""
+    refs: set[str] = set()
+    for line in prompt.splitlines():
+        field = _PROMPT_PNG_FIELD_RE.fullmatch(line)
+        if field:
+            # Do not token-scan a field as well: for a path containing spaces,
+            # the token matcher would see a false relative suffix.
+            refs.add(field.group("path").strip())
+        else:
+            refs.update(match.group("path") for match in _PROMPT_PNG_TOKEN_RE.finditer(line))
+    return refs
+
+
+def _preflight_prompt_png_refs(prompt: str, scratch: Path, managed_names: set[str]) -> None:
+    """Fail closed when a prompt's local PNG reference cannot be read.
+
+    Managed images must resolve to the isolated scratch copy, never to a stale
+    canonical/renamed directory. Other PNGs remain unmanaged: they are not
+    copied, but an explicit absolute reference is allowed when it really exists.
+    """
+    unresolved: list[str] = []
+    for ref in sorted(_prompt_png_refs(prompt)):
+        if _URI_RE.match(ref):
+            continue
+        name = _png_ref_name(ref)
+        expected = scratch / name
+        path = Path(ref).expanduser()
+        if not path.is_absolute():
+            path = scratch / path
+        if _managed_image_name(name):
+            if name not in managed_names or path != expected or not expected.is_file():
+                unresolved.append(ref)
+        elif not path.is_file():
+            unresolved.append(ref)
+    if unresolved:
+        refs = ", ".join(repr(ref) for ref in unresolved)
+        raise ValueError(
+            f"prompt contains unresolved local PNG reference(s) after scratch rewrite: {refs}"
+        )
+
+
+def _scratch_managed_image_descriptors(scratch: Path) -> list[dict]:
+    """Hash the exact managed image set copied into one invocation scratch."""
+    return sorted(
+        (
+            {
+                "path": path.name,
+                "bytes": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+            for path in scratch.iterdir()
+            if path.is_file() and _managed_image_name(path.name)
+        ),
+        key=lambda item: item["path"],
+    )
+
+
+def _preflight_manifest_delivery_assets(prompt: str, scratch: Path, manifest: dict) -> None:
+    """Bind scratch bytes and prompt references to a verified pack manifest."""
+    expected = managed_image_descriptors(manifest)
+    actual = _scratch_managed_image_descriptors(scratch)
+    if actual != expected:
+        raise EvidenceProvenanceError(
+            "invocation scratch image bytes/count/set do not match the evidence manifest"
+        )
+
+    expected_names = {asset["path"] for asset in expected}
+    referenced_names: set[str] = set()
+    unexpected_refs: list[str] = []
+    for ref in sorted(_prompt_png_refs(prompt)):
+        if _URI_RE.match(ref):
+            unexpected_refs.append(ref)
+            continue
+        name = _png_ref_name(ref)
+        if name in expected_names:
+            referenced_names.add(name)
+        else:
+            unexpected_refs.append(ref)
+    if unexpected_refs or referenced_names != expected_names:
+        missing = sorted(expected_names - referenced_names)
+        raise EvidenceProvenanceError(
+            "prompt image references do not match the evidence manifest: "
+            f"missing={missing}, unexpected={unexpected_refs}"
+        )
+
+
+def _scratch_pack(
+    group_dir: Path,
+    prompt: str,
+    evidence_manifest: dict | None = None,
+) -> tuple[Path, str, tempfile.TemporaryDirectory]:
     """Copy a pack's images into an isolated scratch dir and rewrite the prompt.
 
     Some providers (agy) write derived crops next to the images they inspect.
     Giving each invocation an isolated copy keeps the canonical evidence dir
-    pristine and bounds any provider scratch to an auto-cleaned temp dir. The
-    prompt's absolute canonical paths are rewritten to the scratch dir.
+    pristine and bounds any provider scratch to an auto-cleaned temp dir. Prompt
+    PNG references are relocated by managed basename rather than canonical-dir
+    string, so a pack remains runnable after its batch directory is renamed.
     """
     tmp = tempfile.TemporaryDirectory(prefix="stitch_pack_")
     scratch = Path(tmp.name)
-    managed_images = [group_dir / "overview.png"]
-    managed_images.extend(sorted(group_dir.glob("option_*.png")))
-    managed_images.extend(sorted(group_dir.glob("zoom_*.png")))
-    for img in managed_images:
-        if img.is_file():
+    try:
+        managed_images = [group_dir / "overview.png"]
+        managed_images.extend(sorted(group_dir.glob("option_*.png")))
+        managed_images.extend(sorted(group_dir.glob("zoom_*.png")))
+        managed_images = [img for img in managed_images if img.is_file()]
+        for img in managed_images:
             shutil.copy2(img, scratch / img.name)
-    canonical = str(group_dir.resolve())
-    rewritten = prompt.replace(canonical, str(scratch))
-    return scratch, rewritten, tmp
+        managed_names = {img.name for img in managed_images}
+        rewritten = _rewrite_prompt_png_refs(prompt, scratch, managed_names)
+        _preflight_prompt_png_refs(rewritten, scratch, managed_names)
+        if evidence_manifest is not None:
+            _preflight_manifest_delivery_assets(rewritten, scratch, evidence_manifest)
+        return scratch, rewritten, tmp
+    except BaseException:
+        tmp.cleanup()
+        raise
 
 
 def _load_group_context(group_dir: Path) -> tuple[list[str], dict, dict]:
@@ -1208,6 +1384,56 @@ def _edge_classes_for(
     return [(ref_class.get(str(r), ""), tgt_class.get(str(t), "")) for r, t in edge_set]
 
 
+def _delivery_mode_transport(provider: str, invocation_route: str = "") -> tuple[str, str]:
+    """Resolve the evidence-delivery contract for an actual physical route."""
+    if provider == "claude":
+        return DELIVERY_MODE_PROMPT_PATH, "claude:Read"
+    if provider == "agy":
+        return DELIVERY_MODE_PROMPT_PATH, "agy:agent-read"
+    if provider == "codex":
+        return DELIVERY_MODE_NATIVE_ATTACHMENT, "codex:-i"
+    if provider in {"opencode", "kimi", "muse"}:
+        return DELIVERY_MODE_NATIVE_ATTACHMENT, "opencode:-f"
+    if provider == "gemini":
+        if invocation_route == GEMINI_ROUTE_AGY:
+            return DELIVERY_MODE_PROMPT_PATH, "agy:agent-read"
+        if invocation_route == GEMINI_ROUTE_OPENROUTER_FLEX:
+            return DELIVERY_MODE_NATIVE_ATTACHMENT, "opencode:-f"
+        raise EvidenceProvenanceError(
+            "route-aware Gemini ballot is missing a known physical invocation_route"
+        )
+    raise EvidenceProvenanceError(f"no evidence-delivery contract for provider {provider!r}")
+
+
+def _preflight_native_attachment_assets(
+    scratch: Path,
+    letters: list[str],
+    manifest: dict,
+) -> None:
+    """Verify the shared ``_image_paths`` set equals the manifested image set.
+
+    Claude/agy use prompt paths, but checking this for every provider also
+    proves either route of the dynamic Gemini voter is ready before invocation.
+    Codex and OpenCode build their actual ``-i``/``-f`` argv from this same
+    helper, so the recorded assets and native attachment set cannot drift.
+    """
+    attached = sorted(
+        (
+            {
+                "path": Path(raw_path).name,
+                "bytes": Path(raw_path).stat().st_size,
+                "sha256": sha256_file(Path(raw_path)),
+            }
+            for raw_path in _image_paths(scratch, letters)
+        ),
+        key=lambda item: item["path"],
+    )
+    if attached != managed_image_descriptors(manifest):
+        raise EvidenceProvenanceError(
+            "native attachment image bytes/count/set do not match the evidence manifest"
+        )
+
+
 def run_provider_on_group(
     provider: ProviderSpec,
     group_id: str,
@@ -1220,6 +1446,7 @@ def run_provider_on_group(
     collect_feedback: bool = False,
     invocation_budget_s: float = 300.0,
     route_state: ProviderRouteState | None = None,
+    evidence_manifest: dict | None = None,
 ) -> Vote:
     """Run one provider on one group; abstain on bad output, hard-fail if down.
 
@@ -1235,6 +1462,8 @@ def run_provider_on_group(
     Each invocation runs against an isolated scratch copy of the pack so a
     provider that writes derived files (e.g. agy crops) never pollutes the
     canonical evidence dir. Skipped when group_dir is None (unit tests).
+    Production callers pass the already-verified ``evidence_manifest``; direct
+    helper calls may omit it and retain the legacy blank-delivery behavior.
     """
     invoker = _INVOKERS[provider.name]
     valid = set(letters)
@@ -1243,11 +1472,21 @@ def run_provider_on_group(
     scratch_dir = group_dir
     run_prompt = prompt
     tmp_ctx = None
+    if evidence_manifest is not None and group_dir is None:
+        raise EvidenceProvenanceError(
+            "evidence delivery provenance requires a group directory for preflight"
+        )
     if group_dir is not None:
-        scratch_dir, run_prompt, tmp_ctx = _scratch_pack(group_dir, prompt)
+        scratch_dir, run_prompt, tmp_ctx = _scratch_pack(
+            group_dir,
+            prompt,
+            evidence_manifest=evidence_manifest,
+        )
+        if evidence_manifest is not None:
+            _preflight_native_attachment_assets(scratch_dir, letters, evidence_manifest)
 
     try:
-        return _attempt_provider(
+        vote = _attempt_provider(
             provider,
             group_id,
             scratch_dir,
@@ -1262,6 +1501,19 @@ def run_provider_on_group(
             invocation_budget_s=invocation_budget_s,
             route_state=route_state,
         )
+        if evidence_manifest is not None:
+            delivery_mode, transport = _delivery_mode_transport(
+                provider.name,
+                vote.invocation_route,
+            )
+            vote.evidence_delivery = canonical_evidence_delivery_json(
+                build_evidence_delivery_record(
+                    evidence_manifest,
+                    delivery_mode=delivery_mode,
+                    transport=transport,
+                )
+            )
+        return vote
     finally:
         if tmp_ctx is not None:
             tmp_ctx.cleanup()
@@ -1353,17 +1605,19 @@ def _attempt_provider(
             # Abstain loudly and let the run continue. The exception's ``kind``
             # (context overflow vs CLI-internal timeout) rides onto the abstain so
             # run_batch's breaker counts CLI-internal timeouts but not overflows.
+            last_route = e.invocation_route or last_route
             logger.warning(
                 f"{provider.name} group {group_id}: {e}; abstaining (group-scoped, "
                 f"not retryable) and continuing the run"
             )
             return _abstain(f"group-scoped: {e}", reason=e.kind)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
             # Retrying a timeout just burns another full timeout window, and a
             # group whose prompt is too slow for this provider is a property of
             # the group, not provider health -> abstain, don't halt the wave. The
             # consecutive-timeout breaker in run_batch still catches a provider
             # that times out on EVERY group (via AbstainReason.TIMEOUT).
+            last_route = getattr(e, "invocation_route", "") or last_route
             logger.warning(
                 f"{provider.name} group {group_id}: timeout after {timeout}s; "
                 f"abstaining and continuing the run"
@@ -1460,6 +1714,7 @@ def run_panel_on_group(
     collect_feedback: bool = False,
     invocation_budget_s: float = 300.0,
     route_state: ProviderRouteState | None = None,
+    evidence_manifest: dict | None = None,
 ) -> list[Vote]:
     """Run the full panel on one group in parallel (one thread per provider).
 
@@ -1489,6 +1744,7 @@ def run_panel_on_group(
             collect_feedback=collect_feedback,
             invocation_budget_s=invocation_budget_s,
             route_state=route_state,
+            evidence_manifest=evidence_manifest,
         )
 
     with ThreadPoolExecutor(max_workers=len(panel)) as ex:
@@ -1818,6 +2074,7 @@ VOTES_COLUMNS = [
     "timestamp",
     "error",
     "invocation_route",
+    "evidence_delivery",
     "pack_feedback",
     "evidence_id",
     "evidence_pack_sha256",
@@ -1864,6 +2121,7 @@ def _vote_row(v: Vote) -> dict:
         "timestamp": v.timestamp,
         "error": v.error,
         "invocation_route": v.invocation_route,
+        "evidence_delivery": v.evidence_delivery,
         "pack_feedback": v.pack_feedback,
         "evidence_id": v.evidence_id,
         "evidence_pack_sha256": v.evidence_pack_sha256,
@@ -2081,6 +2339,27 @@ def run_batch(
                         return False
                 return True
 
+            def _rows_match_delivery(
+                frame: pd.DataFrame,
+                manifest: dict = manifest,
+            ) -> bool:
+                if "evidence_delivery" not in frame.columns:
+                    return False
+                for row in frame.to_dict("records"):
+                    provider_name = _text(row.get("provider"))
+                    route = _text(row.get("invocation_route"))
+                    try:
+                        delivery_mode, transport = _delivery_mode_transport(provider_name, route)
+                        validate_evidence_delivery_record(
+                            _text(row.get("evidence_delivery")),
+                            manifest,
+                            expected_delivery_mode=delivery_mode,
+                            expected_transport=transport,
+                        )
+                    except (EvidenceProvenanceError, TypeError, ValueError):
+                        return False
+                return True
+
             compatible = complete and all(
                 (
                     _all_equal(vote_group, "evidence_id", evidence["evidence_id"]),
@@ -2101,6 +2380,7 @@ def run_batch(
                     ),
                     _all_equal(vote_group, "option_menu_sha256", evidence["option_menu_sha256"]),
                     _rows_match_menu(vote_group),
+                    _rows_match_delivery(vote_group),
                     _all_equal(cons_group, "evidence_id", evidence["evidence_id"]),
                     _all_equal(
                         cons_group,
@@ -2226,6 +2506,7 @@ def run_batch(
             collect_feedback=collect_feedback,
             invocation_budget_s=invocation_budget_s,
             route_state=route_state,
+            evidence_manifest=evidence_by_id[gid],
         )
         manifest = evidence_by_id[gid]
         evidence = manifest["evidence"]

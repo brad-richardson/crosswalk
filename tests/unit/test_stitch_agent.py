@@ -1012,6 +1012,7 @@ def test_run_provider_retries_once_then_succeeds(monkeypatch):
     assert calls["n"] == 2
     assert vote.choice == "A"
     assert vote.edge_set == frozenset({(R1, T1)})
+    assert vote.evidence_delivery == ""  # direct helper: no verified manifest supplied
 
 
 def test_run_provider_abstains_after_retries(monkeypatch):
@@ -3068,7 +3069,10 @@ def _write_min_pack(batch_dir, gid):
     d = batch_dir / gid
     d.mkdir(parents=True)
     (d / "metadata.yaml").write_text(yaml.safe_dump(meta))
-    (d / "prompt.txt").write_text('respond {"choice": "A"}')
+    (d / "overview.png").write_bytes(b"minimal-overview")
+    (d / "prompt.txt").write_text(
+        f'- overview: {d.resolve() / "overview.png"}\nrespond {{"choice": "A"}}'
+    )
     return d
 
 
@@ -3078,14 +3082,133 @@ def test_scratch_pack_ignores_unmanaged_png(tmp_path):
     (group_dir / "overview.png").write_bytes(b"overview")
     (group_dir / "option_A.png").write_bytes(b"option")
     (group_dir / "other.png").write_bytes(b"unmanaged")
+    external = tmp_path / "external images" / "context.png"
+    external.parent.mkdir()
+    external.write_bytes(b"external")
 
-    scratch, _prompt, temp_dir = sr._scratch_pack(group_dir, "prompt")
+    scratch, rewritten, temp_dir = sr._scratch_pack(group_dir, f"    image: {external}")
     try:
         assert (scratch / "overview.png").exists()
         assert (scratch / "option_A.png").exists()
         assert not (scratch / "other.png").exists()
+        assert not (scratch / "context.png").exists()
+        assert str(external) in rewritten
     finally:
         temp_dir.cleanup()
+
+
+def test_scratch_pack_relocates_stale_absolute_image_paths_after_batch_rename(tmp_path):
+    group_dir = tmp_path / "renamed_batch" / "g1"
+    group_dir.mkdir(parents=True)
+    for name in ("overview.png", "option_A.png", "zoom_R1_T1.png"):
+        (group_dir / name).write_bytes(name.encode())
+
+    stale = tmp_path / "old_batch" / "g1"
+    prompt = (
+        f"- overview: {stale / 'overview.png'}\n"
+        f"      junction zoom: {stale / 'zoom_R1_T1.png'}\n"
+        f"    image: {stale / 'option_A.png'}\n"
+        "Look at overview.png first."
+    )
+
+    scratch, rewritten, temp_dir = sr._scratch_pack(group_dir, prompt)
+    try:
+        assert str(stale) not in rewritten
+        for name in ("overview.png", "option_A.png", "zoom_R1_T1.png"):
+            relocated = scratch / name
+            assert relocated.is_file()
+            assert str(relocated) in rewritten
+    finally:
+        temp_dir.cleanup()
+
+
+def test_missing_prompt_png_fails_before_provider_invocation(monkeypatch, tmp_path):
+    group_dir = tmp_path / "renamed_batch" / "g1"
+    group_dir.mkdir(parents=True)
+    (group_dir / "overview.png").write_bytes(b"overview")
+    stale = tmp_path / "old_batch" / "g1"
+    prompt = f"- overview: {stale / 'overview.png'}\n    image: {stale / 'option_A.png'}"
+    invoked = False
+
+    def fake_invoker(*args, **kwargs):
+        nonlocal invoked
+        invoked = True
+        return '{"choice":"A","confidence":1,"reasoning":"ok"}'
+
+    monkeypatch.setitem(sr._INVOKERS, "claude", fake_invoker)
+    with pytest.raises(ValueError, match=r"unresolved local PNG.*option_A\.png"):
+        sr.run_provider_on_group(
+            sr.ProviderSpec("claude", "m"),
+            "g1",
+            group_dir,
+            prompt,
+            ["A"],
+            {"A": []},
+        )
+    assert not invoked
+
+
+def test_manifest_hash_mismatch_fails_before_provider_invocation(monkeypatch, tmp_path):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    group_dir = _write_min_pack(batch_dir, "g1")
+    manifest = load_evidence_manifest(group_dir)
+    prompt = (group_dir / "prompt.txt").read_text()
+    (group_dir / "overview.png").write_bytes(b"changed-after-manifest-verification")
+    invoked = False
+
+    def fake_invoker(*args, **kwargs):
+        nonlocal invoked
+        invoked = True
+        return '{"choice":"A","confidence":1,"reasoning":"ok"}'
+
+    monkeypatch.setitem(sr._INVOKERS, "claude", fake_invoker)
+    with pytest.raises(EvidenceProvenanceError, match="scratch image bytes/count/set"):
+        sr.run_provider_on_group(
+            sr.ProviderSpec("claude", "m"),
+            "g1",
+            group_dir,
+            prompt,
+            ["A"],
+            {"A": []},
+            evidence_manifest=manifest,
+        )
+    assert not invoked
+
+
+def test_abstain_records_delivery_for_actual_gemini_route(monkeypatch, tmp_path):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    group_dir = _write_min_pack(batch_dir, "g1")
+    manifest = load_evidence_manifest(group_dir)
+
+    def routed_timeout(*args, **kwargs):
+        raise sr.GroupScopedProviderError(
+            "flex timeout",
+            kind=sr.AbstainReason.TIMEOUT,
+            invocation_route=sr.GEMINI_ROUTE_OPENROUTER_FLEX,
+        )
+
+    monkeypatch.setitem(sr._INVOKERS, "gemini", routed_timeout)
+    vote = sr.run_provider_on_group(
+        sr.GEMINI,
+        "g1",
+        group_dir,
+        (group_dir / "prompt.txt").read_text(),
+        ["A"],
+        {"A": []},
+        evidence_manifest=manifest,
+    )
+
+    assert vote.choice == "ABSTAIN"
+    assert vote.invocation_route == sr.GEMINI_ROUTE_OPENROUTER_FLEX
+    record = sr.validate_evidence_delivery_record(
+        vote.evidence_delivery,
+        manifest,
+        expected_delivery_mode=sr.DELIVERY_MODE_NATIVE_ATTACHMENT,
+        expected_transport="opencode:-f",
+    )
+    assert record["preflight_status"] == "passed"
 
 
 def test_run_batch_rejects_pack_outside_schema_v2_roster(tmp_path):
@@ -3166,6 +3289,67 @@ def test_run_batch_resume_skips_completed_groups(tmp_path, monkeypatch):
     # Final output carries BOTH groups.
     assert set(cons_df["group_id"]) == {"g1", "g2"}
     assert set(votes_df["group_id"]) == {"g1", "g2"}
+    assert votes_df["evidence_delivery"].astype(str).str.len().gt(0).all()
+    expected = {
+        "claude": (sr.DELIVERY_MODE_PROMPT_PATH, "claude:Read"),
+        "codex": (sr.DELIVERY_MODE_NATIVE_ATTACHMENT, "codex:-i"),
+        "agy": (sr.DELIVERY_MODE_PROMPT_PATH, "agy:agent-read"),
+    }
+    for row in votes_df.to_dict("records"):
+        mode, transport = expected[row["provider"]]
+        manifest = load_evidence_manifest(batch_dir / row["group_id"])
+        sr.validate_evidence_delivery_record(
+            row["evidence_delivery"],
+            manifest,
+            expected_delivery_mode=mode,
+            expected_transport=transport,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["missing", "tampered", "mode_mismatch"])
+def test_run_batch_resume_rejects_invalid_delivery_provenance(
+    tmp_path,
+    monkeypatch,
+    mutation,
+):
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    calls = {"n": 0}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    panel = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "agy")]
+    sr.run_batch(batch_dir, panel=panel)
+    assert calls["n"] == 3
+
+    partial = pd.read_csv(batch_dir / "votes.partial.csv")
+    if mutation == "missing":
+        partial = partial.drop(columns="evidence_delivery")
+    else:
+        row_index = partial.index[partial["provider"] == "claude"][0]
+        record = json.loads(partial.loc[row_index, "evidence_delivery"])
+        if mutation == "tampered":
+            record["asset_count"] += 1
+        else:
+            record["delivery_mode"] = sr.DELIVERY_MODE_NATIVE_ATTACHMENT
+            record["transport"] = "codex:-i"
+        partial.loc[row_index, "evidence_delivery"] = json.dumps(
+            record,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    partial.to_csv(batch_dir / "votes.partial.csv", index=False)
+
+    calls["n"] = 0
+    repaired, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
+
+    assert calls["n"] == 3
+    assert repaired["evidence_delivery"].astype(str).str.len().gt(0).all()
 
 
 def test_run_batch_resume_requires_valid_gemini_route_provenance(tmp_path, monkeypatch):
@@ -3190,6 +3374,9 @@ def test_run_batch_resume_requires_valid_gemini_route_provenance(tmp_path, monke
     resumed, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
     assert calls["n"] == 0
     assert set(resumed["invocation_route"]) == {sr.GEMINI_ROUTE_OPENROUTER_FLEX}
+    delivery = json.loads(resumed.iloc[0]["evidence_delivery"])
+    assert delivery["delivery_mode"] == sr.DELIVERY_MODE_NATIVE_ATTACHMENT
+    assert delivery["transport"] == "opencode:-f"
 
     partial = pd.read_csv(batch_dir / "votes.partial.csv")
     partial["invocation_route"] = "unknown-route"
@@ -3217,6 +3404,10 @@ def test_run_batch_resume_requires_route_allowed_by_current_gemini_policy(tmp_pa
     panel = [sr.GEMINI_AGY_ONLY]
     sr.run_batch(batch_dir, panel=panel)
     assert calls["n"] == 1
+    recorded = pd.read_csv(batch_dir / "votes.csv").iloc[0]
+    delivery = json.loads(recorded["evidence_delivery"])
+    assert delivery["delivery_mode"] == sr.DELIVERY_MODE_PROMPT_PATH
+    assert delivery["transport"] == "agy:agent-read"
 
     partial = pd.read_csv(batch_dir / "votes.partial.csv")
     partial["invocation_route"] = sr.GEMINI_ROUTE_OPENROUTER_FLEX

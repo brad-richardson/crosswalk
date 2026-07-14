@@ -43,6 +43,14 @@ re-exporting the same batches is a no-op.
 - Route-aware logical voters also carry `invocation_route`. In the v6 Gemini
   candidate this distinguishes an `agy` ballot from the OpenRouter AI Studio
   flex fallback without treating the two transports as separate panel votes.
+- New runner ballots carry canonical JSON in `evidence_delivery`: the exact
+  manifest-hashed image set that passed local preflight, plus whether those
+  files were exposed through prompt paths (`claude:Read` / `agy:agent-read`) or
+  native CLI attachments (`codex:-i` / `opencode:-f`). This proves that the
+  verified local bytes were addressable or submitted to the invocation. It
+  cannot prove that a remote service decoded every image or that the model used
+  the images in its decision. Historical blank values mean delivery is unknown
+  and must not be backfilled from plausible-sounding model prose.
 - Legacy packs can be archived with `source_artifacts.status` explicitly marked
   unavailable. That preserves what was displayed without claiming a model or
   sidecar identity that the old pack never recorded.
