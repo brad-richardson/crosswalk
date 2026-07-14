@@ -199,6 +199,17 @@ PANEL_QUORUM_NONE_LABELER_V6 = "panel_quorum_none_v6"
 PANEL_DECOMPOSED_LABELER_V6 = "panel_unanimous_decomposed_v6"
 PANEL_QUORUM_DECOMPOSED_LABELER_V6 = "panel_quorum_decomposed_v6"
 
+# v7-candidate tags. V7 is a distinct generation rather than an in-place v6
+# edit: it changes Codex Terra -> Sol and records high effort across the lean
+# Claude/Codex/Muse panel. It remains nonstandard until the canonical-rubric
+# replay is manually reviewed and explicitly promoted.
+PANEL_LABELER_V7 = "panel_unanimous_v7"
+PANEL_QUORUM_LABELER_V7 = "panel_quorum_v7"
+PANEL_NONE_LABELER_V7 = "panel_unanimous_none_v7"
+PANEL_QUORUM_NONE_LABELER_V7 = "panel_quorum_none_v7"
+PANEL_DECOMPOSED_LABELER_V7 = "panel_unanimous_decomposed_v7"
+PANEL_QUORUM_DECOMPOSED_LABELER_V7 = "panel_quorum_decomposed_v7"
+
 #: Blessed (provider, model) voter compositions, keyed by labeler era. The gate
 #: keys on the PAIR, not the provider name alone: the opencode transport has
 #: driven Gemini Flash (no-agy quota-outage waves) and Qwen3-VL (v3-candidate)
@@ -258,6 +269,17 @@ PANEL_VOTERS_V6 = frozenset(
     }
 )
 
+# Candidate v7: the canonical-rubric high-effort replay roster. Effort is
+# preserved by panel_invocation_sha256; the era's voter identity remains keyed
+# on (provider, model), matching every historical export generation.
+PANEL_VOTERS_V7 = frozenset(
+    {
+        ("claude", "claude-opus-4-8"),
+        ("codex", "gpt-5.6-sol"),
+        ("muse", "meta/muse-spark-1.1"),
+    }
+)
+
 #: Era -> blessed voter set. A batch matching an era's set exactly is STANDARD
 #: for that era: it passes the export gate and its labels are stamped with that
 #: era's labeler tags (v3-era batches keep minting ``*_v3`` labels on
@@ -274,6 +296,7 @@ STANDARD_PANEL_VOTERS: dict[str, frozenset[tuple[str, str]]] = {
 # This separates "we know how to stamp it" from "it passed calibration".
 CANDIDATE_ERA_VOTERS: dict[frozenset[tuple[str, str]], str] = {
     PANEL_VOTERS_V6: "v6",
+    PANEL_VOTERS_V7: "v7",
 }
 
 #: STAMPING-ONLY historical compositions -> labeler era. These compositions
@@ -462,9 +485,9 @@ def batch_panel_era(batch_dir: Path) -> str | None:
         return None
     rubric_versions = _batch_matching_rubric_versions(batch_dir)
     current_rubric = rubric_versions == frozenset({MATCHING_RUBRIC_VERSION})
-    # The candidate v6 tag is defined by both its lean voter composition and
-    # the refined canonical rubric.  Pre-rubric canaries with the same roster
-    # are deliberately era-less and cannot be exported under the new meaning.
+    # Candidate v6/v7 tags are defined by both their lean voter composition and
+    # the refined canonical rubric. Pre-rubric canaries with either roster are
+    # deliberately era-less and cannot be exported under the new meaning.
     candidate_era = CANDIDATE_ERA_VOTERS.get(frozenset(voters))
     if candidate_era is not None:
         return candidate_era if current_rubric else None
@@ -807,7 +830,7 @@ def plan_exports(
     Pure w.r.t. the label store: reads human labels but writes nothing. Call
     :func:`write_exports` with the returned report to persist.
 
-    ``stamp_era`` ("v3"/"v4"/"v5"/"v6") fills non-invalid era-less batches only: each
+    ``stamp_era`` ("v3"/"v4"/"v5"/"v6"/"v7") fills non-invalid era-less batches only: each
     batch is first resolved via :func:`batch_panel_era`, and ``stamp_era``
     applies solely to batches whose composition resolves to NO era (unknown
     compositions, which :func:`write_exports` otherwise refuses). A batch that
@@ -1341,8 +1364,8 @@ class EraLabelers:
 
 
 #: Era -> labeler tags for write_exports. v3/v4-era batches keep minting their
-#: own era's tags on (re-)export; v5 batches mint the current tags (with the
-#: quorum variants for quorum verdicts). There is deliberately NO fallback
+#: own era's tags on (re-)export; v5-v7 batches use their generation-specific
+#: tags (with quorum variants for quorum verdicts). There is deliberately NO fallback
 #: entry: an era-less group ("" — unknown composition, or no readable
 #: votes.csv) makes write_exports refuse rather than silently mint the current
 #: era's provenance.
@@ -1360,6 +1383,12 @@ LABELERS_BY_ERA: dict[str, EraLabelers] = {
         PANEL_DECOMPOSED_LABELER_V6,
         accept_quorum=PANEL_QUORUM_LABELER_V6,
         decomposed_quorum=PANEL_QUORUM_DECOMPOSED_LABELER_V6,
+    ),
+    "v7": EraLabelers(
+        PANEL_LABELER_V7,
+        PANEL_DECOMPOSED_LABELER_V7,
+        accept_quorum=PANEL_QUORUM_LABELER_V7,
+        decomposed_quorum=PANEL_QUORUM_DECOMPOSED_LABELER_V7,
     ),
 }
 

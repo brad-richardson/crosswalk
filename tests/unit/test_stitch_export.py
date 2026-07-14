@@ -127,6 +127,11 @@ _V6_VOTERS = [
     ("codex", "gpt-5.6-terra"),
     ("muse", "meta/muse-spark-1.1"),
 ]
+_V7_VOTERS = [
+    ("claude", "claude-opus-4-8"),
+    ("codex", "gpt-5.6-sol"),
+    ("muse", "meta/muse-spark-1.1"),
+]
 # The 2026-07-07 transport-swap composition (commit 80dbe1f): Gemini via
 # opencode instead of agy. Committed v3 labels trace to it, so era resolution
 # must keep stamping it v3 (while the export gate still flags it).
@@ -1692,6 +1697,30 @@ def test_current_rubric_v6_candidate_has_own_era_but_remains_nonstandard(tmp_pat
     assert nonstandard_panel_batches([v6], expected=PANEL_VOTERS_V6) == {}
 
 
+def test_pre_rubric_v7_roster_is_era_less(tmp_path):
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    batch = tmp_path / "pre_rubric_v7"
+    _write_votes_csv(batch, _V7_VOTERS)
+    assert batch_panel_era(batch) is None
+
+
+def test_current_rubric_v7_candidate_has_own_era_but_remains_nonstandard(tmp_path):
+    from crosswalk.agent_labeling.stitch_export import (
+        PANEL_VOTERS_V7,
+        batch_panel_era,
+        nonstandard_panel_batches,
+    )
+
+    v7 = tmp_path / "batch_v7_candidate"
+    _write_votes_csv(v7, _V7_VOTERS)
+    _stamp_matching_rubric(v7)
+    assert frozenset(_V7_VOTERS) == PANEL_VOTERS_V7
+    assert batch_panel_era(v7) == "v7"
+    assert nonstandard_panel_batches([v7]) == {"batch_v7_candidate": set(_V7_VOTERS)}
+    assert nonstandard_panel_batches([v7], expected=PANEL_VOTERS_V7) == {}
+
+
 def test_current_rubric_with_v5_roster_does_not_reuse_historical_era(tmp_path):
     from crosswalk.agent_labeling.stitch_export import batch_panel_era
 
@@ -1848,6 +1877,40 @@ def test_explicitly_approved_v6_candidate_export_uses_v6_labeler(tmp_path, label
     assert write_exports(report, DATASET, labels_dir) == 1
     stored = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
     assert list(stored["labeler"]) == [PANEL_LABELER_V6]
+
+
+def test_explicitly_approved_v7_candidate_export_uses_v7_labeler(tmp_path, labels_dir):
+    from crosswalk.agent_labeling.stitch_export import PANEL_LABELER_V7, batch_panel_era
+
+    batch = make_batch(
+        tmp_path / "v7_candidate",
+        DATASET,
+        [
+            {
+                "group_id": "g_v7",
+                "routing": "auto_accept",
+                "edges": [("r1", "t1")],
+                "route_reason": "unanimous",
+            }
+        ],
+        voters=_V7_VOTERS,
+    )
+    _stamp_matching_rubric(batch, group_id="g_v7")
+    assert batch_panel_era(batch) == "v7"
+    report = plan_exports([batch], DATASET, labels_dir)
+    assert [(g.group_id, g.panel_era) for g in report.exported] == [("g_v7", "v7")]
+    assert write_exports(report, DATASET, labels_dir) == 1
+    stored = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
+    assert list(stored["labeler"]) == [PANEL_LABELER_V7]
+
+
+def test_v7_voter_set_matches_runner_candidate_panel():
+    from crosswalk.agent_labeling.stitch_export import PANEL_VOTERS_V7
+    from crosswalk.agent_labeling.stitch_runner import PANEL_V7_CANDIDATE
+
+    assert frozenset(_V7_VOTERS) == PANEL_VOTERS_V7
+    assert frozenset((p.name, p.model) for p in PANEL_V7_CANDIDATE) == PANEL_VOTERS_V7
+    assert [p.effort for p in PANEL_V7_CANDIDATE] == ["high", "high", "high"]
 
 
 def test_default_panel_voters_match_runner_default_panel():

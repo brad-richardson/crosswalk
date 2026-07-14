@@ -2328,6 +2328,33 @@ def test_v6_candidate_is_lean_claude_codex_muse_trio():
     assert sr.get_panel("v6-flex-calibration")[2].routes == (sr.GEMINI_ROUTE_OPENROUTER_FLEX,)
 
 
+def test_v7_candidate_is_high_effort_sol_replay_trio():
+    """V7 is a new Sol/high generation; v5/v6 reproduction stays unchanged."""
+    v7 = sr.get_panel("v7-candidate")
+    assert v7 is sr.PANEL_V7_CANDIDATE
+    assert [p.name for p in v7] == ["claude", "codex", "muse"]
+    assert [p.model for p in v7] == [
+        "claude-opus-4-8",
+        "gpt-5.6-sol",
+        "meta/muse-spark-1.1",
+    ]
+    assert [p.effort for p in v7] == ["high", "high", "high"]
+    assert v7[2] is sr.MUSE_HIGH_EFFORT
+    assert v7[2].timeout == 480 and v7[2].opencode_agent == "vote"
+    assert {"kimi", "gemini"}.isdisjoint(p.name for p in v7)
+
+    # Historical candidates and the production default retain their exact
+    # model/effort identities.
+    v6 = sr.get_panel("v6-candidate")
+    assert [p.model for p in v6] == [
+        "claude-opus-4-8",
+        "gpt-5.6-terra",
+        "meta/muse-spark-1.1",
+    ]
+    assert [p.effort for p in v6] == ["medium", "medium", ""]
+    assert sr.get_panel("default") is sr.DEFAULT_PANEL
+
+
 def test_gemini_primary_route_records_agy(monkeypatch, tmp_path):
     calls = {"agy": 0, "openrouter": 0}
 
