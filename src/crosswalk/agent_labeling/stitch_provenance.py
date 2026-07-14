@@ -15,6 +15,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+from .matching_rubric import MATCHING_RUBRIC_VERSION
+
 EVIDENCE_SCHEMA_VERSION = 1
 EVIDENCE_MANIFEST = "evidence.json"
 
@@ -465,6 +467,7 @@ def build_evidence_record(
         )
     base: dict[str, Any] = {
         "schema_version": EVIDENCE_SCHEMA_VERSION,
+        "matching_rubric_version": MATCHING_RUBRIC_VERSION,
         "group_id": group_id,
         "source_group_sha256": sha256_json(group),
         "source_universe_kind": source_universe_kind,
@@ -595,8 +598,15 @@ def load_evidence_manifest(group_dir: Path, *, allow_legacy: bool = True) -> dic
             )
         return write_evidence_manifest(group_dir, evidence)
 
-    manifest = json.loads(path.read_text())
-    evidence = manifest.get("evidence") or {}
+    try:
+        manifest = json.loads(path.read_text())
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise EvidenceProvenanceError(f"malformed evidence manifest: {path}") from exc
+    if not isinstance(manifest, dict):
+        raise EvidenceProvenanceError(f"evidence manifest root must be an object: {path}")
+    evidence = manifest.get("evidence")
+    if not isinstance(evidence, dict):
+        raise EvidenceProvenanceError(f"evidence record must be an object: {path}")
     claimed_evidence_id = evidence.pop("evidence_id", None)
     actual_evidence_id = sha256_json(evidence)
     evidence["evidence_id"] = claimed_evidence_id

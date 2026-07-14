@@ -2371,8 +2371,9 @@ def compute_group_structure(
     ref_corridor = _corridor_index(ref_ids, ref_geoms, ref_name_lookup)
     tgt_corridor = _corridor_index(target_ids, target_geoms, target_name_lookup)
 
-    # Candidate bipartite graph (slivers excluded — they are junction artifacts,
-    # not real adjacency).
+    # Structural bipartite graph: omit low-span SLIVER links from adjacency
+    # heuristics so tiny contacts do not dominate components. The candidate
+    # edges themselves remain available for identity/option adjudication.
     g = nx.Graph()
     g.add_nodes_from(("ref", r) for r in ref_ids)
     g.add_nodes_from(("target", t) for t in target_ids)

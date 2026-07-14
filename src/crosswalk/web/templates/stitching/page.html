@@ -124,22 +124,22 @@
 
     // --- Submit-time pair confirmation (inline, no native dialog) ---
     //
-    // Before recording, the reviewer sees the exact pairs that would be stored
-    // (ref → target, per-pair confidence, sliver flag), each untickable; unticked
-    // pairs are excluded. Confirmed pairs are submitted through the explicit
-    // #selected-edges path so the stored set is exactly what was ticked.
+    // Before recording an exact OPTION, the reviewer sees the pairs that would
+    // be stored (ref → target, per-pair confidence, sliver warning), each
+    // untickable. Manual review instead confirms group membership as a SET;
+    // SLIVER is evidence and never silently removes a selected member.
     //
     // When it fires:
-    //   - manual / de-anchored CROSS-PRODUCT submits (#selected-edges empty):
-    //     always, so the reviewer sees what the pill cross-product resolved to.
+    //   - manual / de-anchored SET submits (#selected-edges empty): always, so
+    //     the reviewer confirms the selected ref/target membership.
     //   - a picked OPTION on a STALE queue entry (grouping changed since the
     //     batch): so ratifying a possibly out-of-date proposal is an informed act.
     // A normal (non-stale) option pick submits directly — an option is a curated
     // exact edge set and needs no reconstruction.
     //
-    // Supersedes the old #286 native-confirm reject-all dialog: an empty confirmed
-    // set in de-anchored mode still sets the server-required confirm_reject_all
-    // flag, so a blank-slate misclick cannot silently record a false reject-all.
+    // Supersedes the old #286 native-confirm reject-all dialog: any empty
+    // confirmed set sets the server-required confirm_reject_all flag, so no
+    // review mode can silently record a false reject-all.
     function isStaleGroup() {
         var card = document.getElementById('group-card');
         return !!card && card.getAttribute('data-stale') === '1';
@@ -193,9 +193,7 @@
     // Build the pair list the confirmation panel presents.
     //   - option/stale mode: the picked option's exact edges (all ticked).
     //   - manual mode: the active ref×target cross-product over the candidate
-    //     union; sliver pairs are shown flagged and UNTICKED by default when
-    //     sliver exclusion is active (mirrors what the server would have stored),
-    //     so the reviewer can opt them back in explicitly.
+    //     union, used only as supporting evidence for the SET confirmation.
     function collectConfirmPairs(isOption) {
         var edges = parseGroupEdges();
         var byKey = {};
@@ -220,13 +218,12 @@
                 chosen.push({ edge: e, checked: true });
             }
         } else {
-            var exclude = sliverExclusionActive();
             var activeRefs = pillIdSet('.segment-pill-ref.active');
             var activeTargets = pillIdSet('.segment-pill-target.active');
             for (var k = 0; k < edges.length; k++) {
                 var ed = edges[k];
                 if (activeRefs[ed.ref_id] && activeTargets[ed.target_id]) {
-                    chosen.push({ edge: ed, checked: !(exclude && ed.is_sliver) });
+                    chosen.push({ edge: ed, checked: true });
                 }
             }
         }
@@ -394,7 +391,6 @@
     //     the server records a SET label from included_refs/included_targets.
     function confirmPairSubmit() {
         var sel = document.getElementById('selected-edges');
-        var modeField = document.querySelector('#select-form input[name="deanchored"]');
         var flag = document.getElementById('confirm-reject-all');
 
         if (window.__pairConfirmIsOption) {
@@ -410,17 +406,17 @@
             }
             if (sel) sel.value = ticked.length ? JSON.stringify(ticked) : '';
             if (flag) {
-                flag.value = (ticked.length === 0 && modeField && modeField.value === '1') ? '1' : '';
+                flag.value = ticked.length === 0 ? '1' : '';
             }
         } else {
             // Set path: no explicit edges; membership rides in included_refs /
             // included_targets (populated by populateSelection). An empty
-            // membership in de-anchored mode is a deliberate reject-all.
+            // membership is a deliberate reject-all in every review mode.
             if (sel) sel.value = '';
             var nActive = document.querySelectorAll('.segment-pill-ref.active').length +
                 document.querySelectorAll('.segment-pill-target.active').length;
             if (flag) {
-                flag.value = (nActive === 0 && modeField && modeField.value === '1') ? '1' : '';
+                flag.value = nActive === 0 ? '1' : '';
             }
         }
 
@@ -467,16 +463,13 @@
                 for (var j = 0; j < targetPills.length; j++) activeTargets[targetPills[j].title] = true;
             }
 
-            // In manual mode (no exact option), respect the sliver exclusion so
-            // the live confidence matches what the server will actually store.
-            var excludeSlivers = !selectedSet && sliverExclusionActive();
             var weightedSum = 0, weightTotal = 0;
             for (var k = 0; k < edges.length; k++) {
                 var e = edges[k];
                 var included = selectedSet
                     ? !!selectedSet[e.ref_id + '\u0000' + e.target_id]
                     : (activeRefs[e.ref_id] && activeTargets[e.target_id]);
-                if (included && !(excludeSlivers && e.is_sliver)) {
+                if (included) {
                     var refFrac = Math.abs((e.gers_end_frac || 1) - (e.gers_start_frac || 0));
                     var tgtFrac = Math.abs((e.local_end_frac || 1) - (e.local_start_frac || 0));
                     var w = (refFrac + tgtFrac) / 2;
@@ -533,15 +526,7 @@
         return out;
     }
 
-    // --- Sliver-edge exclusion helpers (feature 3) ---
-
-    // True when a manual cross-product submit should drop junction slivers.
-    // Driven by the hidden #exclude-slivers-field kept in sync with the
-    // (default-unchecked) "include sliver edges" checkbox.
-    function sliverExclusionActive() {
-        var f = document.getElementById('exclude-slivers-field');
-        return !!f && f.value === 'true';
-    }
+    // --- Sliver evidence helpers ---
 
     function parseGroupEdges() {
         var el = document.getElementById('group-edges');
@@ -571,16 +556,13 @@
         return out;
     }
 
-    // Compute the effective selection: the edges/segments that will actually be
-    // stored, honoring the sliver exclusion. Single source of truth for the live
-    // confidence, summaries, sliver indicator and coverage-gap overlay.
+    // Compute the displayed selection. SLIVER tags are warning evidence only:
+    // they never remove an exact option edge or an active SET member.
     function computeEffectiveSegments() {
         var edges = parseGroupEdges();
         var selNested = parseSelectedSet();
-        var exclude = !selNested && sliverExclusionActive();
         var includedEdges = [];
-        var sliverCount = 0;   // slivers within the raw active selection
-        var droppedIds = {};   // active pills dropped as sliver-only (summary)
+        var sliverCount = 0;
 
         if (selNested) {
             // Option mode: exact edge set, stored verbatim (no exclusion).
@@ -595,91 +577,57 @@
             includedEdges.forEach(function (e) { optRefs[e.ref_id] = true; optTargets[e.target_id] = true; });
             return { mode: 'option', exclude: false, includedEdges: includedEdges,
                      activeRefs: optRefs, activeTargets: optTargets,
-                     sliverCount: sliverCount, droppedIds: droppedIds };
+                     sliverCount: sliverCount };
         }
 
         // Manual mode: cross-product of the active pills.
         var activeRefs = pillIdSet('.segment-pill-ref.active');
         var activeTargets = pillIdSet('.segment-pill-target.active');
-        var activeEdges = [];
         for (var j = 0; j < edges.length; j++) {
             var ed = edges[j];
             if (activeRefs[ed.ref_id] && activeTargets[ed.target_id]) {
-                activeEdges.push(ed);
                 if (ed.is_sliver) sliverCount++;
-                if (!(exclude && ed.is_sliver)) includedEdges.push(ed);
+                includedEdges.push(ed);
             }
         }
-        if (exclude) {
-            // Drop an active pill from the summary only when it participates in
-            // the selection AND every one of its active edges is a sliver.
-            function markDropped(idSet, keyFn) {
-                Object.keys(idSet).forEach(function (id) {
-                    var acts = activeEdges.filter(function (a) { return keyFn(a) === id; });
-                    if (acts.length > 0 && acts.every(function (a) { return a.is_sliver; })) {
-                        droppedIds[id] = true;
-                    }
-                });
-            }
-            markDropped(activeRefs, function (a) { return a.ref_id; });
-            markDropped(activeTargets, function (a) { return a.target_id; });
-        }
-        return { mode: 'manual', exclude: exclude, includedEdges: includedEdges,
+        return { mode: 'manual', exclude: false, includedEdges: includedEdges,
                  activeRefs: activeRefs, activeTargets: activeTargets,
-                 sliverCount: sliverCount, droppedIds: droppedIds };
+                 sliverCount: sliverCount };
     }
 
-    // Collect an attribute from active pills, skipping any dropped by exclusion.
-    function collectSummaryAttr(selector, attr, droppedIds) {
+    function collectSummaryAttr(selector, attr) {
         var out = [];
         var pills = document.querySelectorAll(selector);
         for (var i = 0; i < pills.length; i++) {
-            if (droppedIds && droppedIds[pills[i].title]) continue;
             out.push(pills[i].getAttribute(attr) || '');
         }
         return out;
     }
 
-    // Recompute Class/Name summaries from the effective (post-exclusion) pills.
-    function updateSummaries(sel) {
-        var dropped = (sel && sel.droppedIds) || {};
+    // Recompute Class/Name summaries from every active membership pill.
+    function updateSummaries() {
         var classEl = document.getElementById('summary-class-value');
         if (classEl) {
-            var refCls = collectSummaryAttr('.segment-pill-ref.active', 'data-cls', dropped);
-            var tgtCls = collectSummaryAttr('.segment-pill-target.active', 'data-cls', dropped);
+            var refCls = collectSummaryAttr('.segment-pill-ref.active', 'data-cls');
+            var tgtCls = collectSummaryAttr('.segment-pill-target.active', 'data-cls');
             classEl.textContent = joinDedup(refCls) + ' → ' + joinDedup(tgtCls);
         }
         var nameEl = document.getElementById('summary-name-value');
         if (nameEl) {
-            var refName = collectSummaryAttr('.segment-pill-ref.active', 'data-name', dropped);
-            var tgtName = collectSummaryAttr('.segment-pill-target.active', 'data-name', dropped);
+            var refName = collectSummaryAttr('.segment-pill-ref.active', 'data-name');
+            var tgtName = collectSummaryAttr('.segment-pill-target.active', 'data-name');
             nameEl.textContent = joinDedup(refName) + ' → ' + joinDedup(tgtName);
         }
     }
 
-    // Show a small, never-silent indicator of how sliver edges are being handled.
+    // Show a neutral, never-silent indicator that sliver evidence is present.
     function updateSliverIndicator(sel) {
         var el = document.getElementById('sliver-indicator');
         if (!el) return;
         var n = (sel && sel.sliverCount) || 0;
         if (n <= 0) { el.textContent = ''; return; }
         var noun = n === 1 ? 'sliver' : 'slivers';
-        if (sel.mode === 'option') {
-            el.textContent = n + ' ' + noun + ' in option';
-        } else if (sel.exclude) {
-            el.textContent = n + ' ' + noun + ' excluded';
-        } else {
-            el.textContent = n + ' ' + noun + ' included';
-        }
-    }
-
-    // Toggle handler for the "include sliver edges" checkbox: unchecked (default)
-    // means EXCLUDE, so the hidden field carries the negation. Always explicit.
-    function onSliverToggle() {
-        var cb = document.getElementById('include-slivers-toggle');
-        var field = document.getElementById('exclude-slivers-field');
-        if (field) field.value = (cb && cb.checked) ? 'false' : 'true';
-        refreshSelectionUI();
+        el.textContent = n + ' ' + noun + ' flagged as low-overlap evidence';
     }
 
     // Single refresh entry point: recompute the effective selection and update
@@ -687,7 +635,7 @@
     function refreshSelectionUI() {
         var sel = computeEffectiveSegments();
         updateConfidence();
-        updateSummaries(sel);
+        updateSummaries();
         updateSliverIndicator(sel);
         updateContextNotice();
         updateReviewSummary();

@@ -14,7 +14,7 @@ muse/Muse Spark 1.1, paired with the quorum consensus rule. The tag is bumped
 whenever the panel composition OR its pack inputs change, and each batch is
 stamped with ITS OWN era's tag — see :data:`STANDARD_PANEL_VOTERS`).
 
-Two verdict classes are promoted:
+One directly voted panel verdict class is promoted:
 
   * **Accept** (routing == ``auto_accept``) -> a normal pair label with the
     panel's chosen edge set. Since v5 the accept tier is part of provenance:
@@ -24,19 +24,14 @@ Two verdict classes are promoted:
     ``panel_quorum_v5`` — the two must stay distinguishable end-to-end.
     v4/v3-era batches keep their ``panel_unanimous_v4``/``_v3`` tags (their
     3-voter rule could not produce a quorum accept).
-  * **All-valid NONE** (every valid vote was "none of the options fit"; routed
-    to ``human_review`` with route_reason ``unanimous_none``, or its v5 quorum
-    analog ``quorum_none``) -> an EMPTY-SET pair label
-    (``selected_edges == []``), tagged ``panel_unanimous_none_v5`` (4/4) or
-    ``panel_quorum_none_v5`` (3-of-4 over an abstention). This is
-    the reject-all ground truth the learned group resolver needs to train/eval on
-    rejects (see ``research/learned_optimizer_design.md`` §2.4a / milestone L1):
-    the cross-mode defect (a cycleway wrongly grouped with a parallel road) has
-    exactly this shape -- the correct answer is "select nothing". Empty-set export
-    is on by default; pass ``export_empty_set=False`` (CLI ``--no-empty-set``) to
-    skip it.
+Panel ``NONE`` is never promoted directly. It deliberately covers three
+different panel outcomes: every edge is a no-match, no offered option is exact,
+or the evidence is insufficient. Consensus routes every ``NONE`` to human
+review, where an explicit human reject-all writes the unambiguous empty-set
+label if appropriate. Historical ``panel_*_none_*`` labels remain readable,
+but this exporter cannot mint new ones.
 
-A third class covers DECOMPOSED groups (#367 Mode B, ``stitch-batch
+A second, recomposed class covers DECOMPOSED groups (#367 Mode B, ``stitch-batch
 --decompose``): an over-backstop group split into panel-sized sub-problems is
 recomposed here — a whole-group label (the union of the sub-selections) is
 minted ONLY when every sub-problem in the batch.json roster resolved as a
@@ -52,40 +47,26 @@ taints the union — the label's weakest link names it). Sub-problem consensus
 rows are consumed by that recomposition and never export individually. See
 :mod:`crosswalk.matching.group_decomposition`.
 
-The empty-set label uses the SAME on-disk representation as a human reject-all
-review (PAIR semantics, ``selected_edges == "[]"``, ``num_refs/num_targets == 0``),
-so it round-trips through every consumer that already handles reject-all human
-labels -- ``stitch_eval.recover_labeled_groups`` (``empty`` bucket),
-``recover_empty_reject_all`` / ``mbench.map_labels_to_groups`` (verbatim group_id
-recovery), the ``edge_prf`` empty-vs-empty perfect score, and
-``render_review_diffs`` (``is_reject_all``).
+Historical panel empty-set labels use the same on-disk representation as a
+human reject-all review and remain readable by existing consumers. This is
+backward compatibility only; new reject-all truth comes from human review.
 
 Gates (applied in order; the first failing gate decides the group and is
 reported):
 
-  a. routing gate -- an ``auto_accept`` row takes the accept path; a
-     ``unanimous_none`` row takes the empty-set path (when ``export_empty_set``);
-     everything else is not a candidate at all.
-  b. size gate -- accept groups: huge/tangled groups stay for human review
-     (structural gate, or flat ``max_edges`` fallback). Empty-set groups apply
-     ONLY the hard backstop ceiling on the group's candidate size (see
-     :func:`_gate_empty_group`): the corridor/assignment-tangle sub-gate targets
-     *selection greediness*, which is irrelevant to an empty selection, and it
-     would wrongly block the 2-corridor cross-mode reject this path exists to
-     capture.
+  a. routing gate -- only an ``auto_accept`` row is a candidate. ``NONE`` and
+     every other human-review outcome are never panel-exportable.
+  b. size gate -- huge/tangled groups stay for human review (structural gate,
+     or flat ``max_edges`` fallback).
   c. class-consistency gate -- reuses the panel runner's cross-mode rule
      (:func:`stitch_runner.has_cross_mode_edge`) on the chosen edge set
      (pedestrian / vehicular / bike; any two different modes are cross-mode).
-     Vacuous on an empty set (no edges to gate), so it is skipped on the
-     empty-set path -- correctly, since the whole point is to record cross-mode
-     rejects.
-  d. sliver canonicalization -- drops junction-sliver edges (shared definition in
-     :func:`crosswalk.matching.sliver`); if that empties the set the accept group
-     is skipped. Skipped on the empty-set path (the emptiness is intentional, not
-     a sliver artifact).
+  d. sliver exactness gate -- if the exact voted set contains a geometry-tagged
+     sliver, the group is skipped for human review. Export never silently edits
+     an exact panel selection by deleting edges.
   e. human precedence -- a group already covered by a *human* label (by exact
      group_id or by edge-overlap, reusing :func:`stitch_eval.map_human_labels_to_groups`)
-     is left untouched. Applies to both paths.
+     is left untouched. Applies to direct and recomposed paths.
 
 Writing is idempotent: rows are upserted by ``group_id`` under the appropriate
 ``panel_*`` labeler, so re-running never duplicates and always refreshes to the
@@ -116,10 +97,10 @@ from ..matching.group_decomposition import (
 )
 from ..matching.optimizer import group_is_structurally_simple
 from ..matching.sliver import annotate_group_sliver_flags
+from .matching_rubric import MATCHING_RUBRIC_VERSION
 from .panel_routing import (
+    REASON_CONTAINS_SLIVER,
     REASON_QUORUM,
-    REASON_QUORUM_NONE,
-    REASON_UNANIMOUS_NONE,
     _int_or_none,
     candidate_edge_count,
     counts_show_abstention,
@@ -187,17 +168,9 @@ PANEL_LABELER_PREFIX = "panel_"
 # noisier). Kept under the ``panel_`` prefix (non-human).
 PANEL_QUORUM_LABELER = "panel_quorum_v5"
 
-# Distinct labeler for all-valid-NONE (reject-all / empty-set) verdicts. Kept
-# UNDER the ``panel_`` prefix so every consumer that buckets labels by that
-# prefix -- the human-precedence filter here, ``mbench.eval.stitch_metrics``
-# (``_labeler_class`` -> "panel"), ``xprod``/``cli.data`` -- still classes it as
-# a non-human panel label. A *separate* tag (rather than reusing PANEL_LABELER)
-# keeps reject-all ground truth sliceable on its own in per-labeler eval: it is
-# semantically a different verdict (select nothing vs select a subset) and the
-# cross-mode acceptance test reports rejects as their own table
-# (research/learned_optimizer_design.md §6.3). Version suffix tracks PANEL_LABELER
-# (same panel composition / pack inputs). The quorum variant is the reject-all
-# analog of PANEL_QUORUM_LABELER (3-of-4 NONE over an abstention).
+# Historical reject-all labelers remain defined so committed rows stay readable
+# and attributable. The exporter no longer mints these tags: panel NONE is
+# overloaded and must be confirmed by a human before becoming empty-set truth.
 PANEL_NONE_LABELER = "panel_unanimous_none_v5"
 PANEL_QUORUM_NONE_LABELER = "panel_quorum_none_v5"
 
@@ -296,9 +269,9 @@ STANDARD_PANEL_VOTERS: dict[str, frozenset[tuple[str, str]]] = {
     "v5": PANEL_VOTERS_V5,
 }
 
-# Known candidate compositions resolve to their own labeler generation but do
-# NOT pass nonstandard_panel_batches. This separates "we know how to stamp it"
-# from "it passed the production calibration gate".
+# Known candidate compositions paired with the current matching rubric resolve
+# to their own labeler generation but do NOT pass nonstandard_panel_batches.
+# This separates "we know how to stamp it" from "it passed calibration".
 CANDIDATE_ERA_VOTERS: dict[frozenset[tuple[str, str]], str] = {
     PANEL_VOTERS_V6: "v6",
 }
@@ -360,8 +333,114 @@ def _batch_voters(batch_dir: Path) -> set[tuple[str, str]] | None:
     return voters or None
 
 
+def _batch_matching_rubric_versions(batch_dir: Path) -> frozenset[str]:
+    """Return rubric versions bound to the batch's voted evidence packs.
+
+    ``""`` denotes a legacy/missing rubric stamp. ``"<invalid>"`` denotes a
+    present but unverifiable pack or ballot/consensus linkage. A non-empty
+    rubric stamp counts only when the complete pack verifies and every ballot
+    plus the consensus row names its exact evidence and pack hashes.
+    """
+    batch_dir = Path(batch_dir)
+    votes_path = batch_dir / "votes.csv"
+    try:
+        votes = pd.read_csv(votes_path, dtype={"group_id": str})
+    except (FileNotFoundError, pd.errors.EmptyDataError, pd.errors.ParserError, ValueError):
+        return frozenset({""})
+    if "group_id" not in votes.columns:
+        return frozenset({"<invalid>"})
+    consensus_path = batch_dir / "consensus.csv"
+    try:
+        consensus = pd.read_csv(consensus_path, dtype={"group_id": str})
+    except (FileNotFoundError, pd.errors.EmptyDataError, pd.errors.ParserError, ValueError):
+        consensus = pd.DataFrame()
+    if consensus_path.exists() and "group_id" not in consensus.columns:
+        return frozenset({"<invalid>"})
+
+    def _group_ids(frame: pd.DataFrame) -> set[str]:
+        if "group_id" not in frame.columns:
+            return set()
+        ids: set[str] = set()
+        for value in frame["group_id"]:
+            if pd.isna(value):
+                raise ValueError("group_id is null")
+            group_id = safe_group_id(str(value).strip())
+            ids.add(group_id)
+        return ids
+
+    try:
+        vote_group_ids = _group_ids(votes)
+        consensus_group_ids = _group_ids(consensus)
+    except (TypeError, ValueError):
+        return frozenset({"<invalid>"})
+
+    link_fields = {"evidence_id", "evidence_pack_sha256"}
+    any_link_fields = bool(
+        link_fields.intersection(votes.columns) or link_fields.intersection(consensus.columns)
+    )
+    full_linkage = link_fields.issubset(votes.columns) and link_fields.issubset(consensus.columns)
+
+    def _rows_bind_manifest(frame: pd.DataFrame, group_id: str, manifest: dict) -> bool:
+        rows = frame[frame["group_id"].astype(str) == group_id]
+        if rows.empty:
+            return False
+        expected = {
+            "evidence_id": str(manifest["evidence"]["evidence_id"]),
+            "evidence_pack_sha256": str(manifest["evidence_pack_sha256"]),
+        }
+        for column, value in expected.items():
+            cells = rows[column].fillna("").astype(str).str.strip()
+            if not cells.eq(value).all():
+                return False
+        return True
+
+    manifests: dict[str, dict] = {}
+    versions: dict[str, str] = {}
+    all_group_ids = vote_group_ids | consensus_group_ids
+    for group_id in sorted(all_group_ids):
+        group_dir = batch_dir / group_id
+        if not (group_dir / "evidence.json").exists():
+            versions[group_id] = ""
+            continue
+        try:
+            manifest = load_evidence_manifest(group_dir, allow_legacy=False)
+            evidence = manifest.get("evidence")
+            if not isinstance(evidence, dict):
+                raise ValueError("evidence record is not an object")
+            versions[group_id] = str(evidence.get("matching_rubric_version") or "")
+            manifests[group_id] = manifest
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            return frozenset({"<invalid>"})
+
+    # A stamped rubric is a batch-wide relational contract, not merely a field
+    # found on whichever ballot groups happen to be convenient to inspect.
+    # Once any pack declares a rubric (or either CSV carries linkage fields),
+    # require exact vote/consensus group agreement, one consensus row per group,
+    # and matching links on every ballot and consensus row. This prevents a
+    # consensus-only group from borrowing another group's verified v6 identity.
+    linked_profile = any(versions.values()) or any_link_fields
+    if not linked_profile:
+        return frozenset({""})
+    if (
+        not full_linkage
+        or not vote_group_ids
+        or vote_group_ids != consensus_group_ids
+        or any(not versions.get(group_id) for group_id in vote_group_ids)
+    ):
+        return frozenset({"<invalid>"})
+    for group_id in sorted(vote_group_ids):
+        if int((consensus["group_id"].astype(str).str.strip() == group_id).sum()) != 1:
+            return frozenset({"<invalid>"})
+        manifest = manifests[group_id]
+        if not _rows_bind_manifest(votes, group_id, manifest) or not _rows_bind_manifest(
+            consensus, group_id, manifest
+        ):
+            return frozenset({"<invalid>"})
+    return frozenset(versions.values())
+
+
 def batch_panel_era(batch_dir: Path) -> str | None:
-    """Return the labeler era ("v3"/"v4"/"v5"/"v6") for a batch composition.
+    """Return the labeler era for a batch's composition *and* rubric profile.
 
     Resolution order: the blessed sets (:data:`STANDARD_PANEL_VOTERS`), then the
     stamping-only historical map (:data:`HISTORICAL_ERA_VOTERS`) — compositions
@@ -370,20 +449,34 @@ def batch_panel_era(batch_dir: Path) -> str | None:
     the export gate (:func:`nonstandard_panel_batches`) still flags those
     batches, exactly as it did when they were first exported.
 
-    ``None`` means the batch is attributable to NO known era: an unknown
-    composition, or no readable ``votes.csv``. Such batches are refused at
-    write time unless the operator declares an era explicitly
-    (``plan_exports(stamp_era=...)`` / CLI ``--stamp-era``); they never
-    silently default to the current era.
+    ``None`` means the batch is attributable to no known era: an unknown
+    composition, no readable ``votes.csv``, or a valid rubric profile that is
+    not a known candidate generation. Non-invalid era-less batches are refused
+    at write time unless the operator declares an era explicitly
+    (``plan_exports(stamp_era=...)`` / CLI ``--stamp-era``). Invalid rubric
+    provenance is stricter: :func:`plan_exports` rejects it before any explicit
+    stamp can apply. Neither case silently defaults to the current era.
     """
     voters = _batch_voters(batch_dir)
     if voters is None:
+        return None
+    rubric_versions = _batch_matching_rubric_versions(batch_dir)
+    current_rubric = rubric_versions == frozenset({MATCHING_RUBRIC_VERSION})
+    # The candidate v6 tag is defined by both its lean voter composition and
+    # the refined canonical rubric.  Pre-rubric canaries with the same roster
+    # are deliberately era-less and cannot be exported under the new meaning.
+    candidate_era = CANDIDATE_ERA_VOTERS.get(frozenset(voters))
+    if candidate_era is not None:
+        return candidate_era if current_rubric else None
+    # v3-v5 are historical prompt eras. Any non-legacy rubric profile (current,
+    # unknown, mixed, or invalid) is a different/unattributable process.
+    if rubric_versions != frozenset({""}):
         return None
     for era, blessed in STANDARD_PANEL_VOTERS.items():
         if voters == blessed:
             return era
     frozen = frozenset(voters)
-    return CANDIDATE_ERA_VOTERS.get(frozen) or HISTORICAL_ERA_VOTERS.get(frozen)
+    return HISTORICAL_ERA_VOTERS.get(frozen)
 
 
 def nonstandard_panel_batches(
@@ -397,8 +490,11 @@ def nonstandard_panel_batches(
     ``expected=None``, a batch passes when it exactly matches ANY era's blessed
     set (:data:`STANDARD_PANEL_VOTERS`): historical v3 batches (claude+codex+agy
     with their v3 models) stay standard instead of being retroactively flagged,
-    and v4 batches validate against the v4 set. Pass an explicit ``expected``
-    frozenset of (provider, model) pairs to pin a single composition.
+    and v4 batches validate against the v4 set. Current/unknown/invalid rubric
+    profiles remain candidates and are flagged until a new production process
+    is blessed.
+    Pass an explicit ``expected`` frozenset of (provider, model) pairs to pin
+    and explicitly accept a single composition.
 
     Keying on the pair (not the provider name) is the point of this gate: the
     two unblessed opencode-transport voters opencode/Gemini and opencode/Qwen
@@ -417,7 +513,13 @@ def nonstandard_panel_batches(
         voters = _batch_voters(bd)
         if voters is None:
             continue
-        if not any(voters == blessed for blessed in accepted):
+        rubric_versions = _batch_matching_rubric_versions(bd)
+        legacy_rubric = rubric_versions == frozenset({""})
+        current_rubric = rubric_versions == frozenset({MATCHING_RUBRIC_VERSION})
+        rubric_blocked = (not legacy_rubric and not current_rubric) or (
+            expected is None and current_rubric
+        )
+        if rubric_blocked or not any(voters == blessed for blessed in accepted):
             offending[Path(bd).name] = voters
     return offending
 
@@ -427,7 +529,9 @@ REASON_EXPORTED = "exported"
 REASON_OVER_MAX = "over_max_edges"
 REASON_STRUCTURAL_TANGLE = "structural_tangle"
 REASON_CLASS_MISMATCH = "class_mismatch"
+# Historical report reason retained for compatibility with archived output.
 REASON_EMPTIED_BY_SLIVER = "emptied_by_sliver"
+REASON_EMPTY_SELECTION = "empty_selection"
 REASON_HUMAN_PRECEDENCE = "human_precedence"
 # Decomposed-group (recomposition) outcomes: a sub-problem the panel could not
 # unanimously accept, or one never voted (including size-gated irreducible
@@ -463,8 +567,8 @@ class GroupExport:
     mean_confidence: float = 0.0
     selected_edges: list[dict] = field(default_factory=list)
     human_group_id: str = ""
-    # True for a unanimous-NONE (reject-all) export: selected_edges is empty and
-    # the row is stamped PANEL_NONE_LABELER. False for a normal accept export.
+    # Historical compatibility flag. New plans never export panel empty sets;
+    # write_exports also rejects a manually constructed empty outcome.
     is_empty_set: bool = False
     # True for a recomposed decomposed-group outcome (#367 Mode B): the group's
     # verdict is the union of per-sub-problem panel votes; an export is stamped
@@ -473,9 +577,8 @@ class GroupExport:
     n_subproblems: int = 0
     n_subproblems_resolved: int = 0
     # True when the verdict is a QUORUM one (v5 rule; see _is_quorum_accept):
-    # a direct accept with >=1 abstention among the panel; an all-valid NONE
-    # over an abstention (quorum_none); or a recomposition ANY of whose
-    # consumed sub-verdicts was quorum-accepted (quorum taints the union).
+    # a direct accept with >=1 abstention among the panel, or a recomposition ANY
+    # of whose consumed sub-verdicts was quorum-accepted (quorum taints the union).
     # write_exports mints the panel_quorum_* labeler variants for these so the
     # unanimous/quorum provenance distinction survives end-to-end.
     is_quorum: bool = False
@@ -497,9 +600,8 @@ class ExportReport:
     n_total_groups: int
     n_auto_accept: int
     groups: list[GroupExport]
-    # Count of all-valid-NONE candidate groups seen (unanimous_none plus the
-    # v5 quorum_none analog — the empty-set path's analog of ``n_auto_accept``).
-    # Zero when ``export_empty_set`` is off.
+    # Historical compatibility field. New export plans never include panel
+    # NONE candidates, so this is always zero.
     n_unanimous_none: int = 0
     # Decomposition (#367 Mode B): consensus rows consumed as sub-problem
     # verdicts (never exported individually), and parents with a roster.
@@ -612,59 +714,13 @@ def _meta_from_group(grp: dict) -> dict | None:
     }
 
 
-def _none_verdict_kind(row: dict) -> str | None:
-    """Classify a consensus row as a reject-all verdict: "unanimous", "quorum", or None.
-
-    ``"unanimous"``: every recorded vote was a valid NONE (``unanimous_none``).
-    ``"quorum"`` (v5 rule): all valid votes were NONE at quorum with >=1
-    abstention (``quorum_none``) — the reject-all analog of a quorum accept,
-    minted under the distinct quorum-NONE labeler. ``None``: not a reject-all
-    candidate at all.
-
-    Reuses the shared route-reason derivation so it matches both freshly-stamped
-    rows and historical waves that predate
-    the stamp (derived from ``consensus == "unanimous"`` + ``choice == "NONE"``).
-    A reject-all row routes to ``human_review`` (it is never ``auto_accept``),
-    so it is disjoint from the accept path.
-
-    Defense-in-depth quorum check (this path mints reject ground truth): the
-    derivation trusts the ``consensus`` column verbatim, but all-valid agreement
-    is only meaningful with a full quorum (``compute_consensus`` requires >= 3
-    agreeing valid votes). A hand-edited or pre-quorum-rule historical row
-    claiming an all-NONE tier with ``n_valid < 3`` must not be exported, so:
-
-    * ``n_valid`` present -> require ``n_valid >= 3`` (contradicting evidence
-      blocks the export even when a ``route_reason`` stamp is present);
-    * ``n_valid`` missing/unparseable -> conservatively require the explicit
-      ``route_reason`` stamp (written only by ``compute_consensus``, which
-      enforces the quorum) rather than deriving from consensus/choice alone.
-    """
-    reason = derive_route_reason(row)
-    if reason not in (REASON_UNANIMOUS_NONE, REASON_QUORUM_NONE):
-        return None
-    n_valid = _int_or_none(row.get("n_valid"))
-    if n_valid is not None:
-        if n_valid < 3:
-            return None
-    else:
-        # No n_valid evidence: trust only the compute_consensus stamp (accepting
-        # the legacy "unanimous_NONE" spelling normalized by derive_route_reason).
-        stamp = str(row.get("route_reason") or "").strip()
-        if stamp not in (REASON_UNANIMOUS_NONE, "unanimous_NONE", REASON_QUORUM_NONE):
-            return None
-    if reason == REASON_QUORUM_NONE or _counts_show_abstention(row):
-        return "quorum"
-    return "unanimous"
-
-
 def _counts_show_abstention(row: dict) -> bool:
     """True when a row's vote counts prove >=1 abstention (``n_valid < n_votes``).
 
     Count evidence must always be able to DOWNGRADE a verdict's tier to quorum,
-    even against a contradicting ``unanimous``/``unanimous_none`` stamp (which
+    even against a contradicting ``unanimous`` stamp (which
     ``derive_route_reason`` would otherwise return verbatim as an informative
-    existing reason) — the same contradicting-evidence-wins stance
-    :func:`_none_verdict_kind` takes on the quorum floor. Missing/unparseable
+    existing reason). Missing/unparseable
     counts are no evidence (False); logically impossible counts are handled
     conservatively (treated as abstention-present, the weaker quorum claim) by
     the shared :func:`panel_routing.counts_show_abstention`.
@@ -681,7 +737,7 @@ def _accept_below_quorum(row: dict) -> bool:
     with routing ``auto_accept`` but ``n_valid`` present and < 3 is a hand-edit /
     corrupt / pre-quorum-rule artifact that must NOT mint accept ground truth.
     ``n_valid`` missing is no evidence — historical rows lacking the column keep
-    exporting (same "no evidence -> untouched" stance the reject-all path takes).
+    exporting (the conservative "no evidence -> untouched" stance).
     """
     n_valid = _int_or_none(row.get("n_valid"))
     return n_valid is not None and n_valid < 3
@@ -743,7 +799,7 @@ def plan_exports(
     max_assignment_components: int | None = None,
     soft_max_edges: int | None = None,
     backstop_max_edges: int | None = None,
-    export_empty_set: bool = True,
+    export_empty_set: bool = False,
     stamp_era: str | None = None,
 ) -> ExportReport:
     """Run the export gates over merged consensus and return a full plan.
@@ -751,7 +807,7 @@ def plan_exports(
     Pure w.r.t. the label store: reads human labels but writes nothing. Call
     :func:`write_exports` with the returned report to persist.
 
-    ``stamp_era`` ("v3"/"v4"/"v5"/"v6") fills era-less batches only: each
+    ``stamp_era`` ("v3"/"v4"/"v5"/"v6") fills non-invalid era-less batches only: each
     batch is first resolved via :func:`batch_panel_era`, and ``stamp_era``
     applies solely to batches whose composition resolves to NO era (unknown
     compositions, which :func:`write_exports` otherwise refuses). A batch that
@@ -759,7 +815,10 @@ def plan_exports(
     era-less and one blessed-v4 batch with ``stamp_era="v3"`` stamps v3 only
     on the era-less one, never re-stamping the v4 batch. It should accompany
     ``--allow-nonstandard-panel``-style explicit provenance decisions only.
-    ``None`` (default) leaves era-less batches unresolved.
+    ``None`` (default) leaves era-less batches unresolved. An invalid linked
+    rubric profile (tampered pack, stale ballot links, unsafe/mismatched group
+    roster) is never era-less: planning rejects it before an explicit stamp can
+    override the failed integrity check.
 
     The size gate is *structural*, not a flat edge count: a group auto-exports
     when it is a single corridor-pair OR has few assignment-components within a
@@ -772,12 +831,15 @@ def plan_exports(
     group's candidate count, so the backstop invariant (no over-backstop group
     ever auto-exports) holds on the legacy path too.
 
-    When ``export_empty_set`` (default), all-valid-NONE groups (every valid
-    vote was "none of the options fit" at quorum — ``unanimous_none``, or the
-    v5 ``quorum_none`` analog) additionally become EMPTY-SET candidates:
-    reject-all pair labels with ``selected_edges == []`` (see
-    :func:`_gate_empty_group`). Set it False to plan the accept path only.
+    ``export_empty_set`` is a retained compatibility argument and must remain
+    False. Panel ``NONE`` is semantically overloaded and cannot become reject-all
+    truth without human confirmation; passing True therefore fails closed.
     """
+    if export_empty_set:
+        raise ValueError(
+            "panel NONE cannot be exported as reject-all ground truth; "
+            "confirm the empty set in human review"
+        )
     # Calibration batches (a ``.no-export`` marker) must not mint labels — drop
     # them up front so nothing downstream plans against them. panel_routing still
     # reads them, so their contested groups reach the human queue.
@@ -802,6 +864,16 @@ def plan_exports(
             "vote-provenance archival key on the basename and would collapse "
             "them — pass uniquely-named batch dirs."
         )
+    invalid_rubric_batches = sorted(
+        Path(bd).name
+        for bd in batch_dirs
+        if "<invalid>" in _batch_matching_rubric_versions(Path(bd))
+    )
+    if invalid_rubric_batches:
+        raise ValueError(
+            "invalid matching-rubric provenance in batches "
+            f"{invalid_rubric_batches}; refusing to plan exports even with stamp_era"
+        )
     merged = _merge_consensus(batch_dirs)
 
     # Load batch.json groups (geometries/edges) once per distinct batch dir,
@@ -813,7 +885,7 @@ def plan_exports(
     for bd in dict.fromkeys(Path(b) for b in batch_dirs):
         if not (bd / "batch.json").exists():
             logger.warning(
-                f"No batch.json in {bd}: sliver canonicalization and edge-overlap "
+                f"No batch.json in {bd}: sliver detection and edge-overlap "
                 "precedence cannot run for its groups (gates degrade)."
             )
         batch_groups[bd] = _load_batch_groups(bd)
@@ -859,18 +931,15 @@ def plan_exports(
         human_df = human_df[~labeler.str.startswith(PANEL_LABELER_PREFIX, na=False)]
     human_gids = set(human_df["group_id"].astype(str)) if not human_df.empty else set()
 
-    # Metadata + candidate edges for candidate groups (for the class gate and
-    # the human edge-overlap mapping, reusing the eval module's approach).
-    # Includes unanimous-NONE groups when empty-set export is on, so their
-    # human-precedence edge-overlap check has the group's candidate edges.
+    # Metadata + candidate edges for auto-accept candidates (for the class gate
+    # and the human edge-overlap mapping, reusing the eval module's approach).
     candidate_metas: dict[str, dict] = {}
     candidate_edges: dict[str, frozenset] = {}
     for gid, (bd, row) in merged.items():
         if gid in sub_to_parent:
             continue  # sub-problem rows are recomposition inputs, not candidates
         is_accept = str(row.get("routing")) == "auto_accept" and not _accept_below_quorum(row)
-        is_none = export_empty_set and _none_verdict_kind(row) is not None
-        if not (is_accept or is_none):
+        if not is_accept:
             continue
         grp = batch_groups.get(bd, {}).get(gid)
         # Prefer per-group metadata.yaml; fall back to batch.json (ids + classes)
@@ -927,7 +996,6 @@ def plan_exports(
 
     groups: list[GroupExport] = []
     n_auto = 0
-    n_none = 0
     n_sub_rows = 0
     for gid, (bd, row) in sorted(merged.items()):
         # Sub-problem rows (#367 Mode B) are consumed by the recomposition path
@@ -936,14 +1004,10 @@ def plan_exports(
         if gid in sub_to_parent:
             n_sub_rows += 1
             continue
-        # Gate (a): route each candidate row to its path. auto_accept -> accept
-        # gates; all-valid NONE (unanimous or quorum) -> empty-set gates (when
-        # enabled). Everything else is not a candidate at all. The verdict's
-        # quorum/unanimous tier rides onto the outcome (is_quorum) so
-        # write_exports can mint the matching labeler variant. A sub-quorum
-        # auto_accept (n_valid present and < 3) is not a valid accept — it is
-        # skipped here (the read-time overlay in panel_routing surfaces it to the
-        # human queue instead) so it can never mint accept ground truth.
+        # Gate (a): only auto_accept is an export candidate. Every NONE remains
+        # in human review because it does not uniquely imply reject-all truth.
+        # A sub-quorum auto_accept (n_valid present and < 3) is also skipped; the
+        # read-time overlay in panel_routing surfaces it to the human queue.
         if str(row.get("routing")) == "auto_accept" and not _accept_below_quorum(row):
             n_auto += 1
             ge = _gate_group(
@@ -960,21 +1024,6 @@ def plan_exports(
                 backstop_max_edges=backstop_max_edges,
             )
             ge.is_quorum = _is_quorum_accept(row)
-            groups.append(ge)
-        elif export_empty_set and (none_kind := _none_verdict_kind(row)) is not None:
-            n_none += 1
-            ge = _gate_empty_group(
-                gid=gid,
-                bd=bd,
-                row=row,
-                grp=batch_groups.get(bd, {}).get(gid, {}),
-                meta=candidate_metas.get(gid),
-                human_gids=human_gids,
-                overlap_map=overlap_map,
-                max_edges=max_edges,
-                backstop_max_edges=backstop_max_edges,
-            )
-            ge.is_quorum = none_kind == "quorum"
             groups.append(ge)
 
     # Per-dir labeler era ("v3"/"v4"/"v5"; "" for unattributable). stamp_era is a
@@ -1076,7 +1125,7 @@ def plan_exports(
         n_total_groups=len(merged),
         n_auto_accept=n_auto,
         groups=groups,
-        n_unanimous_none=n_none,
+        n_unanimous_none=0,
         n_subproblem_rows=n_sub_rows,
         n_decomposed_parents=len(rosters),
     )
@@ -1120,12 +1169,18 @@ def _gate_group(
             **kw,
         )
 
+    # A valid accepted option always has at least one edge. An auto_accept row
+    # with an empty/malformed edge set is not reject-all truth and must return to
+    # review rather than fall through as an empty panel accept.
+    if not edges_pairs:
+        return _mk(REASON_EMPTY_SELECTION, n_edges_final=0)
+
     # Gate (b): size gate. Prefer the structural gate when the group carries
     # structure fields (single corridor / few assignment-components within a
     # soft budget, under a hard backstop). Fall back to the flat edge cap on the
     # selected edge set for older batch.json packs without structure fields —
-    # ALSO enforcing the hard backstop on the group's CANDIDATE count there,
-    # mirroring _gate_empty_group. Without it, a legacy over-backstop group
+    # ALSO enforcing the hard backstop on the group's CANDIDATE count there.
+    # Without it, a legacy over-backstop group
     # with a small selected set (e.g. calib0709's 0cbcf706: 45 candidates, 18
     # selected) slipped past the flat cap and minted a label, resurrecting the
     # size-routing void the consensus/read-time size gates close.
@@ -1160,99 +1215,27 @@ def _gate_group(
         if has_cross_mode_edge(edge_classes):
             return _mk(REASON_CLASS_MISMATCH, n_edges_final=n_raw)
 
-    # Gate (d): sliver canonicalization.
+    # Gate (d): exactness-preserving sliver gate.  A SLIVER tag is evidence,
+    # not semantic truth; silently deleting a voted edge would mutate the exact
+    # option the panel selected.  Hold the whole group for human review instead.
     sliver_pairs = _group_sliver_pairs(grp)
-    final_pairs = [p for p in edges_pairs if p not in sliver_pairs]
-    n_slivers = n_raw - len(final_pairs)
-    if not final_pairs:
-        return _mk(REASON_EMPTIED_BY_SLIVER, n_slivers_dropped=n_slivers, n_edges_final=0)
+    if sliver_pairs.intersection(edges_pairs):
+        return _mk(REASON_CONTAINS_SLIVER, n_edges_final=n_raw)
 
     # Gate (e): human precedence (exact group_id or edge-overlap).
     if gid in human_gids or gid in overlap_map:
         return _mk(
             REASON_HUMAN_PRECEDENCE,
-            n_slivers_dropped=n_slivers,
-            n_edges_final=len(final_pairs),
+            n_edges_final=n_raw,
             human_group_id=(gid if gid in human_gids else overlap_map[gid]),
         )
 
-    selected = [{"ref_id": r, "target_id": t} for r, t in final_pairs]
+    selected = [{"ref_id": r, "target_id": t} for r, t in edges_pairs]
     return _mk(
         REASON_EXPORTED,
-        n_slivers_dropped=n_slivers,
-        n_edges_final=len(final_pairs),
+        n_edges_final=n_raw,
         selected_edges=selected,
     )
-
-
-def _gate_empty_group(
-    gid: str,
-    bd: Path,
-    row: dict,
-    grp: dict,
-    meta: dict | None,
-    human_gids: set[str],
-    overlap_map: dict[str, str],
-    max_edges: int,
-    backstop_max_edges: int,
-) -> GroupExport:
-    """Gate a unanimous-NONE group into an EMPTY-SET (reject-all) export.
-
-    Gate (a) (unanimous-NONE) is applied by the caller. The remaining gates are
-    tailored to an empty selection:
-
-      * **Size** — apply ONLY the hard backstop ceiling on the group's *candidate*
-        edge count (``n_edges`` / ``len(edges)``, since the selected set is empty
-        by definition). The corridor/assignment-tangle sub-gate that
-        :func:`_gate_group` uses guards against a too-greedy *selection*; an empty
-        selection has no such risk, and that sub-gate would wrongly block the
-        2-corridor cross-mode reject (parallel road + cycleway) this path exists
-        to capture. A genuine monster still routes to a human (``over_max_edges``).
-        With no structure fields, fall back to the flat ``max_edges`` cap.
-      * **Class** — skipped. ``has_cross_mode_edge`` on an empty edge set is
-        vacuously False; a cross-mode reject is exactly what we want to record.
-      * **Sliver** — skipped. The emptiness is the intended verdict, not a sliver
-        artifact, so it must not be reclassified as ``emptied_by_sliver``.
-      * **Human precedence** — same as the accept path (exact group_id or
-        edge-overlap). A prior human reject-all on this group matches by group_id.
-    """
-    match_type = str(grp.get("match_type") or (meta.get("match_type") if meta else "") or "")
-    try:
-        mean_conf = float(row.get("mean_confidence") or 0.0)
-    except (ValueError, TypeError):
-        mean_conf = 0.0
-
-    def _mk(reason: str, **kw) -> GroupExport:
-        return GroupExport(
-            group_id=gid,
-            source_batch=bd.name,
-            exported=(reason == REASON_EXPORTED),
-            reason=reason,
-            match_type=match_type,
-            n_edges_raw=0,  # a reject-all selects nothing
-            mean_confidence=mean_conf,
-            is_empty_set=True,
-            **kw,
-        )
-
-    # Size gate: hard backstop ceiling on the group's candidate size only.
-    n_group_edges = grp.get("n_edges")
-    if n_group_edges is None:
-        n_group_edges = len(grp.get("edges", []))
-    ceiling = backstop_max_edges if grp.get("n_edges") is not None else max_edges
-    if int(n_group_edges) > ceiling:
-        return _mk(REASON_OVER_MAX, n_edges_final=0)
-
-    # Human precedence (exact group_id or edge-overlap): never overwrite a human.
-    if gid in human_gids or gid in overlap_map:
-        return _mk(
-            REASON_HUMAN_PRECEDENCE,
-            n_edges_final=0,
-            human_group_id=(gid if gid in human_gids else overlap_map[gid]),
-        )
-
-    # Export the empty set (reject-all).
-    return _mk(REASON_EXPORTED, n_edges_final=0, selected_edges=[])
 
 
 def _gate_recomposed_group(
@@ -1278,7 +1261,7 @@ def _gate_recomposed_group(
     one deliberate exception — there is NO size gate: each sub-decision was
     within the panel envelope by construction, and the union spans the whole
     over-backstop parent, which is exactly what decomposition exists to label.
-    Class-consistency, sliver canonicalization, and human precedence apply to
+    Class-consistency, the exactness-preserving sliver gate, and human precedence apply to
     the union / parent group unchanged.
     """
     match_type = str(grp.get("match_type") or (meta.get("match_type") if meta else "") or "")
@@ -1305,10 +1288,8 @@ def _gate_recomposed_group(
         return _mk(REASON_SUBPROBLEMS_UNVOTED, n_edges_final=n_raw)
 
     # Empty-union guard: a COMPLETE recomposition whose accepted selections union
-    # to nothing is not a real whole-group label. Refuse it EXPLICITLY (route to
-    # review) rather than let it fall through to the sliver gate below, which
-    # would drop it too — but mis-report it as ``emptied_by_sliver`` (0 slivers)
-    # and rely on that unrelated gate as an accidental safety net.
+    # to nothing is not a real whole-group label. Refuse it explicitly rather
+    # than letting an empty union fall through as a successful exact selection.
     if not rec.union_edges:
         return _mk(REASON_EMPTY_RECOMPOSITION, n_edges_final=0)
 
@@ -1319,27 +1300,24 @@ def _gate_recomposed_group(
         if has_cross_mode_edge(edge_classes):
             return _mk(REASON_CLASS_MISMATCH, n_edges_final=n_raw)
 
-    # Sliver canonicalization on the union.
+    # Exactness-preserving sliver gate on the union.  Never mutate a recomposed
+    # exact selection by silently deleting one of its accepted edges.
     sliver_pairs = _group_sliver_pairs(grp)
-    final_pairs = [p for p in rec.union_edges if p not in sliver_pairs]
-    n_slivers = n_raw - len(final_pairs)
-    if not final_pairs:
-        return _mk(REASON_EMPTIED_BY_SLIVER, n_slivers_dropped=n_slivers, n_edges_final=0)
+    if sliver_pairs.intersection(rec.union_edges):
+        return _mk(REASON_CONTAINS_SLIVER, n_edges_final=n_raw)
 
     # Human precedence (exact group_id or edge-overlap): never overwrite a human.
     if gid in human_gids or gid in overlap_map:
         return _mk(
             REASON_HUMAN_PRECEDENCE,
-            n_slivers_dropped=n_slivers,
-            n_edges_final=len(final_pairs),
+            n_edges_final=n_raw,
             human_group_id=(gid if gid in human_gids else overlap_map[gid]),
         )
 
-    selected = [{"ref_id": r, "target_id": t} for r, t in final_pairs]
+    selected = [{"ref_id": r, "target_id": t} for r, t in rec.union_edges]
     return _mk(
         REASON_EXPORTED,
-        n_slivers_dropped=n_slivers,
-        n_edges_final=len(final_pairs),
+        n_edges_final=n_raw,
         selected_edges=selected,
     )
 
@@ -1357,10 +1335,8 @@ class EraLabelers:
     """
 
     accept: str
-    none: str
     decomposed: str
     accept_quorum: str | None = None
-    none_quorum: str | None = None
     decomposed_quorum: str | None = None
 
 
@@ -1371,22 +1347,18 @@ class EraLabelers:
 #: votes.csv) makes write_exports refuse rather than silently mint the current
 #: era's provenance.
 LABELERS_BY_ERA: dict[str, EraLabelers] = {
-    "v3": EraLabelers(PANEL_LABELER_V3, PANEL_NONE_LABELER_V3, PANEL_DECOMPOSED_LABELER_V3),
-    "v4": EraLabelers(PANEL_LABELER_V4, PANEL_NONE_LABELER_V4, PANEL_DECOMPOSED_LABELER_V4),
+    "v3": EraLabelers(PANEL_LABELER_V3, PANEL_DECOMPOSED_LABELER_V3),
+    "v4": EraLabelers(PANEL_LABELER_V4, PANEL_DECOMPOSED_LABELER_V4),
     "v5": EraLabelers(
         PANEL_LABELER,
-        PANEL_NONE_LABELER,
         PANEL_DECOMPOSED_LABELER,
         accept_quorum=PANEL_QUORUM_LABELER,
-        none_quorum=PANEL_QUORUM_NONE_LABELER,
         decomposed_quorum=PANEL_QUORUM_DECOMPOSED_LABELER,
     ),
     "v6": EraLabelers(
         PANEL_LABELER_V6,
-        PANEL_NONE_LABELER_V6,
         PANEL_DECOMPOSED_LABELER_V6,
         accept_quorum=PANEL_QUORUM_LABELER_V6,
-        none_quorum=PANEL_QUORUM_NONE_LABELER_V6,
         decomposed_quorum=PANEL_QUORUM_DECOMPOSED_LABELER_V6,
     ),
 }
@@ -1401,10 +1373,8 @@ def write_exports(
 
     Accept groups are stamped ``panel_unanimous_v5`` with their chosen edge set
     (``panel_quorum_v5`` for quorum accepts — a 4/4 and a 3-of-4 verdict must
-    stay distinguishable); reject-all (empty-set) groups are stamped
-    ``panel_unanimous_none_v5`` / ``panel_quorum_none_v5`` with
-    ``selected_edges == []`` (PAIR semantics, num_refs/num_targets == 0 — the same
-    on-disk shape as a human reject-all); recomposed decomposed-group verdicts
+    stay distinguishable); panel reject-all (empty-set) groups are refused and
+    must be confirmed through human review; recomposed decomposed-group verdicts
     (#367 Mode B) are stamped ``panel_unanimous_decomposed_v5`` with the union of
     their sub-problem selections — or ``panel_quorum_decomposed_v5`` when ANY
     consumed sub-verdict was a quorum accept. Groups whose source batch is an
@@ -1431,6 +1401,12 @@ def write_exports(
     name is recorded in the ``session_id`` field for provenance.
     Returns the number of rows written.
     """
+    empty_groups = sorted(g.group_id for g in report.exported if not g.selected_edges)
+    if empty_groups:
+        raise ValueError(
+            f"empty panel selections {empty_groups} cannot be exported as durable truth; "
+            "confirm reject-all outcomes in human review and investigate empty accepts"
+        )
     era_less = sorted(
         {g.source_batch for g in report.exported if g.panel_era not in LABELERS_BY_ERA}
     )
@@ -1450,9 +1426,7 @@ def write_exports(
     resolved: list[tuple[GroupExport, str]] = []
     for g in report.exported:
         tags = LABELERS_BY_ERA[g.panel_era]
-        if g.is_empty_set:
-            labeler = tags.none_quorum if g.is_quorum else tags.none
-        elif g.from_decomposition:
+        if g.from_decomposition:
             labeler = tags.decomposed_quorum if g.is_quorum else tags.decomposed
         else:
             labeler = tags.accept_quorum if g.is_quorum else tags.accept

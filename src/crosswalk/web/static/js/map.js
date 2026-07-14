@@ -1047,7 +1047,7 @@
         function emit(ivlMap, geomMap, role, activeIds) {
             // Every ACTIVE segment gets gap analysis — a segment with zero
             // selected intervals is 100% uncovered (full-length hazard),
-            // e.g. after sliver exclusion drops all its edges.
+            // including when the reviewer has not selected any incident edge.
             Object.keys(activeIds || {}).forEach(function (id) {
                 if (!geomMap[id]) return;
                 var gaps = uncoveredIntervals(ivlMap[id] || [], GAP_MIN_FRAC);

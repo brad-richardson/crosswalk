@@ -1922,18 +1922,6 @@ def export_stitch_panel(
     labels_dir: Path = typer.Option(Path("labels/stitching"), "--labels", "-l"),
     max_edges: int = typer.Option(20, "--max-edges", help="Skip groups with > this many edges"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Report only; write nothing"),
-    empty_set: bool = typer.Option(
-        True,
-        "--empty-set/--no-empty-set",
-        help=(
-            "Also export all-valid-NONE verdicts (panel rejected every option) as "
-            "empty-set reject-all labels tagged panel_unanimous_none_v5 — or "
-            "panel_quorum_none_v5 for a quorum NONE (3-of-4 over an abstention); "
-            "older-era batches keep their own tags. Default on "
-            "(this is required label production for the learned resolver); pass "
-            "--no-empty-set to plan/write the accept path only."
-        ),
-    ),
     allow_nonstandard_panel: bool = typer.Option(
         False,
         "--allow-nonstandard-panel",
@@ -1964,16 +1952,15 @@ def export_stitch_panel(
 ):
     """Export accepted panel consensus into human-equivalent stitching labels.
 
-    Two verdict classes are promoted. ``auto_accept`` groups export their
-    chosen edge set — labeler ``panel_unanimous_v5`` for a fully unanimous
+    ``auto_accept`` groups export their chosen edge set — labeler
+    ``panel_unanimous_v5`` for a fully unanimous
     accept, or the DISTINCT ``panel_quorum_v5`` for a quorum accept (all valid
-    votes agree over an abstention, v5 rule) — and with ``--empty-set``
-    (default) all-valid-NONE groups export a reject-all EMPTY-SET label
-    (``panel_unanimous_none_v5`` / ``panel_quorum_none_v5``,
-    ``selected_edges == []``). Gates are applied in
+    votes agree over an abstention, v5 rule). Panel ``NONE`` is never exported
+    directly because it can mean reject-all, no exact offered option, or
+    insufficient evidence; it stays in human review for explicit confirmation.
+    Gates are applied in
     order and reported per group: (a) routing, (b) size, (c) class-consistency,
-    (d) sliver canonicalization, (e) human precedence (the class/sliver gates are
-    vacuous on an empty set and are skipped there). Rows upsert by group_id
+    (d) exactness-preserving sliver review, (e) human precedence. Rows upsert by group_id
     (idempotent). Provenance is gated on (provider, model) voter pairs: batches
     matching an older blessed era exactly still export, stamped with that era's
     labelers (as do the known-historical v3 transport-swap batches); anything
@@ -2043,7 +2030,7 @@ def export_stitch_panel(
             raise typer.Exit(1)
         if not (bd / "batch.json").exists():
             console.print(
-                f"[yellow]Warning: no batch.json in {bd} — sliver canonicalization "
+                f"[yellow]Warning: no batch.json in {bd} — sliver detection "
                 "and edge-overlap precedence degrade for its groups[/yellow]"
             )
 
@@ -2084,11 +2071,9 @@ def export_stitch_panel(
         dataset,
         labels_dir,
         max_edges=max_edges,
-        export_empty_set=empty_set,
         stamp_era=stamp_era,
     )
 
-    none_note = f", {report.n_unanimous_none} unanimous-NONE candidates" if empty_set else ""
     decomp_note = (
         f", {report.n_decomposed_parents} decomposed parents "
         f"({report.n_subproblem_rows} sub-problem rows)"
@@ -2097,7 +2082,7 @@ def export_stitch_panel(
     )
     console.print(
         f"[bold]Panel export: {report.n_total_groups} merged groups, "
-        f"{report.n_auto_accept} auto_accept candidates{none_note}{decomp_note}[/bold]"
+        f"{report.n_auto_accept} auto_accept candidates{decomp_note}[/bold]"
     )
     console.print(f"  Batches (in precedence order): {', '.join(b.name for b in batch_dirs)}")
     # Per-batch resolved era + the labeler tags a (re-)export will mint, so an
@@ -2105,9 +2090,9 @@ def export_stitch_panel(
     for bd in batch_dirs:
         era = eras[bd]
         tags = LABELERS_BY_ERA[era]
-        minted = [tags.accept, tags.none, tags.decomposed]
+        minted = [tags.accept, tags.decomposed]
         # Quorum labeler variants exist from v5 on (quorum consensus rule).
-        minted += [t for t in (tags.accept_quorum, tags.none_quorum, tags.decomposed_quorum) if t]
+        minted += [t for t in (tags.accept_quorum, tags.decomposed_quorum) if t]
         # Mark only the batches that actually took the fill-in (unresolved
         # composition + --stamp-era), not every line whenever the flag is set.
         override = " (--stamp-era fill-in)" if stamp_era and not resolved[bd] else ""
@@ -2121,16 +2106,10 @@ def export_stitch_panel(
             if g.from_decomposition
             else ""
         )
-        if g.exported and g.is_empty_set:
-            console.print(
-                f"  [green]EXPORT-EMPTY[/green] {g.group_id} [{g.source_batch}] "
-                f"{g.match_type} reject-all (0 edges) conf={g.mean_confidence:.3f}"
-            )
-        elif g.exported:
-            slivers = f" (-{g.n_slivers_dropped} sliver)" if g.n_slivers_dropped else ""
+        if g.exported:
             console.print(
                 f"  [green]EXPORT[/green] {g.group_id} [{g.source_batch}] "
-                f"{g.match_type} {g.n_edges_final} edges{slivers} "
+                f"{g.match_type} {g.n_edges_final} edges "
                 f"conf={g.mean_confidence:.3f}{recomposed}"
             )
         else:
@@ -2139,18 +2118,15 @@ def export_stitch_panel(
                 extra = f" (human {g.human_group_id})"
             elif g.reason == "over_max_edges":
                 extra = f" ({g.n_edges_raw} > {max_edges})"
-            elif g.reason == "emptied_by_sliver":
-                extra = f" (-{g.n_slivers_dropped} sliver)"
+            elif g.reason == "contains_sliver":
+                extra = " (exact selection contains a SLIVER-tagged edge; human review required)"
             console.print(
                 f"  [yellow]SKIP[/yellow]   {g.group_id} [{g.source_batch}] -> "
                 f"{g.reason}{extra}{recomposed}"
             )
 
-    empty_note = f" ({len(report.exported_empty)} empty-set)" if empty_set else ""
     console.print(
-        f"\n[bold]Summary:[/bold] {len(report.exported)} exported{empty_note}, "
-        f"{len(report.skipped)} skipped, "
-        f"{report.total_slivers_dropped()} sliver edges dropped"
+        f"\n[bold]Summary:[/bold] {len(report.exported)} exported, {len(report.skipped)} skipped"
     )
     by_reason = report.skipped_by_reason()
     if by_reason:
@@ -2183,12 +2159,7 @@ def export_stitch_panel(
     )
 
     written = write_exports(report, dataset, labels_dir)
-    n_empty = len(report.exported_empty)
-    empty_written = f" ({n_empty} reject-all empty-set)" if n_empty else ""
-    console.print(
-        f"[green]Wrote {written} panel labels{empty_written} to "
-        f"{labels_dir}/dataset={dataset}[/green]"
-    )
+    console.print(f"[green]Wrote {written} panel labels to {labels_dir}/dataset={dataset}[/green]")
 
 
 @agent_app.command("import")

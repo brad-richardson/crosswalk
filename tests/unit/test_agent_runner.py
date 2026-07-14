@@ -181,12 +181,13 @@ class TestPrepareBatchPrompt:
         )
 
         assert "transportation network segment matches" in prompt
-        assert "LABELS:" in prompt
+        assert "CANONICAL MATCH-IDENTITY RUBRIC" in prompt
+        assert "PAIR-LABEL OUTPUT CONTRACT" in prompt
         assert "match:" in prompt
         assert "no_match:" in prompt
         assert "unsure:" in prompt
         assert "CRITICAL RULES:" in prompt
-        assert "GEOMETRY FIRST" in prompt
+        assert "Start with the image and aligned geometry" in prompt
         assert "IMAGE VARIANT:" in prompt
         assert "geometry_only.png" in prompt
         assert "BATCH PROCESSING INSTRUCTIONS:" in prompt
@@ -213,10 +214,12 @@ class TestPrepareBatchPrompt:
             output_path="labels/test/data.csv",
         )
 
-        assert "FEW-SHOT EXAMPLES:" in prompt
+        assert "ILLUSTRATIVE RECORDED EXAMPLES:" in prompt
+        assert "may contain human error" in prompt
+        assert "the rubric wins" in prompt
         assert "Example 1: ex1__tx1" in prompt
         assert "examples/ex1__tx1/road_context.png" in prompt
-        assert "ex1,tx1,match,1.0,ground truth example" in prompt
+        assert "ex1,tx1,match,1.0,illustrative recorded label" in prompt
 
     def test_variant_image_description_included(self):
         for variant_name in VARIANT_CONFIG:

@@ -16,24 +16,28 @@ import pandas as pd
 import pytest
 import yaml
 
+from crosswalk.agent_labeling.matching_rubric import MATCHING_RUBRIC_VERSION
 from crosswalk.agent_labeling.stitch_evidence import generate_group_evidence
 from crosswalk.agent_labeling.stitch_export import (
     PANEL_LABELER,
-    PANEL_NONE_LABELER,
     REASON_CLASS_MISMATCH,
-    REASON_EMPTIED_BY_SLIVER,
+    REASON_CONTAINS_SLIVER,
+    REASON_EMPTY_SELECTION,
     REASON_EXPORTED,
     REASON_HUMAN_PRECEDENCE,
     REASON_OVER_MAX,
     REASON_STRUCTURAL_TANGLE,
+    GroupExport,
     plan_exports,
     write_exports,
     write_vote_provenance,
 )
 from crosswalk.agent_labeling.stitch_provenance import (
+    build_evidence_record,
     consensus_policy_signature,
     load_evidence_manifest,
     sha256_file,
+    write_evidence_manifest,
 )
 from crosswalk.config import settings
 from crosswalk.labeling.stitching_store import STITCHING_LABEL_COLUMNS, StitchingLabelStore
@@ -147,6 +151,70 @@ def _write_votes_csv(
             w.writerow(["group_id", "provider", "choice"])
             for p, _m in voters:
                 w.writerow(["g1", p, "A"])
+
+
+def _stamp_matching_rubric(
+    batch_dir: Path,
+    group_id: str = "g1",
+) -> None:
+    """Bind a synthetic voted group to a valid current-rubric evidence pack."""
+    group_dir = batch_dir / group_id
+    group_dir.mkdir(parents=True, exist_ok=True)
+    edge = {"ref_id": "r1", "target_id": "t1", "confidence": 0.9}
+    options = {
+        "optimizer_letter": "A",
+        "options": [{"letter": "A", "is_optimizer": True, "edges": [edge]}],
+    }
+    evidence = build_evidence_record(
+        {"group_id": group_id, "edges": [edge]},
+        options,
+    )
+    metadata = {
+        "group_id": group_id,
+        "segments": {
+            "reference": [{"label": "R1", "id": "r1"}],
+            "target": [{"label": "T1", "id": "t1"}],
+        },
+        "optimizer_letter": "A",
+        "options": [
+            {
+                "letter": "A",
+                "is_optimizer": True,
+                "edges": [{"ref": "R1", "target": "T1"}],
+            }
+        ],
+    }
+    (group_dir / "metadata.yaml").write_text(yaml.safe_dump(metadata))
+    manifest = write_evidence_manifest(group_dir, evidence)
+
+    links = {
+        "evidence_id": evidence["evidence_id"],
+        "evidence_pack_sha256": manifest["evidence_pack_sha256"],
+    }
+    votes_path = batch_dir / "votes.csv"
+    votes = pd.read_csv(votes_path, dtype={"group_id": str})
+    votes["group_id"] = group_id
+    for column, value in links.items():
+        votes[column] = value
+    votes.to_csv(votes_path, index=False)
+
+    consensus_path = batch_dir / "consensus.csv"
+    if consensus_path.exists():
+        consensus = pd.read_csv(consensus_path, dtype={"group_id": str})
+        mask = consensus["group_id"] == group_id
+        assert mask.any(), f"synthetic consensus has no row for {group_id}"
+        for column, value in links.items():
+            consensus.loc[mask, column] = value
+    else:
+        consensus = pd.DataFrame([{"group_id": group_id, **links}])
+    consensus.to_csv(consensus_path, index=False)
+
+
+def _tamper_rubric_stamp(batch_dir: Path, group_id: str = "g1") -> None:
+    path = batch_dir / group_id / "evidence.json"
+    manifest = json.loads(path.read_text())
+    manifest["evidence"]["matching_rubric_version"] = f"{MATCHING_RUBRIC_VERSION}-tampered"
+    path.write_text(json.dumps(manifest))
 
 
 def make_batch(
@@ -498,9 +566,15 @@ def test_cycleway_cycleway_exported(tmp_path, labels_dir):
     assert g.reason == REASON_EXPORTED
 
 
-def test_sliver_dropped_but_group_exported(tmp_path, labels_dir):
+def test_selected_sliver_blocks_export_without_mutating_selection(tmp_path, labels_dir):
+    from crosswalk.agent_labeling.panel_routing import (
+        attach_panel_route_reasons,
+        panel_failed_group_ids,
+    )
+
+    batches_root = tmp_path / "batches"
     b = make_batch(
-        tmp_path / "b1",
+        batches_root / DATASET,
         DATASET,
         [
             {
@@ -512,13 +586,20 @@ def test_sliver_dropped_but_group_exported(tmp_path, labels_dir):
         ],
     )
     g = _by_gid(_plan([b], labels_dir))["mixed"]
-    assert g.exported
-    assert g.n_slivers_dropped == 1
-    assert g.n_edges_final == 1
-    assert {(e["ref_id"], e["target_id"]) for e in g.selected_edges} == {("r1", "t1")}
+    assert not g.exported
+    assert g.reason == REASON_CONTAINS_SLIVER
+    assert g.n_slivers_dropped == 0
+    assert g.n_edges_final == 2
+    assert g.selected_edges == []
+    # The export hold has a destination: read-time routing surfaces the exact
+    # selection to human review instead of letting the auto-accept disappear.
+    assert panel_failed_group_ids(DATASET, batches_root) == {"mixed"}
+    groups = [{"group_id": "mixed"}]
+    assert attach_panel_route_reasons(groups, DATASET, batches_root) == 1
+    assert groups[0]["panel_route_reason"] == REASON_CONTAINS_SLIVER
 
 
-def test_all_slivers_empties_group(tmp_path, labels_dir):
+def test_all_sliver_selection_blocks_export_without_minting_empty_truth(tmp_path, labels_dir):
     b = make_batch(
         tmp_path / "b1",
         DATASET,
@@ -533,8 +614,9 @@ def test_all_slivers_empties_group(tmp_path, labels_dir):
     )
     g = _by_gid(_plan([b], labels_dir))["allsliver"]
     assert not g.exported
-    assert g.reason == REASON_EMPTIED_BY_SLIVER
-    assert g.n_slivers_dropped == 1
+    assert g.reason == REASON_CONTAINS_SLIVER
+    assert g.n_slivers_dropped == 0
+    assert g.n_edges_final == 1
 
 
 def test_human_precedence_by_group_id(tmp_path, labels_dir):
@@ -1584,7 +1666,16 @@ def test_standard_v3_v4_v5_batches_pass(tmp_path):
     assert nonstandard_panel_batches([v3, v4, v5]) == {}
 
 
-def test_v6_candidate_has_own_era_but_remains_nonstandard(tmp_path):
+def test_pre_rubric_v6_roster_is_era_less(tmp_path):
+    """A roster alone cannot retroactively claim the refined prompt contract."""
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    batch = tmp_path / "pre_rubric_v6"
+    _write_votes_csv(batch, _V6_VOTERS)
+    assert batch_panel_era(batch) is None
+
+
+def test_current_rubric_v6_candidate_has_own_era_but_remains_nonstandard(tmp_path):
     """Known stamping and production blessing are separate decisions."""
     from crosswalk.agent_labeling.stitch_export import (
         PANEL_VOTERS_V6,
@@ -1594,9 +1685,144 @@ def test_v6_candidate_has_own_era_but_remains_nonstandard(tmp_path):
 
     v6 = tmp_path / "batch_v6_candidate"
     _write_votes_csv(v6, _V6_VOTERS)
+    _stamp_matching_rubric(v6)
     assert frozenset(_V6_VOTERS) == PANEL_VOTERS_V6
     assert batch_panel_era(v6) == "v6"
     assert nonstandard_panel_batches([v6]) == {"batch_v6_candidate": set(_V6_VOTERS)}
+    assert nonstandard_panel_batches([v6], expected=PANEL_VOTERS_V6) == {}
+
+
+def test_current_rubric_with_v5_roster_does_not_reuse_historical_era(tmp_path):
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    batch = tmp_path / "refined_v5_roster"
+    _write_votes_csv(batch, _V5_VOTERS)
+    _stamp_matching_rubric(batch)
+    assert batch_panel_era(batch) is None
+
+
+@pytest.mark.parametrize("manifest", [[], "not-an-object", {"evidence": []}])
+def test_malformed_rubric_manifest_fails_era_resolution_closed(tmp_path, manifest):
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    batch = tmp_path / "malformed_manifest"
+    _write_votes_csv(batch, _V6_VOTERS)
+    _stamp_matching_rubric(batch)
+    group_dir = batch / "g1"
+    (group_dir / "evidence.json").write_text(json.dumps(manifest))
+    assert batch_panel_era(batch) is None
+
+
+def test_tampered_rubric_stamp_fails_era_resolution_closed(tmp_path, labels_dir):
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    batch = tmp_path / "tampered_manifest"
+    _write_votes_csv(batch, _V6_VOTERS)
+    _stamp_matching_rubric(batch)
+    _tamper_rubric_stamp(batch)
+    assert batch_panel_era(batch) is None
+    with pytest.raises(ValueError, match="invalid matching-rubric provenance"):
+        plan_exports([batch], DATASET, labels_dir, stamp_era="v6")
+
+
+def test_regenerated_pack_does_not_reattribute_stale_ballots(tmp_path, labels_dir):
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    batch = tmp_path / "regenerated_pack"
+    _write_votes_csv(batch, _V6_VOTERS)
+    _stamp_matching_rubric(batch)
+    assert batch_panel_era(batch) == "v6"
+    group_dir = batch / "g1"
+    old_manifest = load_evidence_manifest(group_dir, allow_legacy=False)
+    (group_dir / "prompt.txt").write_text("regenerated after voting")
+    new_manifest = write_evidence_manifest(group_dir, old_manifest["evidence"])
+    assert new_manifest["evidence_pack_sha256"] != old_manifest["evidence_pack_sha256"]
+    assert batch_panel_era(batch) is None
+    with pytest.raises(ValueError, match="invalid matching-rubric provenance"):
+        plan_exports([batch], DATASET, labels_dir, stamp_era="v6")
+
+
+def test_unsafe_vote_group_id_cannot_escape_batch_for_rubric_stamp(tmp_path, labels_dir):
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    batch = tmp_path / "unsafe_group"
+    batch.mkdir()
+    with (batch / "votes.csv").open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            [
+                "group_id",
+                "provider",
+                "model",
+                "choice",
+                "evidence_id",
+                "evidence_pack_sha256",
+            ]
+        )
+        for provider, model in _V6_VOTERS:
+            writer.writerow(["../outside", provider, model, "A", "e" * 64, "p" * 64])
+    pd.DataFrame(
+        [
+            {
+                "group_id": "../outside",
+                "evidence_id": "e" * 64,
+                "evidence_pack_sha256": "p" * 64,
+            }
+        ]
+    ).to_csv(batch / "consensus.csv", index=False)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "evidence.json").write_text(
+        json.dumps({"evidence": {"matching_rubric_version": MATCHING_RUBRIC_VERSION}})
+    )
+    assert batch_panel_era(batch) is None
+    with pytest.raises(ValueError, match="invalid matching-rubric provenance"):
+        plan_exports([batch], DATASET, labels_dir, stamp_era="v6")
+
+
+def test_current_rubric_rejects_consensus_only_group(tmp_path, labels_dir):
+    """A linked group cannot lend its verified v6 identity to an unvoted row."""
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    batch = tmp_path / "consensus_only_group"
+    _write_votes_csv(batch, _V6_VOTERS)
+    _stamp_matching_rubric(batch)
+    consensus = pd.read_csv(batch / "consensus.csv", dtype={"group_id": str})
+    consensus = pd.concat(
+        [consensus, pd.DataFrame([{"group_id": "g2", "routing": "auto_accept"}])],
+        ignore_index=True,
+    )
+    consensus.to_csv(batch / "consensus.csv", index=False)
+    assert batch_panel_era(batch) is None
+    with pytest.raises(ValueError, match="invalid matching-rubric provenance"):
+        plan_exports([batch], DATASET, labels_dir, stamp_era="v6")
+
+
+def test_current_rubric_rejects_null_vote_group_id(tmp_path, labels_dir):
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    batch = tmp_path / "null_vote_group"
+    _write_votes_csv(batch, _V6_VOTERS)
+    _stamp_matching_rubric(batch)
+    votes = pd.read_csv(batch / "votes.csv", dtype={"group_id": str})
+    votes.loc[0, "group_id"] = None
+    votes.to_csv(batch / "votes.csv", index=False)
+    assert batch_panel_era(batch) is None
+    with pytest.raises(ValueError, match="invalid matching-rubric provenance"):
+        plan_exports([batch], DATASET, labels_dir, stamp_era="v6")
+
+
+def test_current_rubric_rejects_missing_vote_group_column(tmp_path, labels_dir):
+    from crosswalk.agent_labeling.stitch_export import batch_panel_era
+
+    batch = tmp_path / "missing_vote_group_column"
+    _write_votes_csv(batch, _V6_VOTERS)
+    _stamp_matching_rubric(batch)
+    votes = pd.read_csv(batch / "votes.csv").drop(columns=["group_id"])
+    votes.to_csv(batch / "votes.csv", index=False)
+    assert batch_panel_era(batch) is None
+    with pytest.raises(ValueError, match="invalid matching-rubric provenance"):
+        plan_exports([batch], DATASET, labels_dir, stamp_era="v6")
 
 
 def test_explicitly_approved_v6_candidate_export_uses_v6_labeler(tmp_path, labels_dir):
@@ -1615,6 +1841,7 @@ def test_explicitly_approved_v6_candidate_export_uses_v6_labeler(tmp_path, label
         ],
         voters=_V6_VOTERS,
     )
+    _stamp_matching_rubric(batch, group_id="g_v6")
     assert batch_panel_era(batch) == "v6"
     report = plan_exports([batch], DATASET, labels_dir)
     assert [(g.group_id, g.panel_era) for g in report.exported] == [("g_v6", "v6")]
@@ -1977,14 +2204,8 @@ def test_quorum_accept_detected_from_counts_without_stamp(tmp_path, labels_dir):
 
 
 def test_contradicting_unanimous_stamp_still_downgrades_to_quorum(tmp_path, labels_dir):
-    """Contradicting evidence wins: a row STAMPED unanimous (accept path) or
-    unanimous_none (reject path) whose counts prove an abstention
-    (n_valid < n_votes) still mints the QUORUM labeler variants — a stamp can
-    never launder an abstention into full-unanimity provenance."""
-    from crosswalk.agent_labeling.stitch_export import (
-        PANEL_QUORUM_LABELER,
-        PANEL_QUORUM_NONE_LABELER,
-    )
+    """Counts downgrade an accept stamp; panel NONE still stays in review."""
+    from crosswalk.agent_labeling.stitch_export import PANEL_QUORUM_LABELER
 
     b = make_batch(
         tmp_path / "b1",
@@ -2013,24 +2234,14 @@ def test_contradicting_unanimous_stamp_still_downgrades_to_quorum(tmp_path, labe
         ],
     )
     report = plan_exports([b], DATASET, labels_dir)
-    assert {g.group_id: g.is_quorum for g in report.groups} == {
-        "g_stamped_unan": True,
-        "g_stamped_none": True,
-    }
-    assert write_exports(report, DATASET, labels_dir) == 2
+    assert {g.group_id: g.is_quorum for g in report.groups} == {"g_stamped_unan": True}
+    assert write_exports(report, DATASET, labels_dir) == 1
     df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
     labelers = dict(zip(df["group_id"], df["labeler"], strict=True))
-    assert labelers == {
-        "g_stamped_unan": PANEL_QUORUM_LABELER,
-        "g_stamped_none": PANEL_QUORUM_NONE_LABELER,
-    }
+    assert labelers == {"g_stamped_unan": PANEL_QUORUM_LABELER}
 
 
-def test_quorum_none_mints_quorum_none_labeler(tmp_path, labels_dir):
-    """A quorum NONE (3 valid NONE + 1 abstain) exports as a reject-all
-    empty-set label under panel_quorum_none_v5 — never the unanimous-NONE tag."""
-    from crosswalk.agent_labeling.stitch_export import PANEL_QUORUM_NONE_LABELER
-
+def test_quorum_none_requires_human_confirmation(tmp_path, labels_dir):
     b = make_batch(
         tmp_path / "b1",
         DATASET,
@@ -2049,13 +2260,9 @@ def test_quorum_none_mints_quorum_none_labeler(tmp_path, labels_dir):
         ],
     )
     report = plan_exports([b], DATASET, labels_dir)
-    g = next(g for g in report.groups if g.group_id == "g_qnone")
-    assert g.exported and g.is_empty_set and g.is_quorum
-    assert report.n_unanimous_none == 1
-    assert write_exports(report, DATASET, labels_dir) == 1
-    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
-    assert list(df["labeler"]) == [PANEL_QUORUM_NONE_LABELER]
-    assert json.loads(df.iloc[0]["selected_edges"]) == []
+    assert report.groups == []
+    assert report.n_unanimous_none == 0
+    assert write_exports(report, DATASET, labels_dir) == 0
 
 
 def test_quorum_none_below_quorum_not_exported(tmp_path, labels_dir):
@@ -2203,18 +2410,12 @@ def test_mixed_codex_model_batch_is_era_less_and_refused(tmp_path, labels_dir):
 
 
 # ---------------------------------------------------------------------------
-# Unanimous-NONE -> empty-set (reject-all) export (resolver L1)
+# Panel NONE -> human confirmation (never direct reject-all truth)
 # ---------------------------------------------------------------------------
 
 
 def _none_group(group_id: str, candidate_edges, **kw) -> dict:
-    """A unanimous-NONE group: routed to human_review, empty consensus edge set.
-
-    ``candidate_edges`` are the group's real candidate pairs (present in
-    batch.json), while the consensus ``edges`` (chosen set) is empty -- the panel
-    rejected every option. ``route_reason`` defaults to the fresh stamp; pass
-    ``route_reason=""`` to exercise the historical-derivation path.
-    """
+    """A NONE verdict routed to review with an empty consensus edge set."""
     return {
         "group_id": group_id,
         "routing": "human_review",
@@ -2227,278 +2428,76 @@ def _none_group(group_id: str, candidate_edges, **kw) -> dict:
     }
 
 
-def test_unanimous_none_exported_as_empty_set(tmp_path, labels_dir):
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [_none_group("gnone", [("r1", "t1"), ("r2", "t2")])],
-    )
-    report = _plan([b], labels_dir)
-    g = _by_gid(report)["gnone"]
-    assert g.exported
-    assert g.is_empty_set
-    assert g.reason == REASON_EXPORTED
-    assert g.selected_edges == []
-    assert g.n_edges_final == 0
-    assert report.n_unanimous_none == 1
-    assert report.exported_empty == [g]
-    assert report.exported_nonempty == []
-
-
-def test_unanimous_none_derived_without_stamp(tmp_path, labels_dir):
-    # A historical wave with a blank route_reason is still recognized as
-    # unanimous-NONE from consensus=unanimous + choice=NONE.
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [_none_group("gnone", [("r1", "t1")], route_reason="")],
-    )
-    g = _by_gid(_plan([b], labels_dir))["gnone"]
-    assert g.exported and g.is_empty_set
-
-
-def test_unanimous_none_below_quorum_not_exported(tmp_path, labels_dir):
-    # Defense-in-depth: a hand-edited / hypothetical pre-quorum-rule historical
-    # row claiming consensus=unanimous + choice=NONE with n_valid < 3 must NOT
-    # mint reject ground truth — with or without the route_reason stamp
-    # (contradicting n_valid evidence wins over the stamp).
+def test_panel_none_is_not_an_export_candidate(tmp_path, labels_dir):
     b = make_batch(
         tmp_path / "b1",
         DATASET,
         [
-            _none_group("g_derived", [("r1", "t1")], n_valid=2, route_reason=""),
-            _none_group("g_stamped", [("r2", "t2")], n_valid=2),
-        ],
-    )
-    report = _plan([b], labels_dir)
-    assert "g_derived" not in _by_gid(report)
-    assert "g_stamped" not in _by_gid(report)
-    assert report.n_unanimous_none == 0
-
-
-def test_unanimous_none_missing_n_valid_requires_stamp(tmp_path, labels_dir):
-    # No n_valid evidence at all: only the compute_consensus route_reason stamp
-    # (which enforces the quorum at write time) is trusted; derivation from the
-    # consensus/choice columns alone is not.
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [
-            _none_group("g_stamped", [("r1", "t1")], n_valid="", n_votes=""),
-            _none_group("g_derived", [("r2", "t2")], n_valid="", n_votes="", route_reason=""),
-        ],
-    )
-    report = _plan([b], labels_dir)
-    gids = _by_gid(report)
-    assert gids["g_stamped"].exported and gids["g_stamped"].is_empty_set
-    assert "g_derived" not in gids
-    assert report.n_unanimous_none == 1
-
-
-def test_unanimous_none_writes_reject_all_row(tmp_path, labels_dir):
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [_none_group("gnone", [("r1", "t1")], match_type="M:N")],
-    )
-    report = _plan([b], labels_dir)
-    written = write_exports(report, DATASET, Path(labels_dir))
-    assert written == 1
-
-    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
-    row = df.iloc[0]
-    # Same on-disk shape as a human reject-all: PAIR semantics, empty edges, 0/0.
-    assert row["labeler"] == PANEL_NONE_LABELER
-    assert row["labeler"].startswith("panel_")  # stays non-human for all consumers
-    assert json.loads(row["selected_edges"]) == []
-    assert row["num_refs"] == 0 and row["num_targets"] == 0
-    assert str(row.get("label_semantics") or "pair") == "pair"
-    assert row["session_id"] == "b1"
-
-
-def test_non_unanimous_none_not_exported(tmp_path, labels_dir):
-    # A NONE that carries a dissent (majority, not unanimous) is NOT a candidate.
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [
+            _none_group("g_unanimous", [("r1", "t1")]),
             _none_group(
-                "gmaj",
-                [("r1", "t1")],
-                consensus="majority",
-                minority="codex=A",
-                route_reason="",  # force derivation -> dissent, not unanimous_none
-            )
+                "g_quorum",
+                [("r2", "t2")],
+                consensus="quorum",
+                n_valid=3,
+                route_reason="quorum_none",
+            ),
+            {"group_id": "g_accept", "routing": "auto_accept", "edges": [("r3", "t3")]},
         ],
     )
     report = _plan([b], labels_dir)
-    assert "gmaj" not in _by_gid(report)  # not a candidate at all
+    assert set(_by_gid(report)) == {"g_accept"}
+    assert [g.group_id for g in report.exported] == ["g_accept"]
     assert report.n_unanimous_none == 0
+    assert report.exported_empty == []
 
 
-def test_empty_set_human_precedence_by_group_id(tmp_path, labels_dir):
-    # A prior human reject-all on the same group_id must not be overwritten.
-    store = StitchingLabelStore(DATASET, labels_dir=labels_dir)
-    store.add("gnone", [], "M:N", 0, 0, "brad", "s1")  # human reject-all
+def test_malformed_auto_accept_with_empty_edge_set_routes_to_review(tmp_path, labels_dir):
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [
+            {
+                "group_id": "g_empty_accept",
+                "routing": "auto_accept",
+                "edges": [],
+                "candidate_edges": [("r1", "t1")],
+            }
+        ],
+    )
+    group = _by_gid(_plan([b], labels_dir))["g_empty_accept"]
+    assert not group.exported
+    assert group.reason == REASON_EMPTY_SELECTION
+
+
+def test_legacy_empty_set_opt_in_fails_closed(tmp_path, labels_dir):
     b = make_batch(
         tmp_path / "b1",
         DATASET,
         [_none_group("gnone", [("r1", "t1")])],
     )
-    g = _by_gid(_plan([b], labels_dir))["gnone"]
-    assert not g.exported
-    assert g.reason == REASON_HUMAN_PRECEDENCE
-    assert g.is_empty_set
+    with pytest.raises(ValueError, match="confirm the empty set in human review"):
+        _plan([b], labels_dir, export_empty_set=True)
 
 
-def test_empty_set_human_precedence_by_edge_overlap(tmp_path, labels_dir):
-    # A human ACCEPT label sharing a candidate edge blocks the empty-set export.
-    store = StitchingLabelStore(DATASET, labels_dir=labels_dir)
-    store.add("old_hash", [{"ref_id": "r1", "target_id": "t1"}], "M:N", 1, 1, "brad", "s1")
+def test_write_exports_refuses_constructed_empty_group_atomically(tmp_path, labels_dir):
     b = make_batch(
         tmp_path / "b1",
         DATASET,
-        [_none_group("new_hash", [("r1", "t1"), ("r2", "t2")])],
-    )
-    g = _by_gid(_plan([b], labels_dir))["new_hash"]
-    assert not g.exported
-    assert g.reason == REASON_HUMAN_PRECEDENCE
-    assert g.human_group_id == "old_hash"
-
-
-def test_empty_set_cross_mode_still_exported(tmp_path, labels_dir):
-    # The class gate is vacuous on an empty set, so a cross-mode reject
-    # (road ref + cycleway target, the co_bogota_bike_network shape) still
-    # exports -- this is the whole point of empty-set labels.
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [
-            _none_group(
-                "xmode_none",
-                [("r1", "t1")],
-                ref_classes={"r1": "primary"},
-                target_classes={"t1": "cycleway"},
-            )
-        ],
-    )
-    g = _by_gid(_plan([b], labels_dir))["xmode_none"]
-    assert g.exported and g.is_empty_set
-
-
-def test_empty_set_multi_corridor_tangle_still_exported(tmp_path, labels_dir):
-    # The corridor/assignment-tangle sub-gate (which blocks small tangles on the
-    # accept path) is NOT applied to empty sets: a 3-corridor reject exports.
-    edges = [(f"r{i}", f"t{i}") for i in range(6)]
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [
-            _none_group(
-                "tangle_none",
-                edges,
-                n_edges=6,
-                n_corridors=3,
-                n_assignment_components=3,
-            )
-        ],
-    )
-    g = _by_gid(_plan([b], labels_dir))["tangle_none"]
-    assert g.exported and g.is_empty_set
-
-
-def test_empty_set_over_backstop_blocked(tmp_path, labels_dir):
-    # A genuine monster reject (candidate size over the hard backstop) still
-    # routes to a human rather than auto-committing a blanket NONE.
-    edges = [(f"r{i}", f"t{i}") for i in range(45)]
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [_none_group("giant_none", edges, n_edges=45)],
-    )
-    g = _by_gid(_plan([b], labels_dir, backstop_max_edges=40))["giant_none"]
-    assert not g.exported
-    assert g.reason == REASON_OVER_MAX
-    assert g.is_empty_set
-
-
-def test_empty_set_over_flat_max_without_structure(tmp_path, labels_dir):
-    # Without structure fields, the empty-set ceiling is the flat max_edges on the
-    # group's candidate count.
-    edges = [(f"r{i}", f"t{i}") for i in range(25)]
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [_none_group("big_none", edges)],  # no n_edges field -> flat cap
-    )
-    g = _by_gid(_plan([b], labels_dir, max_edges=20))["big_none"]
-    assert not g.exported
-    assert g.reason == REASON_OVER_MAX
-
-
-def test_empty_set_disabled_flag(tmp_path, labels_dir):
-    # export_empty_set=False: unanimous-NONE is not a candidate; accepts still are.
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [
-            _none_group("gnone", [("r1", "t1")]),
-            {"group_id": "gyes", "routing": "auto_accept", "edges": [("r2", "t2")]},
-        ],
-    )
-    report = _plan([b], labels_dir, export_empty_set=False)
-    gids = _by_gid(report)
-    assert "gnone" not in gids
-    assert gids["gyes"].exported
-    assert report.n_unanimous_none == 0
-
-
-def test_empty_set_round_trip_through_store(tmp_path, labels_dir):
-    # Store -> load -> recovery: the panel empty-set label is recovered exactly
-    # like a human reject-all (empty bucket / verbatim group_id).
-    from crosswalk.agent_labeling.stitch_eval import (
-        recover_empty_reject_all,
-        recover_labeled_groups,
-    )
-
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [_none_group("gnone", [("r1", "t1")])],
-    )
-    write_exports(_plan([b], labels_dir), DATASET, Path(labels_dir))
-    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
-
-    groups = [{"group_id": "gnone", "edges": [{"ref_id": "r1", "target_id": "t1"}]}]
-    rec = recover_labeled_groups(groups, df)
-    assert rec["empty"] == ["gnone"]  # classified as reject-all, not set/clean/lost
-    assert rec["clean"] == [] and rec["set"] == []
-
-    emp = recover_empty_reject_all(groups, df)
-    assert emp["recovered"] == ["gnone"] and emp["unrecoverable"] == []
-
-
-def test_empty_and_accept_coexist(tmp_path, labels_dir):
-    # A batch with both an accept and a reject-all group exports both, each with
-    # its own labeler.
-    b = make_batch(
-        tmp_path / "b1",
-        DATASET,
-        [
-            {"group_id": "gyes", "routing": "auto_accept", "edges": [("r1", "t1")]},
-            _none_group("gno", [("r2", "t2")]),
-        ],
+        [{"group_id": "g_accept", "routing": "auto_accept", "edges": [("r1", "t1")]}],
     )
     report = _plan([b], labels_dir)
-    assert len(report.exported) == 2
-    assert {g.group_id for g in report.exported_empty} == {"gno"}
-    assert {g.group_id for g in report.exported_nonempty} == {"gyes"}
-
-    write_exports(report, DATASET, Path(labels_dir))
-    df = StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET)
-    labelers = dict(zip(df["group_id"], df["labeler"]))
-    assert labelers["gyes"] == PANEL_LABELER
-    assert labelers["gno"] == PANEL_NONE_LABELER
+    report.groups.append(
+        GroupExport(
+            group_id="g_none",
+            source_batch="b1",
+            exported=True,
+            reason=REASON_EXPORTED,
+            panel_era="v5",
+        )
+    )
+    with pytest.raises(ValueError, match="empty panel selections"):
+        write_exports(report, DATASET, Path(labels_dir))
+    assert StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET).empty
 
 
 # ---------------------------------------------------------------------------

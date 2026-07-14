@@ -343,19 +343,15 @@
             {% endif %}
         </div>
 
-        <!-- Advanced: sliver-edge inclusion (default: exclude). The cross-product
-             manual path silently pulls in near-zero-overlap junction edges;
-             excluding them keeps human labels clean. Stays set across groups.
-             Option picks are exact edge sets and unaffected. -->
+        <!-- SLIVER is a low-overlap evidence warning, never an automatic verdict
+             or membership filter. Exact options and manual SET membership are
+             recorded without silently deleting flagged edges or segments. -->
         <div class="details-block">
-            <div class="details-block-head">Advanced</div>
+            <div class="details-block-head">Geometry evidence</div>
             <div class="sliver-control">
-                <label class="sliver-toggle-label" title="Include near-zero-overlap junction 'sliver' edges in a manual selection">
-                    <input type="checkbox" id="include-slivers-toggle" onchange="onSliverToggle()">
-                    <span>Include sliver edges
-                        <span class="sliver-sub">near-zero-overlap junctions in manual edits &middot; off by default</span>
-                    </span>
-                </label>
+                <span>SLIVER warnings
+                    <span class="sliver-sub">low-span / low-absolute-overlap evidence; inspect context before deciding</span>
+                </span>
                 <span class="sliver-indicator" id="sliver-indicator"
                       data-group-sliver-count="{{ sliver_count if sliver_count is defined else 0 }}"></span>
             </div>
@@ -364,10 +360,9 @@
 
     </div><!-- /stitch-panels -->
 
-    <!-- Pair-confirmation panel (inline, htmx-friendly — no native dialog).
-         Shown before recording a manual/de-anchored cross-product submit, and
-         before ratifying a potentially-stale option pick. Lists the exact pairs
-         that would be stored; each is untickable and unticked pairs are excluded. -->
+    <!-- Confirmation panel (inline, htmx-friendly — no native dialog).
+         Manual/de-anchored review confirms SET membership; a stale explicit
+         option confirms its exact stored pairs. -->
     <div class="pair-confirm-panel" id="pair-confirm-panel" role="group"
          aria-label="Confirm pairs to record" style="display:none; margin-top: 8px;">
         <div class="pair-confirm-header" id="pair-confirm-header"
@@ -419,15 +414,11 @@
             <!-- Exact edge set of an unmodified picked option; cleared on manual edit -->
             <input type="hidden" name="selected_edges" id="selected-edges"
                    value='{% if preseed_edges is defined and preseed_edges %}{{ preseed_edges | tojson }}{% endif %}'>
-            <!-- Whether to drop junction sliver edges from a cross-product manual
-                 submit. Kept in sync with the (default-unchecked) include-slivers
-                 checkbox: unchecked => exclude => "true". Always sent explicitly. -->
-            <input type="hidden" name="exclude_slivers" id="exclude-slivers-field" value="true">
             <!-- Carries the review mode across the HTMX swap chain so the next
                  group stays de-anchored and its label is stamped accordingly. -->
             <input type="hidden" name="deanchored" value="{{ 1 if deanchored else 0 }}">
-            <!-- Set to 1 by the client's confirm dialog when the reviewer
-                 explicitly confirms an EMPTY de-anchored submit (reject-all). -->
+            <!-- Set to 1 by the client's confirmation panel when the reviewer
+                 explicitly confirms an empty submit (reject-all) in any mode. -->
             <input type="hidden" name="confirm_reject_all" id="confirm-reject-all" value="">
             <button type="submit" class="btn-select">
                 Select This

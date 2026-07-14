@@ -1924,8 +1924,9 @@ def compute_consensus(
     ``test_quorum_rule_is_noop_for_3voter_panels`` proves the equivalence over
     every 3-vote combination. A NONE verdict never auto-accepts on either tier;
     an all-valid-NONE at quorum is stamped ``quorum_none`` (the quorum analog
-    of ``unanimous_none``) so the export path can mint reject-all ground truth
-    with honest provenance.
+    of ``unanimous_none``) and remains in human review. NONE is overloaded (all
+    edges wrong, no exact offered option, or insufficient evidence), so only an
+    explicitly human-confirmed empty selection can become reject-all truth.
 
     Size gate: when ``n_candidate_edges`` (the group's candidate-edge count) is
     supplied and exceeds the export backstop

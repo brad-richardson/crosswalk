@@ -21,6 +21,7 @@ from crosswalk.agent_labeling.stitch_export import (
     PANEL_DECOMPOSED_LABELER,
     PANEL_DECOMPOSED_LABELER_V3,
     REASON_CLASS_MISMATCH,
+    REASON_CONTAINS_SLIVER,
     REASON_EMPTY_RECOMPOSITION,
     REASON_EXPORTED,
     REASON_HUMAN_PRECEDENCE,
@@ -271,7 +272,7 @@ def test_empty_union_complete_recomposition_routes_to_review(tmp_path, labels_di
     # Defense in depth (#388 follow-up): a COMPLETE recomposition (every
     # sub-problem auto_accept) whose accepted selections union to NOTHING must
     # route to review under an explicit reason — never mint an empty label, and
-    # never be mis-attributed to the sliver gate (0 slivers dropped).
+    # never be mis-attributed to the sliver gate.
     b, sub_ids = make_decomposed_batch(
         tmp_path / "b1",
         [
@@ -291,7 +292,7 @@ def test_empty_union_complete_recomposition_routes_to_review(tmp_path, labels_di
 
 def test_unanimous_none_subproblem_blocks_and_mints_nothing(tmp_path, labels_dir):
     # A unanimous-NONE SUB verdict must neither complete the group nor mint an
-    # empty-set label for the sub-problem id (empty-set export is on by default).
+    # empty-set label for the sub-problem id.
     b, sub_ids = make_decomposed_batch(
         tmp_path / "b1",
         [
@@ -356,7 +357,7 @@ def test_union_class_gate_blocks_cross_mode(tmp_path, labels_dir):
     assert parent.reason == REASON_CLASS_MISMATCH
 
 
-def test_union_sliver_edges_dropped(tmp_path, labels_dir):
+def test_union_sliver_edge_blocks_export_without_mutating_union(tmp_path, labels_dir):
     b, _ = make_decomposed_batch(
         tmp_path / "b1",
         [{"edges": [("r1", "t1"), ("r2", "t1")]}, {"edges": [("r3", "t2")]}],
@@ -364,10 +365,11 @@ def test_union_sliver_edges_dropped(tmp_path, labels_dir):
     )
     report = _plan([b], labels_dir)
     parent = _by_gid(report)[PARENT]
-    assert parent.exported is True
-    assert parent.n_slivers_dropped == 1
-    assert parent.n_edges_final == 2
-    assert all(e["ref_id"] != "r2" for e in parent.selected_edges)
+    assert parent.exported is False
+    assert parent.reason == REASON_CONTAINS_SLIVER
+    assert parent.n_slivers_dropped == 0
+    assert parent.n_edges_final == 3
+    assert parent.selected_edges == []
 
 
 def test_human_precedence_blocks_recomposed_export(tmp_path, labels_dir):
