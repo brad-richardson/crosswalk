@@ -421,8 +421,9 @@ several labels is never auto-excluded — one label must fully cover it.
 The consensus panel (`crosswalk agent stitch-run`, `agent_labeling/stitch_runner.py`)
 runs each voter through its own CLI. The blessed **v5 default** (2026-07-10) is the
 four-seat quad: `claude`/claude-opus-4-8 (medium) + `codex`/gpt-5.6-terra (medium)
-+ `kimi`/Kimi K2.6 + `muse`/Muse Spark 1.1. Three seats drive the **opencode**
-transport, each under its OWN provider name: Kimi (provider name
++ `kimi`/Kimi K2.6 + `muse`/Muse Spark 1.1. Across the named panel
+configurations, three logical seats use the **opencode** transport, each under
+its OWN provider name: Kimi (provider name
 `kimi`, `openrouter/moonshotai/kimi-k2.6`, via opencode's native OpenRouter auth
 stored by `opencode auth`); the residual v3-era Qwen voter (provider name
 `opencode`, `openrouter/qwen/qwen3-vl-235b-a22b-instruct`; only in the
@@ -479,13 +480,24 @@ Non-blessed compositions are still refused by the `stitch-export`
 `(provider, model)` gate without `--allow-nonstandard-panel` and never mint a
 blessed labeler.
 
+The opt-in `v6-candidate` is the lean three-seat Claude + Codex + Muse panel;
+it removes Kimi but is not the default and remains nonstandard until its
+human-labeled calibration gate passes. Its era identity binds both the exact
+voter roster and `MATCHING_RUBRIC_VERSION`. Pre-rubric canaries with the same
+roster are deliberately era-less: they must be regenerated and rerun under the
+current rubric, not stamped as v6 after the fact. The
+`v6-agy-calibration`/`v6-flex-calibration` panels add a route-provenanced Gemini
+seat for experiments only; Gemini is not part of the v6 production candidate.
+
 Setup (no machine-level config required):
 
 - **Provider**: a project-level [`opencode.json`](../opencode.json) at the repo
-  root defines a custom `meta` provider (`@ai-sdk/openai-compatible`,
-  `baseURL: https://api.meta.ai/v1`). opencode resolves this config by walking up
-  from the working directory to the Git root, so it is picked up automatically
-  when `stitch-run` is invoked from the repo. The API key is referenced via
+  root defines a custom `meta` provider (`@ai-sdk/openai`,
+  `baseURL: https://api.meta.ai/v1`). The OpenAI SDK adapter is required because
+  Muse reasoning uses the Responses API; `@ai-sdk/openai-compatible` does not
+  expose that method. opencode resolves this config by walking up from the
+  working directory to the Git root, so it is picked up automatically when
+  `stitch-run` is invoked from the repo. The API key is referenced via
   `{env:META_API_KEY}` — **never inlined**. `META_API_KEY` (in `.env`) is loaded
   into the process environment by `crosswalk`'s `load_dotenv()` and inherited by
   the opencode subprocess.
