@@ -3149,7 +3149,7 @@ class TestStitchingSelectRoute:
 
     def test_deliberate_full_deselect_stores_empty(self):
         """Deselecting EVERYTHING (empty pill fields, blank selected_edges) is a
-        legitimate reject-all and must store []."""
+        legitimate reject-all once explicitly confirmed, and must store []."""
         client, recorder, patches = self._client_and_recorder()
         try:
             resp = client.post(
@@ -3161,6 +3161,7 @@ class TestStitchingSelectRoute:
                     "included_refs": "",
                     "included_targets": "",
                     "selected_edges": "",
+                    "confirm_reject_all": "true",
                 },
             )
             assert resp.status_code == 200
