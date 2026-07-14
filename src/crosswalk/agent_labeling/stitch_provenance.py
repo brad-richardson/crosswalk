@@ -18,6 +18,34 @@ from typing import Any
 EVIDENCE_SCHEMA_VERSION = 1
 EVIDENCE_MANIFEST = "evidence.json"
 
+# Evidence-pack provenance answers "which bytes made up the pack?".  Delivery
+# provenance answers the narrower, per-ballot question "which image bytes were
+# made available to this provider invocation, and by what mechanism?".  Keep
+# the schemas independent: changing an invocation transport must not force a
+# regeneration of an otherwise-identical evidence pack.
+DELIVERY_SCHEMA_VERSION = 1
+DELIVERY_MODE_NATIVE_ATTACHMENT = "native_cli_attachment"
+DELIVERY_MODE_PROMPT_PATH = "prompt_path_read"
+DELIVERY_PREFLIGHT_PASSED = "passed"
+
+DELIVERY_TRANSPORTS_BY_MODE = {
+    DELIVERY_MODE_NATIVE_ATTACHMENT: frozenset({"codex:-i", "opencode:-f"}),
+    DELIVERY_MODE_PROMPT_PATH: frozenset({"claude:Read", "agy:agent-read"}),
+}
+
+_DELIVERY_RECORD_KEYS = frozenset(
+    {
+        "schema_version",
+        "delivery_mode",
+        "transport",
+        "preflight_status",
+        "asset_count",
+        "asset_set_sha256",
+        "assets",
+    }
+)
+_DELIVERY_ASSET_KEYS = frozenset({"path", "bytes", "sha256"})
+
 _EDGE_PROVENANCE_KEYS = (
     "confidence",
     "selected",
@@ -72,6 +100,225 @@ def artifact_descriptor(path: Path, *, root: Path | None = None) -> dict[str, An
         "bytes": path.stat().st_size,
         "sha256": sha256_file(path),
     }
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and value == value.lower()
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def _is_managed_image_name(value: str) -> bool:
+    return (
+        value == "overview.png"
+        or (value.startswith("option_") and value.endswith(".png"))
+        or (value.startswith("zoom_") and value.endswith(".png"))
+    )
+
+
+def managed_image_descriptors(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the manifest's canonical, pack-relative image descriptors.
+
+    Only images generated and hashed as part of a stitching evidence pack are
+    eligible for delivery provenance: ``overview.png``, ``option_*.png``, and
+    ``zoom_*.png``.  Paths are deliberately one-component, pack-relative names;
+    invocation scratch directories are ephemeral and must never become durable
+    provenance.  The returned list is sorted by path so its set hash is stable.
+
+    This validates the relevant manifest surface instead of trusting a caller
+    to copy arbitrary ``files`` entries into a ballot assertion.
+    """
+    if not isinstance(manifest, dict):
+        raise EvidenceProvenanceError("evidence manifest must be an object")
+    files = manifest.get("files")
+    if not isinstance(files, list):
+        raise EvidenceProvenanceError("evidence manifest files must be a list")
+
+    assets: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in files:
+        if not isinstance(raw, dict):
+            raise EvidenceProvenanceError("evidence manifest file descriptor must be an object")
+        raw_path = raw.get("path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise EvidenceProvenanceError("evidence manifest file path must be non-empty")
+        if raw_path.endswith(".png") and not _is_managed_image_name(raw_path):
+            raise EvidenceProvenanceError(f"unsupported image in evidence manifest: {raw_path!r}")
+        if not _is_managed_image_name(raw_path):
+            continue
+        path = Path(raw_path)
+        if (
+            path.is_absolute()
+            or path.name != raw_path
+            or "/" in raw_path
+            or "\\" in raw_path
+            or raw_path in {".", ".."}
+        ):
+            raise EvidenceProvenanceError(
+                f"delivery asset path must be one pack-relative component: {raw_path!r}"
+            )
+        if raw_path in seen:
+            raise EvidenceProvenanceError(
+                f"duplicate delivery asset in evidence manifest: {raw_path!r}"
+            )
+        seen.add(raw_path)
+        size = raw.get("bytes")
+        digest = raw.get("sha256")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise EvidenceProvenanceError(
+                f"delivery asset bytes must be a non-negative integer: {raw_path!r}"
+            )
+        if not _is_sha256(digest):
+            raise EvidenceProvenanceError(f"delivery asset has invalid sha256: {raw_path!r}")
+        assets.append({"path": raw_path, "bytes": size, "sha256": digest})
+
+    if "overview.png" not in seen:
+        raise EvidenceProvenanceError("evidence manifest has no overview.png delivery asset")
+    return sorted(assets, key=lambda item: item["path"])
+
+
+def _validate_delivery_mode_transport(delivery_mode: Any, transport: Any) -> None:
+    if not isinstance(delivery_mode, str):
+        raise EvidenceProvenanceError(
+            f"evidence delivery mode must be a string, got {type(delivery_mode).__name__}"
+        )
+    if not isinstance(transport, str):
+        raise EvidenceProvenanceError(
+            f"evidence delivery transport must be a string, got {type(transport).__name__}"
+        )
+    if delivery_mode not in DELIVERY_TRANSPORTS_BY_MODE:
+        raise EvidenceProvenanceError(f"unknown evidence delivery mode: {delivery_mode!r}")
+    if transport not in DELIVERY_TRANSPORTS_BY_MODE[delivery_mode]:
+        raise EvidenceProvenanceError(
+            f"transport {transport!r} is not valid for evidence delivery mode {delivery_mode!r}"
+        )
+
+
+def build_evidence_delivery_record(
+    manifest: dict[str, Any],
+    *,
+    delivery_mode: str,
+    transport: str,
+    preflight_status: str = DELIVERY_PREFLIGHT_PASSED,
+) -> dict[str, Any]:
+    """Build one schema-v1 per-ballot evidence-delivery assertion.
+
+    ``preflight_status=passed`` means the local runner verified that these exact
+    manifest image bytes existed in invocation scratch and were addressable by
+    the selected transport.  It does *not* assert that a remote service decoded
+    every image or that the model relied on it; no such consumption claim is
+    representable in this schema.
+    """
+    _validate_delivery_mode_transport(delivery_mode, transport)
+    if preflight_status != DELIVERY_PREFLIGHT_PASSED:
+        raise EvidenceProvenanceError(
+            f"a ballot delivery record requires passed preflight, got {preflight_status!r}"
+        )
+    assets = managed_image_descriptors(manifest)
+    return {
+        "schema_version": DELIVERY_SCHEMA_VERSION,
+        "delivery_mode": delivery_mode,
+        "transport": transport,
+        "preflight_status": preflight_status,
+        "asset_count": len(assets),
+        "asset_set_sha256": sha256_json(assets),
+        "assets": assets,
+    }
+
+
+def canonical_evidence_delivery_json(record: dict[str, Any]) -> str:
+    """Serialize a delivery record for its durable ``votes.csv`` cell."""
+    if not isinstance(record, dict):
+        raise EvidenceProvenanceError("evidence delivery record must be an object")
+    return canonical_json(record)
+
+
+def validate_evidence_delivery_record(
+    value: str | dict[str, Any],
+    manifest: dict[str, Any],
+    *,
+    expected_delivery_mode: str | None = None,
+    expected_transport: str | None = None,
+) -> dict[str, Any]:
+    """Validate a durable delivery record against its exact evidence manifest.
+
+    Strings must use :func:`canonical_json` byte-for-byte, which makes a ballot
+    cell deterministic and rejects silent reformatting or duplicate-key parser
+    ambiguities.  Every other field is recomputed from the verified manifest;
+    missing, extra, reordered, or edited assets therefore fail closed.
+    """
+    if isinstance(value, str):
+        try:
+            record = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise EvidenceProvenanceError("evidence delivery record is not valid JSON") from exc
+        if not isinstance(record, dict):
+            raise EvidenceProvenanceError("evidence delivery record must be a JSON object")
+        if value != canonical_json(record):
+            raise EvidenceProvenanceError("evidence delivery record JSON is not canonical")
+    elif isinstance(value, dict):
+        record = value
+    else:
+        raise EvidenceProvenanceError("evidence delivery record must be JSON text or an object")
+
+    keys = frozenset(record)
+    if keys != _DELIVERY_RECORD_KEYS:
+        missing = sorted(_DELIVERY_RECORD_KEYS - keys)
+        extra = sorted(keys - _DELIVERY_RECORD_KEYS)
+        raise EvidenceProvenanceError(
+            f"evidence delivery record fields mismatch: missing={missing}, extra={extra}"
+        )
+    schema_version = record.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != DELIVERY_SCHEMA_VERSION
+    ):
+        raise EvidenceProvenanceError(f"unsupported evidence delivery schema: {schema_version!r}")
+
+    delivery_mode = record.get("delivery_mode")
+    transport = record.get("transport")
+    _validate_delivery_mode_transport(delivery_mode, transport)
+    if expected_delivery_mode is not None and delivery_mode != expected_delivery_mode:
+        raise EvidenceProvenanceError(
+            f"evidence delivery mode mismatch: expected {expected_delivery_mode!r}, "
+            f"got {delivery_mode!r}"
+        )
+    if expected_transport is not None and transport != expected_transport:
+        raise EvidenceProvenanceError(
+            f"evidence delivery transport mismatch: expected {expected_transport!r}, "
+            f"got {transport!r}"
+        )
+    if record.get("preflight_status") != DELIVERY_PREFLIGHT_PASSED:
+        raise EvidenceProvenanceError(
+            f"evidence delivery preflight did not pass: {record.get('preflight_status')!r}"
+        )
+
+    assets = record.get("assets")
+    if not isinstance(assets, list):
+        raise EvidenceProvenanceError("evidence delivery assets must be a list")
+    for asset in assets:
+        if not isinstance(asset, dict) or frozenset(asset) != _DELIVERY_ASSET_KEYS:
+            raise EvidenceProvenanceError(
+                "evidence delivery asset must contain exactly path, bytes, and sha256"
+            )
+    expected_assets = managed_image_descriptors(manifest)
+    if assets != expected_assets:
+        raise EvidenceProvenanceError("evidence delivery assets do not match the evidence manifest")
+    asset_count = record.get("asset_count")
+    if (
+        isinstance(asset_count, bool)
+        or not isinstance(asset_count, int)
+        or asset_count != len(expected_assets)
+    ):
+        raise EvidenceProvenanceError("evidence delivery asset_count is incorrect")
+    expected_set_hash = sha256_json(expected_assets)
+    if record.get("asset_set_sha256") != expected_set_hash:
+        raise EvidenceProvenanceError("evidence delivery asset_set_sha256 is incorrect")
+    return record
 
 
 def _stable_id(value: Any, field: str) -> str:
@@ -444,6 +691,7 @@ def invocation_signature(
             "effective_timeouts": effective_timeouts,
             "collect_feedback": collect_feedback,
             "invocation_budget_s": invocation_budget_s,
+            "evidence_delivery_schema_version": DELIVERY_SCHEMA_VERSION,
             "runtime_contract_sha256": runtime_contract_sha256,
         }
     )
