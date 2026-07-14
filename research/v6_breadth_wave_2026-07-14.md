@@ -15,10 +15,11 @@ low-confidence groups. The run intentionally excluded groups over the 40-edge
 export backstop and groups already covered by human labels.
 
 Ignored evidence packs and raw outputs are under
-`data/agents/stitching/batches/breadth_v6_20260714_*` on the Mac and factory
-machine. Every selected group has an evidence-pack hash, displayed-candidate
-universe hash, option-menu hash, panel-invocation hash, and consensus-policy
-hash in its vote/consensus rows.
+`data/agents/stitching/batches/<dataset>_breadth_v6_20260714` on the Mac and
+factory machine. The dataset-prefixed name is required by panel-routing and
+vote-export discovery. Every selected group has an evidence-pack hash,
+displayed-candidate universe hash, option-menu hash, panel-invocation hash, and
+consensus-policy hash in its vote/consensus rows.
 
 ## Results
 
