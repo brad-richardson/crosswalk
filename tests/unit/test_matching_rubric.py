@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -26,6 +27,27 @@ def _doc_block(name: str) -> str:
     )
     assert match is not None, f"missing canonical rubric block {name}"
     return match.group(1)
+
+
+def _versioned_contract() -> str:
+    text = CANONICAL_DOC.read_text()
+    match = re.search(
+        r"<!-- BEGIN VERSIONED_MATCHING_CONTRACT -->\n(.*?)\n"
+        r"<!-- END VERSIONED_MATCHING_CONTRACT -->",
+        text,
+        flags=re.DOTALL,
+    )
+    assert match is not None, "missing versioned matching-contract markers"
+    return match.group(1)
+
+
+def _normalized_contract_digest() -> str:
+    contract = re.sub(
+        r"\(version [^)]+\)",
+        "(version {MATCHING_RUBRIC_VERSION})",
+        _versioned_contract(),
+    )
+    return hashlib.sha256(contract.encode()).hexdigest()
 
 
 def _stitch_prompt() -> str:
@@ -87,6 +109,38 @@ def test_runtime_rubric_stamp_matches_every_embedded_version():
         assert versions == [MATCHING_RUBRIC_VERSION]
 
 
+def test_rubric_version_is_content_addressed_to_full_matching_contract():
+    version_date, separator, version_digest = MATCHING_RUBRIC_VERSION.partition("+")
+    assert separator == "+"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", version_date)
+    assert version_digest == _normalized_contract_digest()[:12]
+
+
+def test_runtime_rubrics_expose_stable_rule_ids():
+    assert re.findall(r"\bMI-\d+\b", MATCH_IDENTITY_RUBRIC) == [
+        "MI-1",
+        "MI-2",
+        "MI-3",
+        "MI-4",
+        "MI-5",
+        "MI-6",
+    ]
+    assert re.findall(r"\bPL-\d+\b", PAIR_LABEL_RUBRIC) == [
+        "PL-1",
+        "PL-2",
+        "PL-3",
+        "PL-4",
+    ]
+    assert re.findall(r"\bSA-\d+\b", STITCH_ASSIGNMENT_RUBRIC) == [
+        "SA-1",
+        "SA-2",
+        "SA-3",
+        "SA-4",
+        "SA-5",
+        "SA-6",
+    ]
+
+
 def test_pair_prompt_embeds_only_shared_pair_contract_once():
     prompt = prepare_batch_prompt(Path("batch"), "subline_geometry_only", [], [], "out.csv")
     assert prompt.count(MATCH_IDENTITY_RUBRIC) == 1
@@ -104,6 +158,8 @@ def test_stitch_prompt_embeds_exact_contracts_without_old_biases():
     assert "best represent" not in prompt
     assert "almost never a correct edge" not in prompt
     assert "small overlap means the segments only touch" not in prompt
+    assert "finally longer overlap" not in prompt
+    assert "No single signal is a universal ordering" in prompt
     assert "SLIVER(low-span/low-absolute-overlap warning)" in prompt
     assert "BORDERLINE(low span fraction, display-only)" in prompt
 

@@ -8,6 +8,8 @@ Defines the two-stage pipeline for road network conflation: **stitch** (pair mat
 - **Graph-Level Resolution** answers: "Which of these matches can coexist in a consistent network mapping?"
 - **Merging** answers: "How do we modify the base network given accepted matches?"
 
+<!-- BEGIN VERSIONED_MATCHING_CONTRACT -->
+
 ### Labeling Contract
 
 The pipeline has two distinct labeling surfaces and they must not silently
@@ -44,37 +46,47 @@ must not turn different physical features or network roles into a match.
 ### Versioned Agent Rubrics
 
 The following compact blocks are the prompt-ready form of this canonical
-document. They are copied into the installed package because repository docs
-are not guaranteed to ship with it. CI compares the copies exactly, and both
-pair-labeling and stitching-labeling workflows import those shared copies.
+document. Their stable rule IDs link compact instructions to the expanded
+sections below; the expanded sections explain the rules but do not define a
+second policy. The blocks are copied into the installed package because
+repository docs are not guaranteed to ship with it. CI compares the copies
+exactly, and both pair-labeling and stitching-labeling workflows import those
+shared copies.
+
+CI also hashes this entire marked matching contract, including Sections 1 and
+2, after normalizing the embedded version text. The hash suffix is part of the
+rubric version. Any edit inside the contract therefore requires an intentional
+version update and review of the prompt-ready blocks, even when the edit is in
+expanded prose rather than a copied block. This detects textual drift; review
+is still responsible for judging whether two English statements agree.
 
 <!-- BEGIN MATCH_IDENTITY_RUBRIC -->
-CANONICAL MATCH-IDENTITY RUBRIC (version 2026-07-14)
+CANONICAL MATCH-IDENTITY RUBRIC (version 2026-07-14+eabcc7a9a9aa)
 Apply these rules to each candidate pair before considering group-level conflicts:
-1. Identity and role: a match requires the aligned portions to represent the same physical traveled way with the same network role. ALONG matches ALONG on the same facility; ACROSS matches only the same dedicated transverse crossing; TURN/CONNECTOR matches only the same facility or hierarchy transition. A regular turn through an ordinary intersection remains ALONG, as does a through facility that merely passes over or under another facility.
-2. Representation differences: segmentation points, segment lengths, names, and class tags may differ. One abstract centerline may match each constituent split carriageway as M:N, but the physically separate opposite carriageways do not match each other. Do not force a 1:1 mapping.
-3. Intersections and short overlaps: length alone never decides identity. A short same-direction, same-role subline on the same traveled way is a match and may become a junction anchor. A mere endpoint touch, perpendicular crossing, or different-role overlap is not a match.
-4. Parallel features: laterally separate carriageways, frontage/service roads, sidewalks, separated cycle tracks, and other neighboring facilities are not matches merely because they are parallel or share a name. A painted, sharrow, or flexpost-separated bike lane on the same pavement matches the road rather than a separately mapped cycleway; a raised or curbed cycle track is a separate feature and matches the corresponding cycleway rather than the road.
-5. Evidence, not verdicts: geometry, direction, topology, names, classes, model scores, overlap lengths, and SLIVER/BORDERLINE tags are evidence. No single tag, score, name, class mismatch, or overlap threshold overrides physical identity and network role. Small offsets from GPS or digitization are acceptable when the paths represent the same way.
-6. Replacement test: if replacing one aligned subline with the other would change movement intent (for example ALONG becomes ACROSS or a mainline becomes a ramp), the pair is not a match.
+MI-1. Identity and role: a match requires the aligned portions to represent the same physical traveled way with the same network role. ALONG matches ALONG on the same facility; ACROSS matches only the same dedicated transverse crossing; TURN/CONNECTOR matches only the same facility or hierarchy transition. A regular turn through an ordinary intersection remains ALONG, as does a through facility that merely passes over or under another facility. Treat role compatibility as the default identity gate; document any real-world exception explicitly in this canonical contract rather than inferring one from geometry alone.
+MI-2. Representation differences: segmentation points, segment lengths, names, and class tags may differ. One abstract centerline may match each constituent split carriageway as M:N, but the physically separate opposite carriageways do not match each other. Do not force a 1:1 mapping.
+MI-3. Intersections and short overlaps: length alone never decides identity. A short same-direction, same-role subline on the same traveled way is a match and may become a junction anchor. A mere endpoint touch, perpendicular crossing, or different-role overlap is not a match.
+MI-4. Parallel features: laterally separate carriageways, frontage/service roads, sidewalks, separated cycle tracks, and other neighboring facilities are not matches merely because they are parallel or share a name. A painted, sharrow, or flexpost-separated bike lane on the same pavement matches the road rather than a separately mapped cycleway; a raised or curbed cycle track is a separate feature and matches the corresponding cycleway rather than the road.
+MI-5. Evidence, not verdicts: geometry, direction, topology, names, classes, model scores, overlap lengths, and SLIVER/BORDERLINE tags are evidence. No single tag, score, name, class mismatch, or overlap threshold overrides physical identity and network role. Small offsets from GPS or digitization are acceptable when the paths represent the same way.
+MI-6. Replacement test: if replacing one aligned subline with the other would change movement intent (for example ALONG becomes ACROSS or a mainline becomes a ramp), the pair is not a match.
 <!-- END MATCH_IDENTITY_RUBRIC -->
 
 <!-- BEGIN PAIR_LABEL_RUBRIC -->
-PAIR-LABEL OUTPUT CONTRACT (version 2026-07-14)
-- match: the pair satisfies the canonical match-identity rubric.
-- no_match: the pair represents different physical features or roles, or has no plausible aligned subline after ordinary data noise.
-- unsure: the available evidence cannot determine physical identity or network role reliably. Use uncertainty instead of guessing.
-Pair labeling is recall-biased: retain plausible same-role identity edges for graph-level resolution rather than rejecting them solely because they are short or participate in another candidate match.
+PAIR-LABEL OUTPUT CONTRACT (version 2026-07-14+eabcc7a9a9aa)
+PL-1. match: the pair satisfies the canonical match-identity rubric.
+PL-2. no_match: the pair represents different physical features or roles, or has no plausible aligned subline after ordinary data noise.
+PL-3. unsure: the available evidence cannot determine physical identity or network role reliably. Use uncertainty instead of guessing.
+PL-4. Pair labeling is recall-biased: retain plausible same-role identity edges for graph-level resolution rather than rejecting them solely because they are short or participate in another candidate match.
 <!-- END PAIR_LABEL_RUBRIC -->
 
 <!-- BEGIN STITCH_ASSIGNMENT_RUBRIC -->
-STITCH-ASSIGNMENT OUTPUT CONTRACT (version 2026-07-14)
-1. Judge identity first: apply the canonical match-identity rubric independently to every displayed candidate edge. Graph resolution may decide which identity-compatible edges coexist; it must not redefine different features or roles as matches.
-2. Preserve legitimate M:N structure: keep all mutually consistent identity edges created by different segmentation or centerline/carriageway representation. Do not prefer a smaller set merely because it is simpler.
-3. Resolve actual conflicts only after role-incompatible and different-feature candidates are removed. Then prefer neighborhood support, corridor continuity, and finally longer overlap when structural evidence is otherwise equivalent. A supported short same-way edge may remain as a junction anchor; an isolated clip with a better competing continuation may be excluded.
-4. Exact option semantics: choose an option only when it contains all and only the final accepted edges in the displayed candidate universe. Do not choose the closest option, trade a false positive against a false negative, maximize edge count, or defer to total/mean confidence.
-5. NONE semantics: choose NONE when every displayed edge is a no-match, when no offered option exactly represents the final accepted edge set, or when the evidence is insufficient to determine an exact set. State which reason applies so human review can distinguish them.
-6. Option metadata is non-normative: optimizer status, option order, edge count, and aggregate confidence are context only and never make an option correct.
+STITCH-ASSIGNMENT OUTPUT CONTRACT (version 2026-07-14+eabcc7a9a9aa)
+SA-1. Judge identity first: apply the canonical match-identity rubric independently to every displayed candidate edge. Graph resolution may decide which identity-compatible edges coexist; it must not redefine different features or roles as matches.
+SA-2. Preserve legitimate M:N structure: keep all mutually consistent identity edges created by different segmentation or centerline/carriageway representation. Do not prefer a smaller set merely because it is simpler.
+SA-3. Resolve actual conflicts only after role-incompatible and different-feature candidates are removed. Among the remaining mutually exclusive identity matches, consider neighborhood support, corridor continuity, and aligned coverage together. No single signal is a universal ordering: longer overlap must not by itself override stronger structural evidence, and a supported short same-way edge may remain as a junction anchor. When the evidence does not establish an exact final set, choose NONE for human review.
+SA-4. Exact option semantics: choose an option only when it contains all and only the final accepted edges in the displayed candidate universe. Do not choose the closest option, trade a false positive against a false negative, maximize edge count, or defer to total/mean confidence.
+SA-5. NONE semantics: choose NONE when every displayed edge is a no-match, when no offered option exactly represents the final accepted edge set, or when the evidence is insufficient to determine an exact set. State which reason applies so human review can distinguish them.
+SA-6. Option metadata is non-normative: optimizer status, option order, edge count, and aggregate confidence are context only and never make an option correct.
 <!-- END STITCH_ASSIGNMENT_RUBRIC -->
 
 ---
@@ -91,11 +103,11 @@ Two segments that overlap spatially are not necessarily a match. They must repre
 
 ### Definitions
 
-#### Match
+#### Match (MI-1, PL-1)
 
 The aligned overlapping portions of the GERS segment and the local segment represent the same physical traveled way with the same network role. Segmentation points, names, and classification may differ.
 
-#### No Match
+#### No Match (MI-1, PL-2)
 
 The aligned portions are not the same physical traveled way with the same
 network role. For example, they are different physical features (sidewalk vs
@@ -104,7 +116,7 @@ subline after ordinary GPS/digitization noise. Another candidate being better
 does not by itself make this pair a no-match; pair identity is judged
 independently.
 
-#### Unsure (Workflow State)
+#### Unsure — Workflow State (PL-3)
 
 `unsure` means the available evidence cannot determine identity or role
 reliably. It routes the pair to review; it is not a third physical truth class
@@ -114,7 +126,7 @@ and must not be used as a binary classifier training label.
 
 "New" is a property of a **segment**, not a pair — it emerges from aggregation. If a local segment receives `no_match` against every candidate, then that segment is "new" (no plausible correspondence exists in Overture). Pair truth is binary (`match` or `no_match`), while the labeling workflow may temporarily output `unsure` to request review; "new" is never a pair-level label. The distinction matters for downstream "add to Overture" logic, not for the ML classifier.
 
-### Network Roles
+### Network Roles (MI-1)
 
 Every segment in a transportation network serves one of three roles. Match compatibility is constrained by role. Roles are a conceptual tool for labeling and reasoning — they may be inferred implicitly from geometry, topology, and tags rather than stored explicitly.
 
@@ -152,7 +164,7 @@ Examples: highway off-ramps, slip roads, bike turn pockets at facility transitio
 | **ACROSS** | Never | Yes | Never |
 | **TURN** | Never | Never | Same intent |
 
-### Edge Cases
+### Edge Cases (MI-2 through MI-5)
 
 | Scenario | Result | Why |
 |----------|--------|-----|
@@ -182,7 +194,7 @@ For same-role overlaps near intersection nodes:
 1. If the segments share a subsegment along the same direction, they are a match
 2. Graph-level resolution decides whether to keep, demote, or reject based on neighborhood context
 
-### Pair Matching Scope
+### Pair Matching Scope (PL-4)
 
 The ML classifier operates as a pair-level identity matcher:
 
@@ -191,7 +203,7 @@ The ML classifier operates as a pair-level identity matcher:
 - Pair matching does not enforce graph consistency
 - The model is trained on binary match/no_match labels — the role concept guides labeling decisions, not the classifier features directly
 
-### Heuristic: The Replacement Test
+### Heuristic: The Replacement Test (MI-6)
 
 A helpful mental model: if replacing one aligned subline with the other would change the intent of the network (e.g., through movement becomes a turn, along becomes across), it is not a match.
 
@@ -236,14 +248,24 @@ A match survives graph-level resolution if:
 
 Matches without neighborhood support are demoted to AMBIGUOUS and may be rejected if competing candidates exist.
 
-### 2.5 Conflict Resolution
+### 2.5 Conflict Resolution (SA-3)
 
-Role compatibility is a hard identity gate, not a tie-break. After removing
-role-incompatible or different-feature candidates, resolve remaining competing
-identity matches in this order:
-1. Prefer neighborhood-supported candidates
-2. Prefer corridor-continuous candidates over isolated short matches
-3. Prefer longer overlap when the structural evidence is otherwise equivalent
+Role compatibility is the default hard identity gate, not a tie-break. Any
+real-world exception belongs in the canonical match-identity rules rather than
+being inferred from longer overlap or another geometric signal. After removing
+role-incompatible or different-feature candidates and preserving legitimate
+M:N structure, weigh the following evidence together for genuinely competing
+identity matches:
+
+- Neighborhood support
+- Corridor continuity versus an isolated clip
+- Aligned coverage and overlap length
+
+There is no universal lexicographic order among these signals. Longer overlap
+must not by itself override stronger structural evidence, while a supported
+short same-way edge may remain as a junction anchor. If the evidence does not
+establish an exact final set, leave the conflict AMBIGUOUS and route it to human
+review rather than forcing a winner.
 
 Cap max matches per segment except for defined M:N split cases (e.g., dual carriageway).
 
@@ -255,6 +277,8 @@ Graph-level resolution produces:
   - Likely covered (match exists nearby but didn't meet threshold)
   - Likely net new (no plausible correspondence in reference)
   - Ambiguous (insufficient evidence either way)
+
+<!-- END VERSIONED_MATCHING_CONTRACT -->
 
 ---
 
