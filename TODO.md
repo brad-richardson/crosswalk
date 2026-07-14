@@ -9,6 +9,49 @@ Actionable backlog for the road network matcher.
 
 ## Known Issues & Technical Debt
 
+### Medium: Make Both Overture Fetch Paths Release-Consistent
+
+**Problem:** The two Overture fetch paths can leave a configured dataset with
+mixed-release reference artifacts:
+
+1. `crosswalk data fetch reference|overture` writes the canonical segment and
+   connector paths, but its non-`--force` skip gate checks only that both files
+   exist. It does not verify that their metadata releases agree with each other
+   or with the requested/latest release.
+2. The YAML-free `crosswalk fetch-overture` command defaults to segments-only.
+   With `--connectors`, it appends `_connectors` to the output stem; an output
+   named `*_overture_segments_v1.0.parquet` therefore produces the noncanonical
+   `*_overture_segments_v1.0_connectors.parquet` instead of
+   `*_overture_connectors_v1.0.parquet`.
+
+**Observed impact (2026-07-13):** A June segment refresh left 15 canonical
+connector sidecars on the January release, while the configured dataset's
+aggregate `last_fetch.reference` timestamp reflected only the newer segment
+fetch. This did not change June GERS ids/geometries, but it made factory
+topology features and provenance mixed-release. One redundant Singapore
+connector file was also written under the noncanonical name.
+
+**Patch both paths:**
+
+- Add a shared reference-artifact audit that reads segment and connector
+  metadata together and checks release, bbox/buffer, schema/data version, and
+  canonical paths before a fetch is skipped or a factory run starts.
+- Make `crosswalk data fetch reference|overture` refetch (or fail loudly with a
+  precise `--force` instruction) when either canonical artifact is missing,
+  unreadable, or release-inconsistent; update `last_fetch.reference` only after
+  the pair validates.
+- Make `crosswalk fetch-overture --connectors` derive the canonical connector
+  sibling when the output follows the configured
+  `*_overture_segments_v*.parquet` convention. Warn or refuse when a
+  segments-only invocation targets a configured canonical raw-data path, while
+  preserving segments-only behavior for ordinary YAML-free usage.
+- Add regression tests for stale-segment/fresh-connector and
+  fresh-segment/stale-connector pairs, missing metadata, the canonical filename
+  derivation, and a fully current no-op fetch.
+
+**Location:** `src/crosswalk/cli/data.py`, `src/crosswalk/cli/main.py`,
+`src/crosswalk/fetch/overture.py`, and fetch/factory provenance tests.
+
 ### HIGH: Scalability - Large Dataset Support
 
 - **Problem**: `runner.py` uses `geopandas.read_parquet` which loads entire dataset into memory

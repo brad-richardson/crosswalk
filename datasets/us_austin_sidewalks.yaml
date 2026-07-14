@@ -45,7 +45,7 @@ last_fetch:
     - LineString
     output_path: data/raw
   reference:
-    fetched_at: '2026-07-06T18:50:58.187693+00:00'
+    fetched_at: '2026-07-14T00:30:39.422621+00:00'
     bbox:
     - -97.94
     - 30.13

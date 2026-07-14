@@ -24,7 +24,7 @@ fetch:
   crs: EPSG:4326
 last_fetch:
   reference:
-    fetched_at: '2026-07-06T18:43:24.648177+00:00'
+    fetched_at: '2026-07-13T23:56:26.535011+00:00'
     bbox:
     - 113.82
     - 22.15

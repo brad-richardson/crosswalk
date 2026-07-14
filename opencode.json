@@ -16,7 +16,7 @@
       }
     },
     "meta": {
-      "npm": "@ai-sdk/openai-compatible",
+      "npm": "@ai-sdk/openai",
       "name": "Meta (Muse)",
       "options": {
         "baseURL": "https://api.meta.ai/v1",
@@ -27,8 +27,26 @@
           "name": "Muse Spark 1.1",
           "reasoning": true,
           "limit": {
-            "context": 128000,
-            "output": 32000
+            "context": 1048576,
+            "output": 131072
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "options": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "auto",
+            "include": [
+              "reasoning.encrypted_content"
+            ]
           }
         }
       }
