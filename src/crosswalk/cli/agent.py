@@ -1357,8 +1357,8 @@ def run_stitch_panel(
     # named panel's spec). An unconditional typer default would silently clobber
     # the spec for every composition — the #397 opencode fix, now required for
     # every provider because specs differ across panel eras (codex is
-    # gpt-5.6-terra/medium on the default/v5/v4 panels but gpt-5.5/low on the
-    # v3 panels).
+    # gpt-5.6-sol/high on v7-candidate, gpt-5.6-terra/medium on the
+    # default/v5/v4/v6 panels, and gpt-5.5/low on the v3 panels).
     claude_model: str = typer.Option(
         None,
         "--claude-model",
@@ -1369,19 +1369,22 @@ def run_stitch_panel(
         None,
         "--claude-effort",
         help="Override the claude voter's reasoning effort (default: the named "
-        "panel's spec — medium on all current panels).",
+        "panel's spec — high on v7-candidate and medium on the other current "
+        "panels).",
     ),
     codex_model: str = typer.Option(
         None,
         "--codex-model",
         help="Override the codex voter's model (default: the named panel's spec — "
-        "gpt-5.6-terra on default/v5/v4, gpt-5.5 on the v3-era panels).",
+        "gpt-5.6-sol on v7-candidate, gpt-5.6-terra on default/v5/v4/v6, "
+        "and gpt-5.5 on the v3-era panels).",
     ),
     codex_effort: str = typer.Option(
         None,
         "--codex-effort",
         help="Override the codex voter's reasoning effort (default: the named "
-        "panel's spec — medium on default/v5/v4, low on the v3-era panels).",
+        "panel's spec — high on v7-candidate, medium on default/v5/v4/v6, "
+        "and low on the v3-era panels).",
     ),
     agy_model: str = typer.Option(
         None,
@@ -1408,7 +1411,9 @@ def run_stitch_panel(
         "lean Claude + Codex + Muse trio; it remains nonstandard until its "
         "calibration gate passes. 'v6-agy-calibration' and "
         "'v6-flex-calibration' isolate the two Gemini routes on the same logical "
-        "fourth seat for experimental parity testing.",
+        "fourth seat for experimental parity testing. 'v7-candidate' is the "
+        "canonical-rubric high-effort Claude + Codex/gpt-5.6-sol + Muse replay "
+        "panel; it remains nonstandard pending manual review.",
     ),
     opencode_model: str = typer.Option(
         None,
@@ -1435,8 +1440,8 @@ def run_stitch_panel(
         None,
         "--muse-model",
         help="Override the 'muse' voter's model string (default: the named panel's "
-        "spec — meta/muse-spark-1.1 on the default/v5 quad and on "
-        "meta-candidate). Distinct "
+        "spec — meta/muse-spark-1.1 on the default/v5 quad, meta-candidate, and "
+        "the v6/v7 candidates). Distinct "
         "from --kimi-model: Muse and Kimi both ride the opencode transport but "
         "carry separate provider names ('muse'/'kimi') so both can be seated "
         "(the v5 quad) and pinned independently.",
@@ -1929,8 +1934,8 @@ def export_stitch_panel(
             "Export even when a batch's votes.csv (provider, model) voter set "
             "matches no blessed panel composition (v5: claude+codex/gpt-5.6-terra"
             "+kimi/Kimi+muse/Muse Spark; v4: that trio without muse; v3: "
-            "claude+codex/gpt-5.5+agy). The known v6 candidate also requires "
-            "this flag until calibration promotes it. Labels are "
+            "claude+codex/gpt-5.5+agy). The known v6 and v7 candidates also "
+            "require this flag until calibration promotes them. Labels are "
             "still stamped with the panel_* labelers, so only use this "
             "after an explicit provenance decision. A composition with no known "
             "era additionally needs --stamp-era to say WHICH labeler generation "
@@ -1941,7 +1946,7 @@ def export_stitch_panel(
         None,
         "--stamp-era",
         help=(
-            "Declare the labeler era ('v3', 'v4', 'v5', or 'v6') for batches whose "
+            "Declare the labeler era ('v3', 'v4', 'v5', 'v6', or 'v7') for batches whose "
             "composition resolves to NO era. FILL-IN only: batches that "
             "resolve to a blessed or known-historical era always keep their "
             "own era — this flag never re-stamps them. Required when any "

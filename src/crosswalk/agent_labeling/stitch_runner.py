@@ -14,9 +14,12 @@ Votes are audit data and are stored under the batch dir (``votes.csv``),
 deliberately separate from ``labels/``. This module writes NOTHING into
 ``labels/stitching/`` — export policy is decided after the validation gate.
 
-The opt-in ``v6-candidate`` is a lean three-seat Claude/Codex/Muse panel. The
-route-aware Gemini 3.5 Flash voter remains available through explicit agy and
-OpenRouter AI Studio flex calibration panels, but is not a v6 production seat.
+The opt-in ``v6-candidate`` is the lean three-seat Claude/Codex-Terra/Muse
+panel used for the first breadth wave. ``v7-candidate`` keeps that lean roster,
+returns Codex to gpt-5.6-sol, and records high effort for all three seats under
+the canonical matching rubric. The route-aware Gemini 3.5 Flash voter remains
+available through explicit agy and OpenRouter AI Studio flex calibration
+panels, but is not a v6 or v7 production seat.
 """
 
 from __future__ import annotations
@@ -235,6 +238,19 @@ OPENCODE_KIMI = ProviderSpec(
 # committed), so the rename rewrites nothing on disk.
 MUSE = ProviderSpec(name="muse", model="meta/muse-spark-1.1", timeout=480, opencode_agent="vote")
 
+# V7 records the already-configured Muse high reasoning policy explicitly in
+# the panel invocation signature. ``invoke_opencode`` does not translate the
+# generic effort field into a CLI flag; the actual Muse setting remains pinned
+# by opencode.json's model-scoped ``reasoningEffort: high``. Keep the historical
+# MUSE spec unchanged so v5/v6 invocation signatures remain reproducible.
+MUSE_HIGH_EFFORT = ProviderSpec(
+    name="muse",
+    model="meta/muse-spark-1.1",
+    effort="high",
+    timeout=480,
+    opencode_agent="vote",
+)
+
 # Experimental Gemini calibration voter: one LOGICAL Gemini 3.5 Flash seat with
 # two physical routes. agy uses the user's Google quota first; a provider-scoped failure
 # opens a wave-local circuit and falls back to the paid OpenRouter AI Studio
@@ -329,6 +345,17 @@ PANEL_V6_CANDIDATE = [
 PANEL_V6_AGY_CALIBRATION = [*PANEL_V6_CANDIDATE[:2], GEMINI_AGY_ONLY, MUSE]
 PANEL_V6_FLEX_CALIBRATION = [*PANEL_V6_CANDIDATE[:2], GEMINI_FLEX_ONLY, MUSE]
 
+# Candidate v7: a new provenance era for the canonical-rubric replay. It keeps
+# the lean three-family roster, moves Codex Terra -> Sol, and raises Claude and
+# Codex to high effort. Muse was already invoked with high reasoning through
+# opencode.json; MUSE_HIGH_EFFORT makes that policy explicit in the invocation
+# signature without rewriting historical v5/v6 specs.
+PANEL_V7_CANDIDATE = [
+    ProviderSpec(name="claude", model="claude-opus-4-8", effort="high"),
+    ProviderSpec(name="codex", model="gpt-5.6-sol", effort="high"),
+    MUSE_HIGH_EFFORT,
+]
+
 # Named panel configurations. DEFAULT_PANEL (v5) is the default; historical
 # compositions stay addressable so old batches can be reproduced exactly.
 #
@@ -337,7 +364,7 @@ PANEL_V6_FLEX_CALIBRATION = [*PANEL_V6_CANDIDATE[:2], GEMINI_FLEX_ONLY, MUSE]
 # swaps agy for the opencode/Qwen voter so a wave can proceed 3-wide. NOTE:
 # panel composition is part of export-label provenance — stitch-export keys its
 # gate on (provider, model) pairs, so labels from any non-blessed composition
-# (no-agy, v3-candidate, v4-candidate, meta-candidate, and the v6 candidates)
+# (no-agy, v3-candidate, v4-candidate, meta-candidate, and the v6/v7 candidates)
 # are refused without --allow-nonstandard-panel.
 PANELS: dict[str, list[ProviderSpec]] = {
     "default": DEFAULT_PANEL,
@@ -375,6 +402,7 @@ PANELS: dict[str, list[ProviderSpec]] = {
     "v6-candidate": PANEL_V6_CANDIDATE,
     "v6-agy-calibration": PANEL_V6_AGY_CALIBRATION,
     "v6-flex-calibration": PANEL_V6_FLEX_CALIBRATION,
+    "v7-candidate": PANEL_V7_CANDIDATE,
 }
 
 

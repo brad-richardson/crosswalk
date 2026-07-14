@@ -489,6 +489,13 @@ current rubric, not stamped as v6 after the fact. The
 `v6-agy-calibration`/`v6-flex-calibration` panels add a route-provenanced Gemini
 seat for experiments only; Gemini is not part of the v6 production candidate.
 
+The follow-up `v7-candidate` keeps the same lean Claude + Codex + Muse family
+mix but returns Codex to `gpt-5.6-sol` and uses high effort for all three seats
+(Muse's actual high-reasoning setting remains pinned in `opencode.json`). V7 is
+a new provenance era, not an in-place edit of v6: v6 remains reproducible as
+the Terra/medium breadth-wave roster. Like v6, v7 remains nonstandard until its
+canonical-rubric replay is manually reviewed and explicitly promoted.
+
 Setup (no machine-level config required):
 
 - **Provider**: a project-level [`opencode.json`](../opencode.json) at the repo
