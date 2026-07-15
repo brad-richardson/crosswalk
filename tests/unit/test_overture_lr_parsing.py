@@ -1,14 +1,23 @@
 """Unit tests for Overture linear-referenced attribute parsing."""
 
+from pathlib import Path
+
+import geopandas as gpd
+from shapely import LineString
+
 from crosswalk.fetch.overture import (
     _extract_range_from_rule,
     _get_language_priority,
     _get_variant_priority,
+    backfill_overture_physical_lr,
+    extract_lr_attributes,
+    load_overture_segments,
     parse_level_rules_lr,
     parse_names_lr,
     parse_road_flags_lr,
     parse_subclass_rules_lr,
 )
+from crosswalk.pipeline.runner import load_and_filter_inputs
 
 
 class TestVariantPriority:
@@ -453,3 +462,95 @@ class TestParseRoadFlagsLr:
         ]
         result = parse_road_flags_lr(rules)
         assert result.ranges[0].value == frozenset({"is_tunnel"})
+
+
+def _top_level_physical_gdf() -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        {
+            "id": ["segment"],
+            "names": [{"primary": "Covered Road"}],
+            "road_flags": [
+                [
+                    {
+                        "between": [0.25, 0.75],
+                        "values": ["is_tunnel", "is_covered"],
+                    }
+                ]
+            ],
+            "level_rules": [[{"between": [0.25, 0.75], "value": -1}]],
+        },
+        geometry=[LineString([(0, 0), (1, 0)])],
+        crs="EPSG:4326",
+    )
+
+
+def test_extract_lr_attributes_reads_top_level_road_flags() -> None:
+    result = extract_lr_attributes(_top_level_physical_gdf())
+
+    assert result.iloc[0]["road_flags_lr"] == [
+        {"between": [0.0, 0.25], "value": []},
+        {"between": [0.25, 0.75], "value": ["is_covered", "is_tunnel"]},
+        {"between": [0.75, 1.0], "value": []},
+    ]
+    assert result.iloc[0]["level_lr"] == [
+        {"between": [0.0, 0.25], "value": 0},
+        {"between": [0.25, 0.75], "value": -1},
+        {"between": [0.75, 1.0], "value": 0},
+    ]
+
+
+def test_existing_overture_snapshot_backfills_stale_physical_lr() -> None:
+    stale = _top_level_physical_gdf().assign(
+        road_flags_lr=[[{"between": [0.0, 1.0], "value": []}]],
+        level_lr=[[{"between": [0.0, 1.0], "value": 0}]],
+    )
+
+    result = backfill_overture_physical_lr(stale)
+
+    assert result.iloc[0]["road_flags_lr"][1] == {
+        "between": [0.25, 0.75],
+        "value": ["is_covered", "is_tunnel"],
+    }
+    assert result.iloc[0]["level_lr"][1]["value"] == -1
+    assert list(result.index) == list(stale.index)
+
+
+def test_load_overture_segments_flattens_top_level_flags(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "crosswalk.fetch.overture.gpd.read_parquet",
+        lambda _path: _top_level_physical_gdf(),
+    )
+
+    result = load_overture_segments(Path("unused.parquet"))
+
+    assert bool(result.iloc[0]["is_tunnel"]) is True
+    assert bool(result.iloc[0]["is_bridge"]) is False
+
+
+def test_pipeline_load_repairs_existing_overture_snapshot(monkeypatch, tmp_path) -> None:
+    reference_path = tmp_path / "reference.parquet"
+    target_path = tmp_path / "target.parquet"
+    reference_path.touch()
+    target_path.touch()
+    reference = _top_level_physical_gdf().assign(
+        road_flags_lr=[[{"between": [0.0, 1.0], "value": []}]],
+        level_lr=[[{"between": [0.0, 1.0], "value": 0}]],
+    )
+    target = gpd.GeoDataFrame(
+        {"id": ["target"]},
+        geometry=[LineString([(0, 0), (1, 0)])],
+        crs="EPSG:4326",
+    )
+
+    monkeypatch.setattr(
+        "crosswalk.pipeline.runner.gpd.read_parquet",
+        lambda path: reference.copy() if path == reference_path else target.copy(),
+    )
+
+    loaded_reference, _loaded_target = load_and_filter_inputs(reference_path, target_path)
+
+    assert loaded_reference.iloc[0]["road_flags_lr"][1]["value"] == [
+        "is_covered",
+        "is_tunnel",
+    ]
+    assert loaded_reference.iloc[0]["level_lr"][1]["value"] == -1

@@ -384,3 +384,17 @@ These mappings are declarative in the dataset recipes and flow through ArcGIS,
 download, OGC, and OS-download ingestion. Existing snapshots are also normalized
 at pipeline load from their retained `source_tags`, so the evidence is available
 without a network refetch; the next fetch writes the same fields natively.
+
+### Pairwise physical-feature follow-up
+
+The subsequent coverage audit, Overture top-level `road_flags` repair,
+multi-seed grouped ablation, known-failure fixtures, Geneva coincidence feature,
+and curated review queue are documented in
+[`physical_feature_experiment_2026-07-15.md`](physical_feature_experiment_2026-07-15.md).
+
+The short result is to keep propagating physical evidence but not yet promote it
+into the production pairwise model. The apparent full-bundle gain is dominated
+by target-attribute availability, while the 46 rows with active physical
+evidence regress. Exact/relative numeric level remains deferred; same-side
+coincidence is treated as geometry-derived group ambiguity rather than a
+synthetic physical layer.

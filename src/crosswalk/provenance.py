@@ -13,7 +13,11 @@ def _find_repo_root(start: Path) -> Path | None:
     if resolved.is_file():
         resolved = resolved.parent
     for candidate in (resolved, *resolved.parents):
-        if (candidate / ".git").exists():
+        git_marker = candidate / ".git"
+        # A checkout has either a real .git directory with HEAD or a .git file
+        # pointing at worktree/submodule metadata. Empty mount-point markers
+        # (some sandboxes create one at /tmp/.git) are not repositories.
+        if git_marker.is_file() or (git_marker.is_dir() and (git_marker / "HEAD").is_file()):
             return candidate
     return None
 

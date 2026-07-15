@@ -312,9 +312,17 @@ def load_overture_segments(path: Path) -> gpd.GeoDataFrame:
             lambda x: x.get("primary") if isinstance(x, dict) else None
         )
 
-    # Extract bridge/tunnel flags from road struct
-    # Overture stores road_flags as array of {values: [flag_names]}
-    if "road" in gdf.columns:
+    # Extract bridge/tunnel flags. Current Overture releases expose
+    # ``road_flags`` as a top-level segment property; retain the nested
+    # ``road.road_flags`` fallback for older snapshots.
+    if "road_flags" in gdf.columns:
+        gdf["is_bridge"] = gdf["road_flags"].apply(
+            lambda x: _has_road_flag_rules(x, "is_bridge")
+        )
+        gdf["is_tunnel"] = gdf["road_flags"].apply(
+            lambda x: _has_road_flag_rules(x, "is_tunnel")
+        )
+    elif "road" in gdf.columns:
         gdf["is_bridge"] = gdf["road"].apply(
             lambda x: _has_road_flag(x, "is_bridge") if x else False
         )
@@ -363,17 +371,34 @@ def _has_road_flag(road_struct, flag_name: str) -> bool:
         return False
 
     # Check new format: road_flags array
-    road_flags = road_struct.get("road_flags") or road_struct.get("flags")
-    if isinstance(road_flags, list):
-        for rule in road_flags:
-            if isinstance(rule, dict):
-                values = rule.get("values") or []
-                if flag_name in values:
-                    return True
+    road_flags = road_struct.get("road_flags")
+    if road_flags is None:
+        road_flags = road_struct.get("flags")
+    if not isinstance(road_flags, dict):
+        return _has_road_flag_rules(road_flags, flag_name)
     # Check old format: flags.is_bridge (boolean)
-    elif isinstance(road_flags, dict):
+    if isinstance(road_flags, dict):
         return road_flags.get(flag_name, False)
 
+    return False
+
+
+def _has_road_flag_rules(road_flags, flag_name: str) -> bool:
+    """Check a top-level Overture road_flags rule array for one flag."""
+    if road_flags is None:
+        return False
+    if hasattr(road_flags, "tolist"):
+        road_flags = road_flags.tolist()
+    if not isinstance(road_flags, list):
+        return False
+    for rule in road_flags:
+        if not isinstance(rule, dict):
+            continue
+        values = rule.get("values")
+        if hasattr(values, "tolist"):
+            values = values.tolist()
+        if isinstance(values, list) and flag_name in values:
+            return True
     return False
 
 
@@ -837,7 +862,7 @@ def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     - names_lr: From names struct
     - subclass_lr: From subclass_rules array
     - level_lr: From level_rules array
-    - road_flags_lr: From road.road_flags array
+    - road_flags_lr: From top-level road_flags (or legacy road.road_flags)
     - oneway_lr: From access struct (forward/backward)
     - speed_limit_kph_lr: From speed_limits array (normalized to kph)
 
@@ -880,8 +905,14 @@ def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     else:
         gdf["level_lr"] = [[{"between": [0.0, 1.0], "value": 0}] for _ in range(len(gdf))]
 
-    # Parse road_flags linear reference
-    if "road" in gdf.columns:
+    # Parse road_flags linear reference. Current Overture segment snapshots use
+    # a top-level ``road_flags`` column. The nested road struct remains as a
+    # backwards-compatible fallback.
+    if "road_flags" in gdf.columns:
+        gdf["road_flags_lr"] = gdf["road_flags"].apply(
+            lambda x: parse_road_flags_lr(x).to_dict_list()
+        )
+    elif "road" in gdf.columns:
         gdf["road_flags_lr"] = gdf["road"].apply(
             lambda x: parse_road_flags_lr(
                 x.get("road_flags") if isinstance(x, dict) else None
@@ -922,3 +953,104 @@ def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         ]
 
     return gdf
+
+
+def backfill_overture_physical_lr(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Rebuild physical LR fields retained in an existing Overture snapshot.
+
+    Early snapshots parsed only a legacy nested ``road`` struct and therefore
+    wrote empty ``road_flags_lr`` rules even though the raw top-level
+    ``road_flags`` column was retained. This row-order-preserving backfill is
+    intentionally limited to physical columns so cached positional match
+    indices remain valid and unrelated derived fields are untouched.
+    """
+    has_flags = "road_flags" in gdf.columns or "road" in gdf.columns
+    has_levels = "level_rules" in gdf.columns
+
+    def _as_list(value):
+        if hasattr(value, "tolist"):
+            value = value.tolist()
+        return value if isinstance(value, list) else []
+
+    def _first_positive_flag_is_missing() -> bool:
+        if "road_flags_lr" not in gdf.columns:
+            return True
+        raw_values = gdf["road_flags"] if "road_flags" in gdf.columns else gdf["road"]
+        for raw, derived in zip(raw_values, gdf["road_flags_lr"], strict=True):
+            if isinstance(raw, dict):
+                raw = raw.get("road_flags")
+            expected = {
+                str(flag)
+                for rule in _as_list(raw)
+                if isinstance(rule, dict)
+                for flag in _as_list(rule.get("values"))
+                if flag
+            }
+            if not expected:
+                continue
+            actual = {
+                str(flag)
+                for rule in _as_list(derived)
+                if isinstance(rule, dict)
+                for flag in _as_list(rule.get("value"))
+                if flag
+            }
+            return not expected.issubset(actual)
+        return False
+
+    def _first_nonzero_level_is_missing() -> bool:
+        if "level_lr" not in gdf.columns:
+            return True
+        for raw, derived in zip(gdf["level_rules"], gdf["level_lr"], strict=True):
+            expected = {
+                int(rule.get("value"))
+                for rule in _as_list(raw)
+                if isinstance(rule, dict) and rule.get("value") not in (None, 0)
+            }
+            if not expected:
+                continue
+            actual = {
+                int(rule.get("value"))
+                for rule in _as_list(derived)
+                if isinstance(rule, dict) and rule.get("value") is not None
+            }
+            return not expected.issubset(actual)
+        return False
+
+    rebuild_flags = has_flags and _first_positive_flag_is_missing()
+    rebuild_levels = has_levels and _first_nonzero_level_is_missing()
+    if not (rebuild_flags or rebuild_levels):
+        return gdf
+
+    # Only derived columns are replaced; a shallow frame copy avoids doubling
+    # the memory footprint of large retained Overture snapshots.
+    result = gdf.copy(deep=False)
+    if rebuild_flags and "road_flags" in result.columns:
+        result["road_flags_lr"] = result["road_flags"].apply(
+            lambda value: parse_road_flags_lr(value).to_dict_list()
+        )
+    elif rebuild_flags and "road" in result.columns:
+        result["road_flags_lr"] = result["road"].apply(
+            lambda value: parse_road_flags_lr(
+                value.get("road_flags") if isinstance(value, dict) else None
+            ).to_dict_list()
+        )
+
+    if rebuild_flags:
+        result["road_flags_lr"] = result["road_flags_lr"].apply(
+            lambda rules: [
+                {
+                    **rule,
+                    "value": sorted(rule["value"])
+                    if isinstance(rule.get("value"), frozenset)
+                    else rule.get("value"),
+                }
+                for rule in rules
+            ]
+        )
+
+    if rebuild_levels:
+        result["level_lr"] = result["level_rules"].apply(
+            lambda value: parse_level_rules_lr(value).to_dict_list()
+        )
+    return result

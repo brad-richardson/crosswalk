@@ -21,6 +21,7 @@ from ..config import (
     NAMES_COLUMN,
     settings,
 )
+from ..fetch.overture import backfill_overture_physical_lr
 from ..fetch.target import backfill_physical_lr_from_source_tags
 from ..filenames import candidates_sidecar_path, extract_version_from_filename, groups_sidecar_path
 from ..matching import MatchDecision, optimize_matches_with_grouping
@@ -1695,6 +1696,10 @@ def load_and_filter_inputs(
         reference = gpd.read_parquet(reference_path)
     except Exception as e:
         raise PipelineError(f"Failed to read reference file {reference_path}: {e}") from e
+
+    # Existing Overture snapshots retain current top-level road_flags and
+    # level_rules even when an older transform wrote stale derived LR columns.
+    reference = backfill_overture_physical_lr(reference)
 
     try:
         target = gpd.read_parquet(target_path)

@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "source_wave": "breadth_v7",
+  "pair_cases": [
+    {
+      "dataset_id": "au_sydney_roads",
+      "group_id": "66e22055",
+      "source_batch": "au_sydney_roads_breadth_v7_20260714",
+      "ref_id": "d910f21d-02b5-417c-85ae-e0b3c419f8cb",
+      "target_id": "au_sydney_831180_88be0e3435",
+      "pair_truth": "negative",
+      "truth_source": "empty pair-semantics human selection",
+      "human_note": "R1 is separated infra from T1. T2 is underground",
+      "ref_alignment": [0.0098078, 0.9717301],
+      "target_alignment": [0.8365927, 0.9238419],
+      "ref_physical": {
+        "level_lr": [{"between": [0.0, 1.0], "value": 0}],
+        "road_flags_lr": [{"between": [0.0, 1.0], "value": []}]
+      },
+      "target_physical": {
+        "level_lr": [{"between": [0.0, 1.0], "value": 0}],
+        "road_flags_lr": [{"between": [0.0, 1.0], "value": []}]
+      },
+      "target_analog": {"field": "roadontype", "raw_value": 1},
+      "physical_signal": "none; role/separated-infrastructure negative control"
+    },
+    {
+      "dataset_id": "au_sydney_roads",
+      "group_id": "66e22055",
+      "source_batch": "au_sydney_roads_breadth_v7_20260714",
+      "ref_id": "d910f21d-02b5-417c-85ae-e0b3c419f8cb",
+      "target_id": "au_sydney_831394_88be0e3435",
+      "pair_truth": "negative",
+      "truth_source": "empty pair-semantics human selection",
+      "human_note": "R1 is separated infra from T1. T2 is underground",
+      "ref_alignment": [0.0133228, 0.9686256],
+      "target_alignment": [0.1853197, 0.2099968],
+      "ref_physical": {
+        "level_lr": [{"between": [0.0, 1.0], "value": 0}],
+        "road_flags_lr": [{"between": [0.0, 1.0], "value": []}]
+      },
+      "target_physical": {
+        "road_flags_lr": [{"between": [0.0, 1.0], "value": ["is_tunnel"]}]
+      },
+      "target_analog": {"field": "roadontype", "raw_value": 3},
+      "physical_signal": "target tunnel conflicts with surface cycleway"
+    },
+    {
+      "dataset_id": "hk_hongkong_roads",
+      "group_id": "4eed5e80",
+      "source_batch": "hk_hongkong_roads_breadth_v7_20260714",
+      "ref_id": "635d37a9-2b4a-4e21-87a9-087bb930110b",
+      "target_id": "hk_hongkong_103785_88411c86b1",
+      "pair_truth": "negative",
+      "truth_source": "empty pair-semantics human selection",
+      "ref_alignment": [0.811529, 0.9695196],
+      "target_alignment": [0.0, 1.0],
+      "ref_physical": {
+        "level_lr": [
+          {"between": [0.0, 0.4180881], "value": 0},
+          {"between": [0.4180881, 1.0], "value": -1}
+        ],
+        "road_flags_lr": [
+          {"between": [0.0, 0.4180881], "value": []},
+          {"between": [0.4180881, 1.0], "value": ["is_tunnel"]}
+        ]
+      },
+      "target_physical": {
+        "level_lr": [{"between": [0.0, 1.0], "value": 0}]
+      },
+      "target_analog": {"field": "ELEVATION", "raw_value": 0},
+      "physical_signal": "aligned tunnel/layer -1 conflicts with target elevation 0"
+    },
+    {
+      "dataset_id": "hk_hongkong_roads",
+      "group_id": "4eed5e80",
+      "source_batch": "hk_hongkong_roads_breadth_v7_20260714",
+      "ref_id": "635d37a9-2b4a-4e21-87a9-087bb930110b",
+      "target_id": "hk_hongkong_103984_88411c86b1",
+      "pair_truth": "negative",
+      "truth_source": "empty pair-semantics human selection",
+      "ref_alignment": [0.5128291, 0.7688197],
+      "target_alignment": [0.0, 1.0],
+      "ref_physical": {
+        "level_lr": [
+          {"between": [0.0, 0.4180881], "value": 0},
+          {"between": [0.4180881, 1.0], "value": -1}
+        ],
+        "road_flags_lr": [
+          {"between": [0.0, 0.4180881], "value": []},
+          {"between": [0.4180881, 1.0], "value": ["is_tunnel"]}
+        ]
+      },
+      "target_physical": {
+        "level_lr": [{"between": [0.0, 1.0], "value": 0}]
+      },
+      "target_analog": {"field": "ELEVATION", "raw_value": 0},
+      "physical_signal": "aligned tunnel/layer -1 conflicts with target elevation 0"
+    },
+    {
+      "dataset_id": "hk_hongkong_roads",
+      "group_id": "4eed5e80",
+      "source_batch": "hk_hongkong_roads_breadth_v7_20260714",
+      "ref_id": "635d37a9-2b4a-4e21-87a9-087bb930110b",
+      "target_id": "hk_hongkong_144878_88411c86b1",
+      "pair_truth": "negative",
+      "truth_source": "empty pair-semantics human selection",
+      "ref_alignment": [0.7691866, 0.8115375],
+      "target_alignment": [0.0029045, 1.0],
+      "ref_physical": {
+        "level_lr": [
+          {"between": [0.0, 0.4180881], "value": 0},
+          {"between": [0.4180881, 1.0], "value": -1}
+        ],
+        "road_flags_lr": [
+          {"between": [0.0, 0.4180881], "value": []},
+          {"between": [0.4180881, 1.0], "value": ["is_tunnel"]}
+        ]
+      },
+      "target_physical": {
+        "level_lr": [{"between": [0.0, 1.0], "value": 0}]
+      },
+      "target_analog": {"field": "ELEVATION", "raw_value": 0},
+      "physical_signal": "aligned tunnel/layer -1 conflicts with target elevation 0"
+    },
+    {
+      "dataset_id": "us_philadelphia_sidewalks",
+      "group_id": "b7f57035",
+      "source_batch": "us_philadelphia_sidewalks_breadth_v7_retry2_20260715",
+      "ref_id": "0d653fb0-9025-42a6-b8d1-bc67850e5e87",
+      "target_id": "phila_sidewalk_673046_882a1348b9",
+      "pair_truth": "negative",
+      "truth_source": "explicit human note on a set-semantics group",
+      "human_note": "R2 does not match T7",
+      "ref_alignment": [0.0, 1.0],
+      "target_alignment": [0.6299279, 0.8193171],
+      "ref_physical": {},
+      "target_physical": {},
+      "target_analog": {"field": "feat_type", "raw_value": "GRADE_SEPARATED"},
+      "physical_signal": "no safe polarity; hard-negative control only"
+    },
+    {
+      "dataset_id": "us_philadelphia_sidewalks",
+      "group_id": "b7f57035",
+      "source_batch": "us_philadelphia_sidewalks_breadth_v7_retry2_20260715",
+      "ref_id": "ce6d1dfe-999c-491c-90cd-f90236685215",
+      "target_id": "phila_sidewalk_673046_882a1348b9",
+      "pair_truth": "unknown",
+      "truth_source": "diagnostic human note; set membership is not exact pair truth",
+      "human_note": "R5 is a bridge and has layer=1 - do we capture that? Does T7 have anything about that?",
+      "ref_alignment": [0.0, 1.0],
+      "target_alignment": [0.2083624, 0.8241018],
+      "ref_physical": {
+        "level_lr": [{"between": [0.0, 1.0], "value": 1}],
+        "road_flags_lr": [{"between": [0.0, 1.0], "value": ["is_bridge"]}]
+      },
+      "target_physical": {},
+      "target_analog": {"field": "feat_type", "raw_value": "GRADE_SEPARATED"},
+      "physical_signal": "bridge evidence probe; do not train as a positive pair"
+    }
+  ],
+  "group_cases": [
+    {
+      "dataset_id": "ch_grand_geneva_cycle_schema",
+      "group_id": "dd106a0f",
+      "source_batch": "ch_grand_geneva_cycle_schema_breadth_v7_retry1_20260714",
+      "case_type": "same-side-coincident-alternatives",
+      "human_note": "Route de Thonon has dedicated cycle lanes, tranchee does not (motorway) and the two roads continually overlap each other (bridge?)",
+      "ambiguous_ref_id": "3c772d2e-0795-4835-849e-6f2bdb0c6c1c",
+      "ambiguous_ref_name": "Tranchée couverte de Vésenaz",
+      "ambiguous_ref_in_human_set": false,
+      "derived_coincidence_context": {
+        "tolerance_m": 3.0,
+        "min_coincident_length_m": 20.0,
+        "covered_fraction": 0.331,
+        "covered_length_m": 254.2,
+        "max_symmetric_fraction": 1.0,
+        "alternative_count": 2,
+        "has_role_conflict": true
+      },
+      "ambiguous_ref_physical": {
+        "level_lr": [
+          {"between": [0.0, 0.1923734], "value": 0},
+          {"between": [0.1923734, 0.8457108], "value": -1},
+          {"between": [0.8457108, 1.0], "value": 0}
+        ],
+        "road_flags_lr": [
+          {"between": [0.0, 0.1923734], "value": []},
+          {"between": [0.1923734, 0.8457108], "value": ["is_tunnel"]},
+          {"between": [0.8457108, 1.0], "value": []}
+        ]
+      },
+      "coincident_members": [
+        {
+          "ref_id": "4f8a5ae5-8e7e-49be-93a9-a59ed1ce11c3",
+          "name": "Route de Thonon",
+          "in_human_set": true,
+          "fraction_within_3m_of_ambiguous_ref": 1.0
+        },
+        {
+          "ref_id": "65429f4c-5851-41ae-81fb-2a9f481f24d7",
+          "name": "Route de Thonon",
+          "in_human_set": true,
+          "fraction_within_3m_of_ambiguous_ref": 1.0
+        }
+      ],
+      "expected_use": "derive same-side coincidence/non-identifiability context; let the group resolver value role-compatible continuity instead of treating the geometry as a physical level"
+    }
+  ]
+}

@@ -1,0 +1,5608 @@
+{
+  "protocol": {
+    "seeds": [
+      42,
+      73,
+      999
+    ],
+    "n_folds": 5,
+    "split": "segment-component GroupKFold",
+    "threshold": 0.5,
+    "n_rows": 5428,
+    "n_groups": 4934,
+    "feature_variants": {
+      "baseline": [],
+      "flag_positive_only": [
+        "physical_flag_positive_match"
+      ],
+      "vertical_positive_only": [
+        "vertical_positive_match"
+      ],
+      "positive_only": [
+        "physical_positive_match"
+      ],
+      "conflict_only": [
+        "physical_structure_conflict"
+      ],
+      "coverage_only": [
+        "physical_comparable_count"
+      ],
+      "composite_no_coverage": [
+        "physical_structure_conflict",
+        "physical_positive_match"
+      ],
+      "flags": [
+        "bridge_fraction_delta",
+        "tunnel_fraction_delta",
+        "physical_flag_positive_match"
+      ],
+      "vertical": [
+        "vertical_nonzero_fraction_delta",
+        "vertical_sign_delta",
+        "vertical_positive_match"
+      ],
+      "composite": [
+        "physical_structure_conflict",
+        "physical_positive_match",
+        "physical_comparable_count"
+      ],
+      "primitives": [
+        "bridge_fraction_delta",
+        "tunnel_fraction_delta",
+        "physical_flag_positive_match",
+        "vertical_nonzero_fraction_delta",
+        "vertical_sign_delta",
+        "vertical_positive_match"
+      ],
+      "all_no_coverage": [
+        "bridge_fraction_delta",
+        "tunnel_fraction_delta",
+        "physical_flag_positive_match",
+        "vertical_nonzero_fraction_delta",
+        "vertical_sign_delta",
+        "vertical_positive_match",
+        "physical_structure_conflict",
+        "physical_positive_match"
+      ],
+      "all": [
+        "bridge_fraction_delta",
+        "tunnel_fraction_delta",
+        "physical_flag_positive_match",
+        "vertical_nonzero_fraction_delta",
+        "vertical_sign_delta",
+        "vertical_positive_match",
+        "physical_structure_conflict",
+        "physical_positive_match",
+        "physical_comparable_count"
+      ]
+    }
+  },
+  "coverage": [
+    {
+      "dataset_id": "au_sydney_roads",
+      "n_labeled_pairs": 226,
+      "target_domains": [
+        "is_bridge",
+        "is_tunnel"
+      ],
+      "n_comparable": 224,
+      "n_informative": 6,
+      "n_conflicts": 5,
+      "n_positive_matches": 2
+    },
+    {
+      "dataset_id": "fi_helsinki_roads",
+      "n_labeled_pairs": 84,
+      "target_domains": [
+        "is_bridge",
+        "is_tunnel",
+        "level"
+      ],
+      "n_comparable": 78,
+      "n_informative": 3,
+      "n_conflicts": 3,
+      "n_positive_matches": 1
+    },
+    {
+      "dataset_id": "gb_london_roads",
+      "n_labeled_pairs": 201,
+      "target_domains": [
+        "is_tunnel"
+      ],
+      "n_comparable": 189,
+      "n_informative": 2,
+      "n_conflicts": 2,
+      "n_positive_matches": 1
+    },
+    {
+      "dataset_id": "hk_hongkong_roads",
+      "n_labeled_pairs": 208,
+      "target_domains": [
+        "level"
+      ],
+      "n_comparable": 189,
+      "n_informative": 20,
+      "n_conflicts": 15,
+      "n_positive_matches": 5
+    },
+    {
+      "dataset_id": "de_berlin_roads",
+      "n_labeled_pairs": 121,
+      "target_domains": [
+        "level"
+      ],
+      "n_comparable": 120,
+      "n_informative": 11,
+      "n_conflicts": 11,
+      "n_positive_matches": 0
+    },
+    {
+      "dataset_id": "nl_amsterdam_roads",
+      "n_labeled_pairs": 199,
+      "target_domains": [
+        "level"
+      ],
+      "n_comparable": 8,
+      "n_informative": 4,
+      "n_conflicts": 4,
+      "n_positive_matches": 0
+    },
+    {
+      "dataset_id": "us_utah_slc_roads",
+      "n_labeled_pairs": 200,
+      "target_domains": [
+        "level"
+      ],
+      "n_comparable": 1,
+      "n_informative": 0,
+      "n_conflicts": 0,
+      "n_positive_matches": 0
+    }
+  ],
+  "signal_summary": [
+    {
+      "feature": "bridge_fraction_delta",
+      "n_known": 302,
+      "n_active": 5,
+      "active_match_rate": 1.0,
+      "active_by_dataset": [
+        {
+          "dataset_id": "au_sydney_roads",
+          "n": 4,
+          "n_match": 4,
+          "n_no_match": 0
+        },
+        {
+          "dataset_id": "fi_helsinki_roads",
+          "n": 1,
+          "n_match": 1,
+          "n_no_match": 0
+        }
+      ]
+    },
+    {
+      "feature": "tunnel_fraction_delta",
+      "n_known": 491,
+      "n_active": 3,
+      "active_match_rate": 0.6666666666666666,
+      "active_by_dataset": [
+        {
+          "dataset_id": "au_sydney_roads",
+          "n": 1,
+          "n_match": 0,
+          "n_no_match": 1
+        },
+        {
+          "dataset_id": "gb_london_roads",
+          "n": 2,
+          "n_match": 2,
+          "n_no_match": 0
+        }
+      ]
+    },
+    {
+      "feature": "physical_flag_positive_match",
+      "n_known": 491,
+      "n_active": 4,
+      "active_match_rate": 0.75,
+      "active_by_dataset": [
+        {
+          "dataset_id": "au_sydney_roads",
+          "n": 2,
+          "n_match": 1,
+          "n_no_match": 1
+        },
+        {
+          "dataset_id": "fi_helsinki_roads",
+          "n": 1,
+          "n_match": 1,
+          "n_no_match": 0
+        },
+        {
+          "dataset_id": "gb_london_roads",
+          "n": 1,
+          "n_match": 1,
+          "n_no_match": 0
+        }
+      ]
+    },
+    {
+      "feature": "vertical_nonzero_fraction_delta",
+      "n_known": 396,
+      "n_active": 33,
+      "active_match_rate": 0.48484848484848486,
+      "active_by_dataset": [
+        {
+          "dataset_id": "de_berlin_roads",
+          "n": 11,
+          "n_match": 8,
+          "n_no_match": 3
+        },
+        {
+          "dataset_id": "fi_helsinki_roads",
+          "n": 3,
+          "n_match": 3,
+          "n_no_match": 0
+        },
+        {
+          "dataset_id": "hk_hongkong_roads",
+          "n": 15,
+          "n_match": 4,
+          "n_no_match": 11
+        },
+        {
+          "dataset_id": "nl_amsterdam_roads",
+          "n": 4,
+          "n_match": 1,
+          "n_no_match": 3
+        }
+      ]
+    },
+    {
+      "feature": "vertical_sign_delta",
+      "n_known": 396,
+      "n_active": 33,
+      "active_match_rate": 0.48484848484848486,
+      "active_by_dataset": [
+        {
+          "dataset_id": "de_berlin_roads",
+          "n": 11,
+          "n_match": 8,
+          "n_no_match": 3
+        },
+        {
+          "dataset_id": "fi_helsinki_roads",
+          "n": 3,
+          "n_match": 3,
+          "n_no_match": 0
+        },
+        {
+          "dataset_id": "hk_hongkong_roads",
+          "n": 15,
+          "n_match": 4,
+          "n_no_match": 11
+        },
+        {
+          "dataset_id": "nl_amsterdam_roads",
+          "n": 4,
+          "n_match": 1,
+          "n_no_match": 3
+        }
+      ]
+    },
+    {
+      "feature": "vertical_positive_match",
+      "n_known": 396,
+      "n_active": 6,
+      "active_match_rate": 1.0,
+      "active_by_dataset": [
+        {
+          "dataset_id": "fi_helsinki_roads",
+          "n": 1,
+          "n_match": 1,
+          "n_no_match": 0
+        },
+        {
+          "dataset_id": "hk_hongkong_roads",
+          "n": 5,
+          "n_match": 5,
+          "n_no_match": 0
+        }
+      ]
+    },
+    {
+      "feature": "physical_structure_conflict",
+      "n_known": 809,
+      "n_active": 40,
+      "active_match_rate": 0.55,
+      "active_by_dataset": [
+        {
+          "dataset_id": "au_sydney_roads",
+          "n": 5,
+          "n_match": 4,
+          "n_no_match": 1
+        },
+        {
+          "dataset_id": "de_berlin_roads",
+          "n": 11,
+          "n_match": 8,
+          "n_no_match": 3
+        },
+        {
+          "dataset_id": "fi_helsinki_roads",
+          "n": 3,
+          "n_match": 3,
+          "n_no_match": 0
+        },
+        {
+          "dataset_id": "gb_london_roads",
+          "n": 2,
+          "n_match": 2,
+          "n_no_match": 0
+        },
+        {
+          "dataset_id": "hk_hongkong_roads",
+          "n": 15,
+          "n_match": 4,
+          "n_no_match": 11
+        },
+        {
+          "dataset_id": "nl_amsterdam_roads",
+          "n": 4,
+          "n_match": 1,
+          "n_no_match": 3
+        }
+      ]
+    },
+    {
+      "feature": "physical_positive_match",
+      "n_known": 809,
+      "n_active": 9,
+      "active_match_rate": 0.8888888888888888,
+      "active_by_dataset": [
+        {
+          "dataset_id": "au_sydney_roads",
+          "n": 2,
+          "n_match": 1,
+          "n_no_match": 1
+        },
+        {
+          "dataset_id": "fi_helsinki_roads",
+          "n": 1,
+          "n_match": 1,
+          "n_no_match": 0
+        },
+        {
+          "dataset_id": "gb_london_roads",
+          "n": 1,
+          "n_match": 1,
+          "n_no_match": 0
+        },
+        {
+          "dataset_id": "hk_hongkong_roads",
+          "n": 5,
+          "n_match": 5,
+          "n_no_match": 0
+        }
+      ]
+    },
+    {
+      "feature": "physical_comparable_count",
+      "n_known": 999,
+      "n_active": 809,
+      "active_match_rate": 0.5377008652657602,
+      "active_by_dataset": [
+        {
+          "dataset_id": "au_sydney_roads",
+          "n": 224,
+          "n_match": 146,
+          "n_no_match": 78
+        },
+        {
+          "dataset_id": "de_berlin_roads",
+          "n": 120,
+          "n_match": 85,
+          "n_no_match": 35
+        },
+        {
+          "dataset_id": "fi_helsinki_roads",
+          "n": 78,
+          "n_match": 65,
+          "n_no_match": 13
+        },
+        {
+          "dataset_id": "gb_london_roads",
+          "n": 189,
+          "n_match": 58,
+          "n_no_match": 131
+        },
+        {
+          "dataset_id": "hk_hongkong_roads",
+          "n": 189,
+          "n_match": 77,
+          "n_no_match": 112
+        },
+        {
+          "dataset_id": "nl_amsterdam_roads",
+          "n": 8,
+          "n_match": 3,
+          "n_no_match": 5
+        },
+        {
+          "dataset_id": "us_utah_slc_roads",
+          "n": 1,
+          "n_match": 1,
+          "n_no_match": 0
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9280238512940254,
+        "f1_std": 0.0011192000331880368,
+        "precision_mean": 0.9236475363277448,
+        "precision_std": 0.0008355493251983819,
+        "recall_mean": 0.9324420135723691,
+        "recall_std": 0.0014107554215723858,
+        "f1_delta_vs_baseline": 0.0
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8757070644095454,
+        "f1_std": 0.0022058102540193293,
+        "precision_mean": 0.8636357569933804,
+        "precision_std": 0.0018451257509799535,
+        "recall_mean": 0.8881226053639847,
+        "recall_std": 0.00286717041132104,
+        "f1_delta_vs_baseline": 0.0
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9101731601731601,
+        "f1_std": 0.014600365328173201,
+        "precision_mean": 0.8838259441707716,
+        "precision_std": 0.015458267966964513,
+        "recall_mean": 0.9382716049382717,
+        "recall_std": 0.01745942669596411,
+        "f1_delta_vs_baseline": 0.0
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8820259509394649,
+          "f1_std": 0.0017412489675799729,
+          "precision_mean": 0.8583677970774745,
+          "precision_std": 0.0004289040304963778,
+          "recall_mean": 0.9070294784580498,
+          "recall_std": 0.0032068334747689265,
+          "f1_delta_vs_baseline": 0.0
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9041905141566294,
+          "f1_std": 0.007445314616733804,
+          "precision_mean": 0.8939305883319831,
+          "precision_std": 0.00543415778561055,
+          "recall_mean": 0.9147286821705426,
+          "recall_std": 0.010962895832349594,
+          "f1_delta_vs_baseline": 0.0
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8804478208716513,
+          "f1_std": 0.013703018453885626,
+          "precision_mean": 0.9530075187969925,
+          "precision_std": 0.016394821977268475,
+          "recall_mean": 0.8181818181818182,
+          "recall_std": 0.012371160317086792,
+          "f1_delta_vs_baseline": 0.0
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9293615886978542,
+          "f1_std": 0.0035812418612673302,
+          "precision_mean": 0.8814903846153846,
+          "precision_std": 0.0064591484819925046,
+          "recall_mean": 0.9827586206896551,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": 0.0
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.7879173086800205,
+          "f1_std": 0.008733062015403671,
+          "precision_mean": 0.7620065120065119,
+          "precision_std": 0.011648498122070566,
+          "recall_mean": 0.815686274509804,
+          "recall_std": 0.005545935538718,
+          "f1_delta_vs_baseline": 0.0
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8645440580924452,
+          "f1_std": 0.001283673810281408,
+          "precision_mean": 0.8023278276827973,
+          "precision_std": 0.005668874996472808,
+          "recall_mean": 0.9372937293729372,
+          "recall_std": 0.004667371492980464,
+          "f1_delta_vs_baseline": 0.0
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9027317468727162,
+          "f1_std": 0.0033591568335989753,
+          "precision_mean": 0.8916407419512332,
+          "precision_std": 0.002823490990198172,
+          "recall_mean": 0.914141414141414,
+          "recall_std": 0.00714249273925805,
+          "f1_delta_vs_baseline": 0.0
+        }
+      }
+    },
+    "flag_positive_only": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9278913725092507,
+        "f1_std": 0.00026514637242476405,
+        "precision_mean": 0.9232874852472045,
+        "precision_std": 0.001148103239606698,
+        "recall_mean": 0.9325432999088422,
+        "recall_std": 0.0007442995268256424,
+        "f1_delta_vs_baseline": -0.00013247878477473662
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8737220399382416,
+        "f1_std": 0.003151814580898409,
+        "precision_mean": 0.8700986207267771,
+        "precision_std": 0.005890182473462723,
+        "recall_mean": 0.8773946360153256,
+        "recall_std": 0.001083688553542621,
+        "f1_delta_vs_baseline": -0.0019850244713037757
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.911217437533227,
+        "f1_std": 0.0015036826819490546,
+        "precision_mean": 0.8753968253968254,
+        "precision_std": 0.012346308877860361,
+        "recall_mean": 0.9506172839506172,
+        "recall_std": 0.01745942669596411,
+        "f1_delta_vs_baseline": 0.0010442773600669586
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8834336515495936,
+          "f1_std": 0.006447787319181102,
+          "precision_mean": 0.8736938262883158,
+          "precision_std": 0.009827366834941174,
+          "recall_mean": 0.8934240362811791,
+          "recall_std": 0.0032068334747689265,
+          "f1_delta_vs_baseline": 0.001407700610128737
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8969435736677115,
+          "f1_std": 0.0005541589194251773,
+          "precision_mean": 0.8835016835016835,
+          "precision_std": 0.004047412552246232,
+          "recall_mean": 0.9108527131782945,
+          "recall_std": 0.005481447916174797,
+          "f1_delta_vs_baseline": -0.007246940488917941
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8530628644900583,
+          "f1_std": 0.011841482052609254,
+          "precision_mean": 0.9447564140960368,
+          "precision_std": 0.001257450560413342,
+          "recall_mean": 0.7777777777777777,
+          "recall_std": 0.018897259529161305,
+          "f1_delta_vs_baseline": -0.027384956381592995
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9397462303593969,
+          "f1_std": 0.013263196378941106,
+          "precision_mean": 0.9006581021437579,
+          "precision_std": 0.024524144474064778,
+          "recall_mean": 0.9827586206896551,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": 0.010384641661542626
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.7999962514208324,
+          "f1_std": 0.011600083104388524,
+          "precision_mean": 0.7710293646463858,
+          "precision_std": 0.013015501453809909,
+          "recall_mean": 0.8313725490196079,
+          "recall_std": 0.014673166222642905,
+          "f1_delta_vs_baseline": 0.012078942740811893
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8593252222760831,
+          "f1_std": 0.0022284029277981105,
+          "precision_mean": 0.8005843702804544,
+          "precision_std": 0.0028940947590915703,
+          "recall_mean": 0.9273927392739275,
+          "recall_std": 0.004667371492980516,
+          "f1_delta_vs_baseline": -0.005218835816362066
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9140719622859486,
+          "f1_std": 0.0030503946244856647,
+          "precision_mean": 0.9017247639796659,
+          "precision_std": 0.003311956904881662,
+          "recall_mean": 0.9267676767676768,
+          "recall_std": 0.003571246369629025,
+          "f1_delta_vs_baseline": 0.01134021541323238
+        }
+      }
+    },
+    "vertical_positive_only": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9262864429779487,
+        "f1_std": 0.0010956188483870026,
+        "precision_mean": 0.9215972474158406,
+        "precision_std": 0.0014184378131128243,
+        "recall_mean": 0.9310240048617442,
+        "recall_std": 0.0008594430643409915,
+        "f1_delta_vs_baseline": -0.0017374083160767162
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8688926354486041,
+        "f1_std": 0.0028379857822111087,
+        "precision_mean": 0.8569520998668633,
+        "precision_std": 0.002107418528238321,
+        "recall_mean": 0.8812260536398467,
+        "recall_std": 0.00781458929286251,
+        "f1_delta_vs_baseline": -0.00681442896094131
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8968894506133832,
+        "f1_std": 0.017297693563531388,
+        "precision_mean": 0.8822954822954823,
+        "precision_std": 0.02909776819756772,
+        "recall_mean": 0.9135802469135802,
+        "recall_std": 0.03491885339192827,
+        "f1_delta_vs_baseline": -0.013283709559776868
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8775946585237158,
+          "f1_std": 0.00842125002309451,
+          "precision_mean": 0.8540589196434687,
+          "precision_std": 0.0063895093872020645,
+          "recall_mean": 0.9024943310657596,
+          "recall_std": 0.01156240252515372,
+          "f1_delta_vs_baseline": -0.004431292415749133
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8931556948798328,
+          "f1_std": 0.00480271063501836,
+          "precision_mean": 0.8797979797979799,
+          "precision_std": 0.009285240561035454,
+          "recall_mean": 0.9069767441860465,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": -0.011034819276796615
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8724371584699453,
+          "f1_std": 0.017955349546135226,
+          "precision_mean": 0.9413841807909605,
+          "precision_std": 0.009127977833952788,
+          "recall_mean": 0.8131313131313131,
+          "recall_std": 0.025752623806024198,
+          "f1_delta_vs_baseline": -0.008010662401706004
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.926829268292683,
+          "f1_std": 0.0,
+          "precision_mean": 0.8769230769230769,
+          "precision_std": 0.0,
+          "recall_mean": 0.9827586206896551,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": -0.0025323204051712622
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.7797694722872263,
+          "f1_std": 0.014170743919903653,
+          "precision_mean": 0.7503134957344023,
+          "precision_std": 0.019174323301361932,
+          "recall_mean": 0.811764705882353,
+          "recall_std": 0.009605842128561448,
+          "f1_delta_vs_baseline": -0.008147836392794261
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8615226422099614,
+          "f1_std": 0.007015528853968276,
+          "precision_mean": 0.7997161150404201,
+          "precision_std": 0.012916539239870036,
+          "recall_mean": 0.933993399339934,
+          "recall_std": 0.012348704246778646,
+          "f1_delta_vs_baseline": -0.0030214158824837245
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9047772076051731,
+          "f1_std": 0.0030647495198158335,
+          "precision_mean": 0.8981063931678506,
+          "precision_std": 0.008122094442820284,
+          "recall_mean": 0.9116161616161617,
+          "recall_std": 0.003571246369629025,
+          "f1_delta_vs_baseline": 0.0020454607324569274
+        }
+      }
+    },
+    "positive_only": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9283426301990794,
+        "f1_std": 0.001150574451515731,
+        "precision_mean": 0.9237881648833491,
+        "precision_std": 0.0026366101413515743,
+        "recall_mean": 0.9329484452547351,
+        "recall_std": 0.001145924085788006,
+        "f1_delta_vs_baseline": 0.00031877890505394024
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.874814721740194,
+        "f1_std": 0.0026860883201099126,
+        "precision_mean": 0.8768713687813937,
+        "precision_std": 0.005658584877770884,
+        "recall_mean": 0.8727969348659004,
+        "recall_std": 0.00286717041132104,
+        "f1_delta_vs_baseline": -0.0008923426693513425
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8900112233445566,
+        "f1_std": 0.026982750348308195,
+        "precision_mean": 0.8791887125220459,
+        "precision_std": 0.019330079556246025,
+        "recall_mean": 0.9012345679012346,
+        "recall_std": 0.03491885339192827,
+        "f1_delta_vs_baseline": -0.020161936828603455
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.883895917646508,
+          "f1_std": 0.008684720701118127,
+          "precision_mean": 0.8881404794387899,
+          "precision_std": 0.01597827654513154,
+          "recall_mean": 0.8798185941043083,
+          "recall_std": 0.0032068334747689265,
+          "f1_delta_vs_baseline": 0.0018699667070430914
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8948197082301128,
+          "f1_std": 0.005706377942667553,
+          "precision_mean": 0.8830341383615309,
+          "precision_std": 0.004805002846540925,
+          "recall_mean": 0.9069767441860465,
+          "recall_std": 0.00949414628985725,
+          "f1_delta_vs_baseline": -0.009370805926516623
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8418001997264212,
+          "f1_std": 0.004152680166140944,
+          "precision_mean": 0.9552396672263487,
+          "precision_std": 0.008380234778660893,
+          "recall_mean": 0.7525252525252526,
+          "recall_std": 0.00714249273925805,
+          "f1_delta_vs_baseline": -0.03864762114523013
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9447658402203857,
+          "f1_std": 0.003701109873979167,
+          "precision_mean": 0.9096262160778289,
+          "precision_std": 0.0068791750345849265,
+          "recall_mean": 0.9827586206896551,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": 0.015404251522531442
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8096962130669997,
+          "f1_std": 0.009228511558603424,
+          "precision_mean": 0.7722693831352574,
+          "precision_std": 0.009191573629303116,
+          "recall_mean": 0.8509803921568627,
+          "recall_std": 0.011091871077436,
+          "f1_delta_vs_baseline": 0.02177890438697916
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8579924050243685,
+          "f1_std": 0.006867995513849815,
+          "precision_mean": 0.7983335707164221,
+          "precision_std": 0.006303739993501621,
+          "recall_mean": 0.9273927392739273,
+          "recall_std": 0.012348704246778657,
+          "f1_delta_vs_baseline": -0.0065516530680767016
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9079500164271995,
+          "f1_std": 0.007795876570702663,
+          "precision_mean": 0.8946038674999602,
+          "precision_std": 0.006966773781098713,
+          "recall_mean": 0.9217171717171717,
+          "recall_std": 0.009448629764580652,
+          "f1_delta_vs_baseline": 0.005218269554483346
+        }
+      }
+    },
+    "conflict_only": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.928096510386813,
+        "f1_std": 0.0005586503338965076,
+        "precision_mean": 0.9227996692100348,
+        "precision_std": 0.0004138987634536146,
+        "recall_mean": 0.9334548769371013,
+        "recall_std": 0.000894536702757817,
+        "f1_delta_vs_baseline": 7.265909278753035e-05
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8760514479602305,
+        "f1_std": 0.0002678223427519378,
+        "precision_mean": 0.8747204985206714,
+        "precision_std": 0.001614424405505359,
+        "recall_mean": 0.8773946360153256,
+        "recall_std": 0.00216737710708519,
+        "f1_delta_vs_baseline": 0.0003443835506851123
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9070377092155676,
+        "f1_std": 0.007414711155817769,
+        "precision_mean": 0.8573476702508961,
+        "precision_std": 0.013179051118889056,
+        "recall_mean": 0.9629629629629629,
+        "recall_std": 0.0,
+        "f1_delta_vs_baseline": -0.0031354509575924894
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8863828902179813,
+          "f1_std": 0.0018819192106677679,
+          "precision_mean": 0.8795086423090207,
+          "precision_std": 0.004171098597677921,
+          "recall_mean": 0.8934240362811791,
+          "recall_std": 0.006413666949537854,
+          "f1_delta_vs_baseline": 0.004356939278516436
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8897186147186148,
+          "f1_std": 0.007337438860584402,
+          "precision_mean": 0.873116937161881,
+          "precision_std": 0.00564825919738214,
+          "recall_mean": 0.9069767441860465,
+          "recall_std": 0.00949414628985725,
+          "f1_delta_vs_baseline": -0.014471899438014635
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8515334947538338,
+          "f1_std": 0.004099969493830104,
+          "precision_mean": 0.9560823523087674,
+          "precision_std": 0.008234574705551454,
+          "recall_mean": 0.7676767676767676,
+          "recall_std": 0.00714249273925805,
+          "f1_delta_vs_baseline": -0.028914326117817524
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9527050489617336,
+          "f1_std": 0.007464423275252149,
+          "precision_mean": 0.9245381212594328,
+          "precision_std": 0.013983896791615318,
+          "recall_mean": 0.9827586206896551,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": 0.023343460263879345
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8030343450828669,
+          "f1_std": 0.006942769611695482,
+          "precision_mean": 0.7699108258476824,
+          "precision_std": 0.01060712477041665,
+          "recall_mean": 0.8392156862745098,
+          "recall_std": 0.005545935538718,
+          "f1_delta_vs_baseline": 0.01511703640284634
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8606258468643789,
+          "f1_std": 0.003411342602008525,
+          "precision_mean": 0.7956206993640148,
+          "precision_std": 0.007708748567896959,
+          "recall_mean": 0.9372937293729372,
+          "recall_std": 0.004667371492980464,
+          "f1_delta_vs_baseline": -0.003918211228066237
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.907938992462569,
+          "f1_std": 0.005036200820548258,
+          "precision_mean": 0.8946145186476376,
+          "precision_std": 0.0030482788642819908,
+          "recall_mean": 0.9217171717171717,
+          "recall_std": 0.009448629764580652,
+          "f1_delta_vs_baseline": 0.00520724558985286
+        }
+      }
+    },
+    "coverage_only": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9303080953296948,
+        "f1_std": 0.000777451997200619,
+        "precision_mean": 0.9263866045780494,
+        "precision_std": 0.0015793436530890227,
+        "recall_mean": 0.9342651676288868,
+        "recall_std": 0.0008712980114496875,
+        "f1_delta_vs_baseline": 0.0022842440356694027
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8846690523112164,
+        "f1_std": 0.004993505029129333,
+        "precision_mean": 0.8936818719082432,
+        "precision_std": 0.005187009480776604,
+        "recall_mean": 0.8758620689655173,
+        "recall_std": 0.006767632847760786,
+        "f1_delta_vs_baseline": 0.00896198790167102
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8956228956228957,
+        "f1_std": 0.009523323652344083,
+        "precision_mean": 0.8902116402116401,
+        "precision_std": 0.0018706528602819173,
+        "recall_mean": 0.9012345679012346,
+        "recall_std": 0.01745942669596416,
+        "f1_delta_vs_baseline": -0.014550264550264425
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.898973013551268,
+          "f1_std": 0.0043718921609935,
+          "precision_mean": 0.8999937874693256,
+          "precision_std": 0.0033836199135773145,
+          "recall_mean": 0.8979591836734694,
+          "recall_std": 0.005554398509712428,
+          "f1_delta_vs_baseline": 0.01694706261180312
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8699413556206702,
+          "f1_std": 0.009946122035466342,
+          "precision_mean": 0.8843477809139553,
+          "precision_std": 0.011499078745379815,
+          "recall_mean": 0.8565891472868218,
+          "recall_std": 0.023893077530887503,
+          "f1_delta_vs_baseline": -0.03424915853595922
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.893997121327576,
+          "f1_std": 0.0175074148175173,
+          "precision_mean": 0.938760128132655,
+          "precision_std": 0.008639075474918122,
+          "recall_mean": 0.8535353535353535,
+          "recall_std": 0.025752623806024142,
+          "f1_delta_vs_baseline": 0.013549300455924729
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9597679792582342,
+          "f1_std": 0.0040766493187013395,
+          "precision_mean": 0.9598606881513154,
+          "precision_std": 0.007575829277577153,
+          "recall_mean": 0.9597701149425287,
+          "recall_std": 0.008127664151569527,
+          "f1_delta_vs_baseline": 0.03040639056037997
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8053115381728099,
+          "f1_std": 0.005709889678417868,
+          "precision_mean": 0.7843998593998593,
+          "precision_std": 0.003545884844835772,
+          "recall_mean": 0.8274509803921569,
+          "recall_std": 0.011091871077436052,
+          "f1_delta_vs_baseline": 0.017394229492789348
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8688783570300158,
+          "f1_std": 0.008936578593194902,
+          "precision_mean": 0.8333333333333334,
+          "precision_std": 0.00857099128710967,
+          "recall_mean": 0.9075907590759077,
+          "recall_std": 0.009334742985961032,
+          "f1_delta_vs_baseline": 0.0043342989375706464
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9164586498806164,
+          "f1_std": 0.0018801949358660784,
+          "precision_mean": 0.8923432682425488,
+          "precision_std": 0.00036336422465908883,
+          "recall_mean": 0.941919191919192,
+          "recall_std": 0.003571246369629025,
+          "f1_delta_vs_baseline": 0.013726903007900249
+        }
+      }
+    },
+    "composite_no_coverage": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.928196300470506,
+        "f1_std": 0.0009676401408659625,
+        "precision_mean": 0.9241887005665715,
+        "precision_std": 0.0004529421279137121,
+        "recall_mean": 0.9322394408994227,
+        "recall_std": 0.0015091324243645806,
+        "f1_delta_vs_baseline": 0.00017244917648062685
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8749977632002937,
+        "f1_std": 0.0020211284724449244,
+        "precision_mean": 0.8811207641225517,
+        "precision_std": 0.0017196239212396449,
+        "recall_mean": 0.8689655172413793,
+        "recall_std": 0.003251065660627811,
+        "f1_delta_vs_baseline": -0.0007093012092517226
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9037676701957769,
+        "f1_std": 0.005291158986087913,
+        "precision_mean": 0.8848812477844737,
+        "precision_std": 0.03490147285926283,
+        "recall_mean": 0.9259259259259259,
+        "recall_std": 0.0302406141084343,
+        "f1_delta_vs_baseline": -0.006405489977383216
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8886627399426232,
+          "f1_std": 0.006556752374267839,
+          "precision_mean": 0.8907458710481856,
+          "precision_std": 0.010237482261079503,
+          "recall_mean": 0.8866213151927438,
+          "recall_std": 0.003206833474768927,
+          "f1_delta_vs_baseline": 0.006636789003158339
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.880293050141148,
+          "f1_std": 0.007476306577403513,
+          "precision_mean": 0.8769045709703288,
+          "precision_std": 0.005796131229083982,
+          "recall_mean": 0.8837209302325583,
+          "recall_std": 0.009494146289857296,
+          "f1_delta_vs_baseline": -0.02389746401548143
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8571428571428571,
+          "f1_std": 0.0,
+          "precision_mean": 0.9622641509433962,
+          "precision_std": 0.0,
+          "recall_mean": 0.7727272727272728,
+          "recall_std": 1.1102230246251565e-16,
+          "f1_delta_vs_baseline": -0.023304963728794204
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9500439845359631,
+          "f1_std": 0.006464454999750285,
+          "precision_mean": 0.919514324326593,
+          "precision_std": 0.01211093493252744,
+          "recall_mean": 0.9827586206896551,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": 0.020682395838108825
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8060217883745855,
+          "f1_std": 0.00650392182043217,
+          "precision_mean": 0.7823064616542877,
+          "precision_std": 0.0015947661743613104,
+          "recall_mean": 0.8313725490196079,
+          "recall_std": 0.014673166222642905,
+          "f1_delta_vs_baseline": 0.018104479694564968
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8541026705410267,
+          "f1_std": 0.003741418397438628,
+          "precision_mean": 0.791553909699473,
+          "precision_std": 0.0036484475663209203,
+          "recall_mean": 0.9273927392739275,
+          "recall_std": 0.004667371492980516,
+          "f1_delta_vs_baseline": -0.010441387551418435
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9106604523849157,
+          "f1_std": 0.005427311660885434,
+          "precision_mean": 0.8951087734363817,
+          "precision_std": 0.0038204209231132657,
+          "recall_mean": 0.9267676767676768,
+          "recall_std": 0.00714249273925805,
+          "f1_delta_vs_baseline": 0.007928705512199485
+        }
+      }
+    },
+    "flags": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9291986653554837,
+        "f1_std": 0.0008944671492013627,
+        "precision_mean": 0.9252802370132235,
+        "precision_std": 0.0013932310672507024,
+        "recall_mean": 0.9331510179276816,
+        "recall_std": 0.00042972153217046957,
+        "f1_delta_vs_baseline": 0.0011748140614582514
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8759490656482738,
+        "f1_std": 0.0035296764091284245,
+        "precision_mean": 0.8752851320932761,
+        "precision_std": 0.0021534592375134992,
+        "recall_mean": 0.8766283524904215,
+        "recall_std": 0.00573434082264207,
+        "f1_delta_vs_baseline": 0.0002420012387284176
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9034391534391535,
+        "f1_std": 0.01784489095665616,
+        "precision_mean": 0.8825031928480204,
+        "precision_std": 0.014783955175977321,
+        "recall_mean": 0.9259259259259259,
+        "recall_std": 0.0302406141084343,
+        "f1_delta_vs_baseline": -0.006734006734006592
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8883781740924598,
+          "f1_std": 0.003098553431090458,
+          "precision_mean": 0.8834199272550184,
+          "precision_std": 0.002499911290624904,
+          "recall_mean": 0.8934240362811791,
+          "recall_std": 0.006413666949537854,
+          "f1_delta_vs_baseline": 0.006352223152994885
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8982901698691172,
+          "f1_std": 0.004939773321385259,
+          "precision_mean": 0.8899757655871338,
+          "precision_std": 0.012147052110010532,
+          "recall_mean": 0.9069767441860465,
+          "recall_std": 0.00949414628985725,
+          "f1_delta_vs_baseline": -0.0059003442875121825
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8690355013929745,
+          "f1_std": 0.005033297104253691,
+          "precision_mean": 0.9691228524561858,
+          "precision_std": 0.008239820506728585,
+          "recall_mean": 0.7878787878787877,
+          "recall_std": 0.012371160317086747,
+          "f1_delta_vs_baseline": -0.011412319478676825
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9448527277053621,
+          "f1_std": 0.009805312001759058,
+          "precision_mean": 0.9099377114233671,
+          "precision_std": 0.018252463898609426,
+          "recall_mean": 0.9827586206896551,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": 0.01549113900750787
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.7886492039034412,
+          "f1_std": 0.012166901201576562,
+          "precision_mean": 0.7599538143016403,
+          "precision_std": 0.010017474403565658,
+          "recall_mean": 0.819607843137255,
+          "recall_std": 0.014673166222642895,
+          "f1_delta_vs_baseline": 0.0007318952234206533
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8645200274708883,
+          "f1_std": 0.0060219480378429485,
+          "precision_mean": 0.8022505539953197,
+          "precision_std": 0.004210254792078397,
+          "recall_mean": 0.9372937293729372,
+          "recall_std": 0.00933474298596098,
+          "f1_delta_vs_baseline": -2.4030621556869747e-05
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9103766224432096,
+          "f1_std": 0.008825507237607355,
+          "precision_mean": 0.8970325952403488,
+          "precision_std": 0.0016512518485296535,
+          "recall_mean": 0.9242424242424242,
+          "recall_std": 0.016365506814161282,
+          "f1_delta_vs_baseline": 0.007644875570493426
+        }
+      }
+    },
+    "vertical": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9271635081454228,
+        "f1_std": 0.00028859497714527516,
+        "precision_mean": 0.9228394101083305,
+        "precision_std": 0.0008636616909066374,
+        "recall_mean": 0.9315304365441102,
+        "recall_std": 0.0011724741114949836,
+        "f1_delta_vs_baseline": -0.0008603431486026158
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8734873541411177,
+        "f1_std": 0.0026495513905509978,
+        "precision_mean": 0.858674395620571,
+        "precision_std": 0.004800936131562358,
+        "recall_mean": 0.8888888888888888,
+        "recall_std": 0.00710622106934534,
+        "f1_delta_vs_baseline": -0.0022197102684277104
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9404647983595352,
+        "f1_std": 0.008446100229838709,
+        "precision_mean": 0.9083743842364532,
+        "precision_std": 0.014350681784197634,
+        "recall_mean": 0.9753086419753085,
+        "recall_std": 0.01745942669596416,
+        "f1_delta_vs_baseline": 0.030291638186375147
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8751255931295975,
+          "f1_std": 0.009670370942256526,
+          "precision_mean": 0.8534282921379696,
+          "precision_std": 0.008410589663790375,
+          "recall_mean": 0.8979591836734694,
+          "recall_std": 0.011108797019424856,
+          "f1_delta_vs_baseline": -0.006900357809867419
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9014637854719219,
+          "f1_std": 0.006134267346459989,
+          "precision_mean": 0.8815253989167032,
+          "precision_std": 0.00358899473971561,
+          "recall_mean": 0.9224806201550387,
+          "recall_std": 0.014502548010751737,
+          "f1_delta_vs_baseline": -0.00272672868470758
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8814643403734314,
+          "f1_std": 0.015797257811394162,
+          "precision_mean": 0.9426468070535866,
+          "precision_std": 0.006756448270869007,
+          "recall_mean": 0.8282828282828283,
+          "recall_std": 0.02856997095703225,
+          "f1_delta_vs_baseline": 0.0010165195017800555
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9193548387096774,
+          "f1_std": 0.0,
+          "precision_mean": 0.8636363636363636,
+          "precision_std": 0.0,
+          "recall_mean": 0.9827586206896551,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": -0.010006749988176855
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.7947091349875177,
+          "f1_std": 0.00567691212905042,
+          "precision_mean": 0.7645749820125398,
+          "precision_std": 0.006864658603937771,
+          "recall_mean": 0.8274509803921569,
+          "recall_std": 0.011091871077436052,
+          "f1_delta_vs_baseline": 0.006791826307497195
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8628042394537304,
+          "f1_std": 0.003740043994469239,
+          "precision_mean": 0.8017045728910136,
+          "precision_std": 0.0036659287564312242,
+          "recall_mean": 0.933993399339934,
+          "recall_std": 0.004667371492980464,
+          "f1_delta_vs_baseline": -0.0017398186387147518
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.901605335338262,
+          "f1_std": 0.003859291010193512,
+          "precision_mean": 0.8894295755609624,
+          "precision_std": 0.000764646424640799,
+          "recall_mean": 0.914141414141414,
+          "recall_std": 0.00714249273925805,
+          "f1_delta_vs_baseline": -0.0011264115344541414
+        }
+      }
+    },
+    "composite": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9303073207154139,
+        "f1_std": 0.0008164608321708794,
+        "precision_mean": 0.9263849849908429,
+        "precision_std": 0.0010495932013275177,
+        "recall_mean": 0.934265167628887,
+        "recall_std": 0.0014954748364462145,
+        "f1_delta_vs_baseline": 0.002283469421388462
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8834202304092699,
+        "f1_std": 0.00683116066593724,
+        "precision_mean": 0.890338216629677,
+        "precision_std": 0.00986325867137685,
+        "recall_mean": 0.8766283524904215,
+        "recall_std": 0.003907294646431237,
+        "f1_delta_vs_baseline": 0.007713165999724492
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8944793850454227,
+        "f1_std": 0.007906155484964926,
+        "precision_mean": 0.9002849002849004,
+        "precision_std": 0.016116393873197712,
+        "recall_mean": 0.8888888888888888,
+        "recall_std": 0.0,
+        "f1_delta_vs_baseline": -0.015693775127737397
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8907311085414259,
+          "f1_std": 0.010536126487481411,
+          "precision_mean": 0.8859478620653819,
+          "precision_std": 0.01776013633887971,
+          "recall_mean": 0.8956916099773243,
+          "recall_std": 0.0032068334747689265,
+          "f1_delta_vs_baseline": 0.008705157601961
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8762445329008797,
+          "f1_std": 0.004283965937117923,
+          "precision_mean": 0.8885814488396985,
+          "precision_std": 0.009815453541554829,
+          "recall_mean": 0.8643410852713179,
+          "recall_std": 0.005481447916174797,
+          "f1_delta_vs_baseline": -0.027945981255749763
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9033347575739078,
+          "f1_std": 0.008056721346608611,
+          "precision_mean": 0.9351201318414434,
+          "precision_std": 0.0009813260906396542,
+          "recall_mean": 0.8737373737373737,
+          "recall_std": 0.0142849854785161,
+          "f1_delta_vs_baseline": 0.0228869367022565
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9567716141929035,
+          "f1_std": 0.007040980911347026,
+          "precision_mean": 0.9595684613833434,
+          "precision_std": 0.00798889203046595,
+          "recall_mean": 0.9540229885057471,
+          "recall_std": 0.008127664151569527,
+          "f1_delta_vs_baseline": 0.02741002549504923
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8031370415703339,
+          "f1_std": 0.011650513488344722,
+          "precision_mean": 0.7911134871840565,
+          "precision_std": 0.01622588838770732,
+          "recall_mean": 0.815686274509804,
+          "recall_std": 0.011091871077436002,
+          "f1_delta_vs_baseline": 0.01521973289031342
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8539329145082478,
+          "f1_std": 0.008803864400732801,
+          "precision_mean": 0.8143540669856458,
+          "precision_std": 0.00384763575177508,
+          "recall_mean": 0.8976897689768978,
+          "recall_std": 0.016828447239580165,
+          "f1_delta_vs_baseline": -0.010611143584197347
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9126501673513467,
+          "f1_std": 0.006532300945833821,
+          "precision_mean": 0.8896671482689625,
+          "precision_std": 0.003978751048488926,
+          "recall_mean": 0.9368686868686869,
+          "recall_std": 0.009448629764580701,
+          "f1_delta_vs_baseline": 0.009918420478630563
+        }
+      }
+    },
+    "primitives": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9292851277548447,
+        "f1_std": 0.0008828550641093191,
+        "precision_mean": 0.9255510689442437,
+        "precision_std": 0.0012440035431486862,
+        "recall_mean": 0.9330497315912084,
+        "recall_std": 0.0005164610061372042,
+        "f1_delta_vs_baseline": 0.001261276460819305
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8771550131438645,
+        "f1_std": 0.0014258442711398156,
+        "precision_mean": 0.8761560282192157,
+        "precision_std": 0.0028484407766955393,
+        "recall_mean": 0.8781609195402299,
+        "recall_std": 0.0,
+        "f1_delta_vs_baseline": 0.0014479487343190822
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8953687821612349,
+        "f1_std": 0.01940601800855016,
+        "precision_mean": 0.8901098901098901,
+        "precision_std": 0.0038852020944316183,
+        "recall_mean": 0.9012345679012346,
+        "recall_std": 0.03491885339192827,
+        "f1_delta_vs_baseline": -0.014804378011925134
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8864115805109593,
+          "f1_std": 0.0034724281525616405,
+          "precision_mean": 0.8795907153630319,
+          "precision_std": 0.009285916886362754,
+          "recall_mean": 0.8934240362811791,
+          "recall_std": 0.0032068334747689265,
+          "f1_delta_vs_baseline": 0.004385629571494354
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8927557451013746,
+          "f1_std": 0.014086707486578108,
+          "precision_mean": 0.8827969618667293,
+          "precision_std": 0.01804607627227073,
+          "recall_mean": 0.9031007751937984,
+          "recall_std": 0.014502548010751688,
+          "f1_delta_vs_baseline": -0.011434769055254868
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.875240697371845,
+          "f1_std": 0.012820903376823489,
+          "precision_mean": 0.969343782236864,
+          "precision_std": 0.008622238178158544,
+          "recall_mean": 0.7979797979797979,
+          "recall_std": 0.018897259529161343,
+          "f1_delta_vs_baseline": -0.005207123499806343
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9422785507645681,
+          "f1_std": 0.011104859216870976,
+          "precision_mean": 0.9052254098360656,
+          "precision_std": 0.02064809760636949,
+          "recall_mean": 0.9827586206896551,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": 0.012916962066713888
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.7962030220844634,
+          "f1_std": 0.0021917296588501675,
+          "precision_mean": 0.7673875397688373,
+          "precision_std": 0.005581447751301337,
+          "recall_mean": 0.8274509803921569,
+          "recall_std": 0.011091871077436052,
+          "f1_delta_vs_baseline": 0.00828571340444284
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8628103323192368,
+          "f1_std": 0.006276097151574553,
+          "precision_mean": 0.8017855388545044,
+          "precision_std": 0.008287205098785548,
+          "recall_mean": 0.933993399339934,
+          "recall_std": 0.00933474298596098,
+          "f1_delta_vs_baseline": -0.0017337257732084055
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9106696998279974,
+          "f1_std": 0.003039357555270915,
+          "precision_mean": 0.8951266638042078,
+          "precision_std": 0.0032781871822087755,
+          "recall_mean": 0.9267676767676768,
+          "recall_std": 0.003571246369629025,
+          "f1_delta_vs_baseline": 0.007937952955281213
+        }
+      }
+    },
+    "all_no_coverage": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9301599004614536,
+        "f1_std": 0.000905960073187771,
+        "precision_mean": 0.9261906641901075,
+        "precision_std": 0.0010805081721326718,
+        "recall_mean": 0.9341638812924137,
+        "recall_std": 0.0010026835750644614,
+        "f1_delta_vs_baseline": 0.0021360491674281556
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8796291996348616,
+        "f1_std": 0.00022750604226524852,
+        "precision_mean": 0.8857864756841592,
+        "precision_std": 0.00146851637046569,
+        "recall_mean": 0.8735632183908045,
+        "recall_std": 0.0018770036343166002,
+        "f1_delta_vs_baseline": 0.003922135225316259
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9099136730715678,
+        "f1_std": 0.016286561075583114,
+        "precision_mean": 0.8840357598978289,
+        "precision_std": 0.012673957834028365,
+        "recall_mean": 0.9382716049382714,
+        "recall_std": 0.034918853391928274,
+        "f1_delta_vs_baseline": -0.0002594871015922928
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8954484094295881,
+          "f1_std": 0.0018707591040351254,
+          "precision_mean": 0.8975429511143798,
+          "precision_std": 0.004453879585078403,
+          "recall_mean": 0.8934240362811791,
+          "recall_std": 0.006413666949537854,
+          "f1_delta_vs_baseline": 0.013422458490123246
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.896551724137931,
+          "f1_std": 0.009385018171583047,
+          "precision_mean": 0.8863636363636364,
+          "precision_std": 0.00927837023781506,
+          "recall_mean": 0.9069767441860465,
+          "recall_std": 0.00949414628985725,
+          "f1_delta_vs_baseline": -0.007638790018698383
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.86251763757307,
+          "f1_std": 0.011647444141568819,
+          "precision_mean": 0.9457558036505405,
+          "precision_std": 0.0012125667477976836,
+          "recall_mean": 0.7929292929292929,
+          "recall_std": 0.018897259529161353,
+          "f1_delta_vs_baseline": -0.017930183298581315
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9578334782188738,
+          "f1_std": 0.006335771773824565,
+          "precision_mean": 0.9397661031990615,
+          "precision_std": 0.019220259161175517,
+          "recall_mean": 0.9770114942528735,
+          "recall_std": 0.008127664151569475,
+          "f1_delta_vs_baseline": 0.028471889521019533
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.7878007156619874,
+          "f1_std": 0.008405149114476757,
+          "precision_mean": 0.7687710437710438,
+          "precision_std": 0.011744158905458008,
+          "recall_mean": 0.8078431372549021,
+          "recall_std": 0.005545935538718001,
+          "f1_delta_vs_baseline": -0.00011659301803312871
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8606258468643789,
+          "f1_std": 0.003411342602008525,
+          "precision_mean": 0.7956206993640148,
+          "precision_std": 0.007708748567896959,
+          "recall_mean": 0.9372937293729372,
+          "recall_std": 0.004667371492980464,
+          "f1_delta_vs_baseline": -0.003918211228066237
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9095012323499452,
+          "f1_std": 0.007517303090603133,
+          "precision_mean": 0.8929284796007476,
+          "precision_std": 0.0036904781461912866,
+          "recall_mean": 0.9267676767676768,
+          "recall_std": 0.012876311903012107,
+          "f1_delta_vs_baseline": 0.006769485477228998
+        }
+      }
+    },
+    "all": {
+      "n_runs": 3,
+      "global": {
+        "n_mean": 5428.0,
+        "n_std": 0.0,
+        "positive_mean": 3291.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.9308425201156999,
+        "f1_std": 0.0005774549595053177,
+        "precision_mean": 0.9258579577575704,
+        "precision_std": 0.0019902037305181497,
+        "recall_mean": 0.9358857490124581,
+        "recall_std": 0.0009923993691008715,
+        "f1_delta_vs_baseline": 0.002818668821674475
+      },
+      "comparable": {
+        "n_mean": 809.0,
+        "n_std": 0.0,
+        "positive_mean": 435.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8880314588521339,
+        "f1_std": 0.0010768601273088033,
+        "precision_mean": 0.888755241174596,
+        "precision_std": 0.0035740946523263846,
+        "recall_mean": 0.8873563218390804,
+        "recall_std": 0.005631010902949846,
+        "f1_delta_vs_baseline": 0.012324394442588482
+      },
+      "informative": {
+        "n_mean": 46.0,
+        "n_std": 0.0,
+        "positive_mean": 27.0,
+        "positive_std": 0.0,
+        "f1_mean": 0.8848484848484848,
+        "f1_std": 0.01714198257421934,
+        "precision_mean": 0.8690476190476191,
+        "precision_std": 0.01683587574253689,
+        "recall_mean": 0.9012345679012346,
+        "recall_std": 0.01745942669596416,
+        "f1_delta_vs_baseline": -0.025324675324675305
+      },
+      "per_dataset": {
+        "au_sydney_roads": {
+          "n_mean": 226.0,
+          "n_std": 0.0,
+          "positive_mean": 147.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8946119525829671,
+          "f1_std": 0.0019443781472554258,
+          "precision_mean": 0.8847172181011814,
+          "precision_std": 0.0022407135059304686,
+          "recall_mean": 0.9047619047619048,
+          "recall_std": 0.005554398509712428,
+          "f1_delta_vs_baseline": 0.01258600164350221
+        },
+        "de_berlin_roads": {
+          "n_mean": 121.0,
+          "n_std": 0.0,
+          "positive_mean": 86.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8966837598632544,
+          "f1_std": 0.002803868224712631,
+          "precision_mean": 0.9019976983041279,
+          "precision_std": 0.0047236544062354575,
+          "recall_mean": 0.8914728682170544,
+          "recall_std": 0.005481447916174797,
+          "f1_delta_vs_baseline": -0.007506754293374995
+        },
+        "fi_helsinki_roads": {
+          "n_mean": 84.0,
+          "n_std": 0.0,
+          "positive_mean": 66.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8976749000124983,
+          "f1_std": 0.0057714268387702985,
+          "precision_mean": 0.934593689405958,
+          "precision_std": 0.012511395065845374,
+          "recall_mean": 0.8636363636363636,
+          "recall_std": 0.0,
+          "f1_delta_vs_baseline": 0.01722707914084698
+        },
+        "gb_london_roads": {
+          "n_mean": 201.0,
+          "n_std": 0.0,
+          "positive_mean": 58.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9569664320382181,
+          "f1_std": 0.0072841560024769205,
+          "precision_mean": 0.9543960475902399,
+          "precision_std": 0.00746933874998728,
+          "recall_mean": 0.9597701149425287,
+          "recall_std": 0.016255328303139003,
+          "f1_delta_vs_baseline": 0.027604843340363838
+        },
+        "hk_hongkong_roads": {
+          "n_mean": 208.0,
+          "n_std": 0.0,
+          "positive_mean": 85.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.8014723406734476,
+          "f1_std": 0.002823952395212158,
+          "precision_mean": 0.7739291621114007,
+          "precision_std": 0.007563191242028056,
+          "recall_mean": 0.8313725490196079,
+          "recall_std": 0.014673166222642905,
+          "f1_delta_vs_baseline": 0.013555031993427114
+        },
+        "nl_amsterdam_roads": {
+          "n_mean": 199.0,
+          "n_std": 0.0,
+          "positive_mean": 101.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.860276965777896,
+          "f1_std": 0.008106512447670515,
+          "precision_mean": 0.8203560703560703,
+          "precision_std": 0.007394815176292632,
+          "recall_mean": 0.9042904290429044,
+          "recall_std": 0.009334742985961032,
+          "f1_delta_vs_baseline": -0.004267092314549137
+        },
+        "us_utah_slc_roads": {
+          "n_mean": 200.0,
+          "n_std": 0.0,
+          "positive_mean": 132.0,
+          "positive_std": 0.0,
+          "f1_mean": 0.9160279755904573,
+          "f1_std": 0.0039533811085807015,
+          "precision_mean": 0.8961555636747454,
+          "precision_std": 0.0024105500266824857,
+          "recall_mean": 0.9368686868686869,
+          "recall_std": 0.009448629764580701,
+          "f1_delta_vs_baseline": 0.013296228717741165
+        }
+      }
+    }
+  },
+  "runs": {
+    "baseline": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9269399485705642,
+          "precision": 0.9228915662650602,
+          "recall": 0.9310240048617442
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8742921857304643,
+          "precision": 0.8616071428571429,
+          "recall": 0.8873563218390804
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9285714285714286,
+          "precision": 0.896551724137931,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8807947019867549,
+            "precision": 0.8580645161290322,
+            "recall": 0.9047619047619048
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8943089430894309,
+            "precision": 0.9649122807017544,
+            "recall": 0.8333333333333334
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.926829268292683,
+            "precision": 0.8769230769230769,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7796610169491526,
+            "precision": 0.75,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.896551724137931,
+            "precision": 0.8863636363636364,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8663594470046083,
+            "precision": 0.8103448275862069,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9022556390977443,
+            "precision": 0.8955223880597015,
+            "recall": 0.9090909090909091
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9275669136549222,
+          "precision": 0.9232390126429861,
+          "recall": 0.931935581890003
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8740068104426788,
+          "precision": 0.8632286995515696,
+          "recall": 0.8850574712643678
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9090909090909091,
+          "precision": 0.8928571428571429,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8807947019867549,
+            "precision": 0.8580645161290322,
+            "recall": 0.9047619047619048
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8617886178861789,
+            "precision": 0.9298245614035088,
+            "recall": 0.803030303030303
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.926829268292683,
+            "precision": 0.8769230769230769,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8,
+            "precision": 0.7777777777777778,
+            "recall": 0.8235294117647058
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.9017341040462428,
+            "precision": 0.896551724137931,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8636363636363636,
+            "precision": 0.7983193277310925,
+            "recall": 0.9405940594059405
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.898876404494382,
+            "precision": 0.8888888888888888,
+            "recall": 0.9090909090909091
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9295646916565901,
+          "precision": 0.924812030075188,
+          "recall": 0.9343664539653601
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8788221970554927,
+          "precision": 0.8660714285714286,
+          "recall": 0.8919540229885058
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8928571428571429,
+          "precision": 0.8620689655172413,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8844884488448845,
+            "precision": 0.8589743589743589,
+            "recall": 0.9115646258503401
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8852459016393442,
+            "precision": 0.9642857142857143,
+            "recall": 0.8181818181818182
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9344262295081968,
+            "precision": 0.890625,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7840909090909091,
+            "precision": 0.7582417582417582,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.9142857142857143,
+            "precision": 0.898876404494382,
+            "recall": 0.9302325581395349
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8636363636363636,
+            "precision": 0.7983193277310925,
+            "recall": 0.9405940594059405
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9070631970260223,
+            "precision": 0.8905109489051095,
+            "recall": 0.9242424242424242
+          }
+        }
+      }
+    ],
+    "flag_positive_only": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9278163696768348,
+          "precision": 0.9222455719003302,
+          "recall": 0.9334548769371012
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.87115165336374,
+          "precision": 0.8642533936651584,
+          "recall": 0.8781609195402299
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9122807017543859,
+          "precision": 0.8666666666666667,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8762541806020067,
+            "precision": 0.8618421052631579,
+            "recall": 0.891156462585034
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.85,
+            "precision": 0.9444444444444444,
+            "recall": 0.7727272727272727
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.926829268292683,
+            "precision": 0.8769230769230769,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8114285714285714,
+            "precision": 0.7888888888888889,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8977272727272727,
+            "precision": 0.8777777777777778,
+            "recall": 0.9186046511627907
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8584474885844748,
+            "precision": 0.7966101694915254,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9138576779026217,
+            "precision": 0.9037037037037037,
+            "recall": 0.9242424242424242
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9276106997128608,
+          "precision": 0.9227300060132291,
+          "recall": 0.9325432999088423
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8718535469107551,
+          "precision": 0.8678815489749431,
+          "recall": 0.8758620689655172
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9122807017543859,
+          "precision": 0.8666666666666667,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8821548821548821,
+            "precision": 0.8733333333333333,
+            "recall": 0.891156462585034
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8688524590163934,
+            "precision": 0.9464285714285714,
+            "recall": 0.803030303030303
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9344262295081968,
+            "precision": 0.890625,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7840909090909091,
+            "precision": 0.7582417582417582,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.896551724137931,
+            "precision": 0.8863636363636364,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8623853211009175,
+            "precision": 0.8034188034188035,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.917910447761194,
+            "precision": 0.9044117647058824,
+            "recall": 0.9318181818181818
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9282470481380564,
+          "precision": 0.9248868778280543,
+          "recall": 0.9316317228805834
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8781609195402299,
+          "precision": 0.8781609195402299,
+          "recall": 0.8781609195402299
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9090909090909091,
+          "precision": 0.8928571428571429,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8918918918918919,
+            "precision": 0.8859060402684564,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8403361344537815,
+            "precision": 0.9433962264150944,
+            "recall": 0.7575757575757576
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.957983193277311,
+            "precision": 0.9344262295081968,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8044692737430168,
+            "precision": 0.7659574468085106,
+            "recall": 0.8470588235294118
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.896551724137931,
+            "precision": 0.8863636363636364,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8571428571428571,
+            "precision": 0.8017241379310345,
+            "recall": 0.9207920792079208
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9104477611940298,
+            "precision": 0.8970588235294118,
+            "recall": 0.9242424242424242
+          }
+        }
+      }
+    ],
+    "vertical_positive_only": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9250755287009064,
+          "precision": 0.9197957344547912,
+          "recall": 0.9304162868429049
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8671963677639046,
+          "precision": 0.8565022421524664,
+          "recall": 0.8781609195402299
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9056603773584906,
+          "precision": 0.9230769230769231,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8675496688741722,
+            "precision": 0.8451612903225807,
+            "recall": 0.891156462585034
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8688524590163934,
+            "precision": 0.9464285714285714,
+            "recall": 0.803030303030303
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.926829268292683,
+            "precision": 0.8769230769230769,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7909604519774012,
+            "precision": 0.7608695652173914,
+            "recall": 0.8235294117647058
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.896551724137931,
+            "precision": 0.8863636363636364,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8609865470852018,
+            "precision": 0.7868852459016393,
+            "recall": 0.9504950495049505
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9022556390977443,
+            "precision": 0.8955223880597015,
+            "recall": 0.9090909090909091
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9260547406623317,
+          "precision": 0.921733895243829,
+          "recall": 0.9304162868429049
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8665906499429875,
+          "precision": 0.8597285067873304,
+          "recall": 0.8735632183908046
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8727272727272727,
+          "precision": 0.8571428571428571,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8770764119601329,
+            "precision": 0.8571428571428571,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8524590163934426,
+            "precision": 0.9285714285714286,
+            "recall": 0.7878787878787878
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.926829268292683,
+            "precision": 0.8769230769230769,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7885714285714286,
+            "precision": 0.7666666666666667,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.896551724137931,
+            "precision": 0.8863636363636364,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8532110091743119,
+            "precision": 0.7948717948717948,
+            "recall": 0.9207920792079208
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9029850746268657,
+            "precision": 0.8897058823529411,
+            "recall": 0.9166666666666666
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9277290595706078,
+          "precision": 0.9232621125489016,
+          "recall": 0.9322394408994227
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8728908886389202,
+          "precision": 0.8546255506607929,
+          "recall": 0.8919540229885058
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9122807017543859,
+          "precision": 0.8666666666666667,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8881578947368421,
+            "precision": 0.8598726114649682,
+            "recall": 0.9183673469387755
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.896,
+            "precision": 0.9491525423728814,
+            "recall": 0.8484848484848485
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.926829268292683,
+            "precision": 0.8769230769230769,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7597765363128491,
+            "precision": 0.723404255319149,
+            "recall": 0.8
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8863636363636364,
+            "precision": 0.8666666666666667,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8703703703703703,
+            "precision": 0.8173913043478261,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9090909090909091,
+            "precision": 0.9090909090909091,
+            "recall": 0.9090909090909091
+          }
+        }
+      }
+    ],
+    "positive_only": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9268586940129694,
+          "precision": 0.920059880239521,
+          "recall": 0.9337587359465208
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.872852233676976,
+          "precision": 0.8698630136986302,
+          "recall": 0.8758620689655172
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8518518518518519,
+          "precision": 0.8518518518518519,
+          "recall": 0.8518518518518519
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8716216216216216,
+            "precision": 0.8657718120805369,
+            "recall": 0.8775510204081632
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.847457627118644,
+            "precision": 0.9615384615384616,
+            "recall": 0.7575757575757576
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.95,
+            "precision": 0.9193548387096774,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8111111111111111,
+            "precision": 0.7684210526315789,
+            "recall": 0.8588235294117647
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.9028571428571428,
+            "precision": 0.8876404494382022,
+            "recall": 0.9186046511627907
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8545454545454545,
+            "precision": 0.7899159663865546,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9070631970260223,
+            "precision": 0.8905109489051095,
+            "recall": 0.9242424242424242
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9296626834064438,
+          "precision": 0.9256024096385542,
+          "recall": 0.9337587359465208
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8729792147806005,
+          "precision": 0.877030162412993,
+          "recall": 0.8689655172413793
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9090909090909091,
+          "precision": 0.8928571428571429,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8904109589041096,
+            "precision": 0.896551724137931,
+            "recall": 0.8843537414965986
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8403361344537815,
+            "precision": 0.9433962264150944,
+            "recall": 0.7575757575757576
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9421487603305785,
+            "precision": 0.9047619047619048,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.797752808988764,
+            "precision": 0.7634408602150538,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8901734104046243,
+            "precision": 0.8850574712643678,
+            "recall": 0.8953488372093024
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.867579908675799,
+            "precision": 0.8050847457627118,
+            "recall": 0.9405940594059405
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.917910447761194,
+            "precision": 0.9044117647058824,
+            "recall": 0.9318181818181818
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.928506513177825,
+          "precision": 0.9257022047719722,
+          "recall": 0.9313278638711637
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8786127167630058,
+          "precision": 0.8837209302325582,
+          "recall": 0.8735632183908046
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9090909090909091,
+          "precision": 0.8928571428571429,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8896551724137931,
+            "precision": 0.9020979020979021,
+            "recall": 0.8775510204081632
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8376068376068376,
+            "precision": 0.9607843137254902,
+            "recall": 0.7424242424242424
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9421487603305785,
+            "precision": 0.9047619047619048,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8202247191011236,
+            "precision": 0.7849462365591398,
+            "recall": 0.8588235294117647
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8914285714285715,
+            "precision": 0.8764044943820225,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8518518518518519,
+            "precision": 0.8,
+            "recall": 0.9108910891089109
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.898876404494382,
+            "precision": 0.8888888888888888,
+            "recall": 0.9090909090909091
+          }
+        }
+      }
+    ],
+    "conflict_only": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9273084479371316,
+          "precision": 0.9224293445580276,
+          "recall": 0.9322394408994227
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8758620689655172,
+          "precision": 0.8758620689655172,
+          "recall": 0.8758620689655172
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.896551724137931,
+          "precision": 0.8387096774193549,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8843537414965986,
+            "precision": 0.8843537414965986,
+            "recall": 0.8843537414965986
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.847457627118644,
+            "precision": 0.9615384615384616,
+            "recall": 0.7575757575757576
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9421487603305785,
+            "precision": 0.9047619047619048,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8089887640449438,
+            "precision": 0.7741935483870968,
+            "recall": 0.8470588235294118
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8977272727272727,
+            "precision": 0.8777777777777778,
+            "recall": 0.9186046511627907
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8558558558558559,
+            "precision": 0.7851239669421488,
+            "recall": 0.9405940594059405
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9070631970260223,
+            "precision": 0.8905109489051095,
+            "recall": 0.9242424242424242
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9284420289855072,
+          "precision": 0.9225922592259226,
+          "recall": 0.9343664539653601
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8758620689655172,
+          "precision": 0.8758620689655172,
+          "recall": 0.8758620689655172
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9122807017543859,
+          "precision": 0.8666666666666667,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8888888888888888,
+            "precision": 0.88,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.85,
+            "precision": 0.9444444444444444,
+            "recall": 0.7727272727272727
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.957983193277311,
+            "precision": 0.9344262295081968,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8068181818181818,
+            "precision": 0.7802197802197802,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.88,
+            "precision": 0.8651685393258427,
+            "recall": 0.8953488372093024
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8623853211009175,
+            "precision": 0.8034188034188035,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9144981412639405,
+            "precision": 0.8978102189781022,
+            "recall": 0.9318181818181818
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9285390542378003,
+          "precision": 0.9233774038461539,
+          "recall": 0.9337587359465208
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8764302059496567,
+          "precision": 0.8724373576309795,
+          "recall": 0.8804597701149425
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9122807017543859,
+          "precision": 0.8666666666666667,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8859060402684564,
+            "precision": 0.8741721854304636,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8571428571428571,
+            "precision": 0.9622641509433962,
+            "recall": 0.7727272727272727
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.957983193277311,
+            "precision": 0.9344262295081968,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7932960893854749,
+            "precision": 0.7553191489361702,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8914285714285715,
+            "precision": 0.8764044943820225,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8636363636363636,
+            "precision": 0.7983193277310925,
+            "recall": 0.9405940594059405
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9022556390977443,
+            "precision": 0.8955223880597015,
+            "recall": 0.9090909090909091
+          }
+        }
+      }
+    ],
+    "coverage_only": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9299093655589123,
+          "precision": 0.9246019825773506,
+          "recall": 0.935278030993619
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8868360277136259,
+          "precision": 0.8909512761020881,
+          "recall": 0.8827586206896552
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9090909090909091,
+          "precision": 0.8928571428571429,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.89419795221843,
+            "precision": 0.8972602739726028,
+            "recall": 0.891156462585034
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8976377952755905,
+            "precision": 0.9344262295081968,
+            "recall": 0.8636363636363636
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9572649572649573,
+            "precision": 0.9491525423728814,
+            "recall": 0.9655172413793104
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8068181818181818,
+            "precision": 0.7802197802197802,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8837209302325582,
+            "precision": 0.8837209302325582,
+            "recall": 0.8837209302325582
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8625592417061612,
+            "precision": 0.8272727272727273,
+            "recall": 0.900990099009901
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9191176470588235,
+            "precision": 0.8928571428571429,
+            "recall": 0.946969696969697
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9296200998940518,
+          "precision": 0.9261158021712907,
+          "recall": 0.9331510179276815
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8777648428405123,
+          "precision": 0.8891509433962265,
+          "recall": 0.8666666666666667
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8888888888888888,
+          "precision": 0.8888888888888888,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8979591836734694,
+            "precision": 0.8979591836734694,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8709677419354839,
+            "precision": 0.9310344827586207,
+            "recall": 0.8181818181818182
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9565217391304348,
+            "precision": 0.9649122807017544,
+            "recall": 0.9482758620689655
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7976878612716763,
+            "precision": 0.7840909090909091,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8654970760233918,
+            "precision": 0.8705882352941177,
+            "recall": 0.8604651162790697
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8815165876777251,
+            "precision": 0.8454545454545455,
+            "recall": 0.9207920792079208
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.915129151291513,
+            "precision": 0.8920863309352518,
+            "recall": 0.9393939393939394
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.93139482053612,
+          "precision": 0.9284420289855072,
+          "recall": 0.9343664539653601
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.889406286379511,
+          "precision": 0.9009433962264151,
+          "recall": 0.8781609195402299
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8888888888888888,
+          "precision": 0.8888888888888888,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.9047619047619048,
+            "precision": 0.9047619047619048,
+            "recall": 0.9047619047619048
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.9133858267716536,
+            "precision": 0.9508196721311475,
+            "recall": 0.8787878787878788
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9655172413793104,
+            "precision": 0.9655172413793104,
+            "recall": 0.9655172413793104
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8114285714285714,
+            "precision": 0.7888888888888889,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8606060606060606,
+            "precision": 0.8987341772151899,
+            "recall": 0.8255813953488372
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8625592417061612,
+            "precision": 0.8272727272727273,
+            "recall": 0.900990099009901
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.915129151291513,
+            "precision": 0.8920863309352518,
+            "recall": 0.9393939393939394
+          }
+        }
+      }
+    ],
+    "composite_no_coverage": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9295646916565901,
+          "precision": 0.924812030075188,
+          "recall": 0.9343664539653601
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8773148148148148,
+          "precision": 0.8834498834498834,
+          "recall": 0.871264367816092
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9090909090909091,
+          "precision": 0.8928571428571429,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8972602739726028,
+            "precision": 0.903448275862069,
+            "recall": 0.891156462585034
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8571428571428571,
+            "precision": 0.9622641509433962,
+            "recall": 0.7727272727272727
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.95,
+            "precision": 0.9193548387096774,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8135593220338984,
+            "precision": 0.782608695652174,
+            "recall": 0.8470588235294118
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.872093023255814,
+            "precision": 0.872093023255814,
+            "recall": 0.872093023255814
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8584474885844748,
+            "precision": 0.7966101694915254,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9144981412639405,
+            "precision": 0.8978102189781022,
+            "recall": 0.9318181818181818
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9275230745952489,
+          "precision": 0.9237492465340567,
+          "recall": 0.9313278638711637
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8723897911832946,
+          "precision": 0.8805620608899297,
+          "recall": 0.864367816091954
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9056603773584906,
+          "precision": 0.9230769230769231,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8873720136518771,
+            "precision": 0.8904109589041096,
+            "recall": 0.8843537414965986
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8571428571428571,
+            "precision": 0.9622641509433962,
+            "recall": 0.7727272727272727
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9421487603305785,
+            "precision": 0.9047619047619048,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7976878612716763,
+            "precision": 0.7840909090909091,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8786127167630058,
+            "precision": 0.8735632183908046,
+            "recall": 0.8837209302325582
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8493150684931506,
+            "precision": 0.788135593220339,
+            "recall": 0.9207920792079208
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9029850746268657,
+            "precision": 0.8897058823529411,
+            "recall": 0.9166666666666666
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9275011351596791,
+          "precision": 0.9240048250904704,
+          "recall": 0.9310240048617442
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8752886836027713,
+          "precision": 0.8793503480278422,
+          "recall": 0.871264367816092
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.896551724137931,
+          "precision": 0.8387096774193549,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8813559322033898,
+            "precision": 0.8783783783783784,
+            "recall": 0.8843537414965986
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8571428571428571,
+            "precision": 0.9622641509433962,
+            "recall": 0.7727272727272727
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.957983193277311,
+            "precision": 0.9344262295081968,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8068181818181818,
+            "precision": 0.7802197802197802,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8901734104046243,
+            "precision": 0.8850574712643678,
+            "recall": 0.8953488372093024
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8545454545454545,
+            "precision": 0.7899159663865546,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9144981412639405,
+            "precision": 0.8978102189781022,
+            "recall": 0.9318181818181818
+          }
+        }
+      }
+    ],
+    "flags": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9281934996220711,
+          "precision": 0.9235860409145608,
+          "recall": 0.932847158918262
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8709677419354839,
+          "precision": 0.8729792147806005,
+          "recall": 0.8689655172413793
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8928571428571429,
+          "precision": 0.8620689655172413,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8843537414965986,
+            "precision": 0.8843537414965986,
+            "recall": 0.8843537414965986
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8666666666666667,
+            "precision": 0.9629629629629629,
+            "recall": 0.7878787878787878
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9344262295081968,
+            "precision": 0.890625,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7727272727272727,
+            "precision": 0.7472527472527473,
+            "recall": 0.8
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.9005847953216374,
+            "precision": 0.9058823529411765,
+            "recall": 0.8953488372093024
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8584474885844748,
+            "precision": 0.7966101694915254,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9144981412639405,
+            "precision": 0.8978102189781022,
+            "recall": 0.9318181818181818
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9303663336360884,
+          "precision": 0.9269984917043741,
+          "recall": 0.9337587359465208
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8787185354691075,
+          "precision": 0.8747152619589977,
+          "recall": 0.8827586206896552
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9285714285714286,
+          "precision": 0.896551724137931,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8918918918918919,
+            "precision": 0.8859060402684564,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8760330578512396,
+            "precision": 0.9636363636363636,
+            "recall": 0.803030303030303
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9421487603305785,
+            "precision": 0.9047619047619048,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8022598870056498,
+            "precision": 0.7717391304347826,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8914285714285715,
+            "precision": 0.8764044943820225,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8623853211009175,
+            "precision": 0.8034188034188035,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9185185185185185,
+            "precision": 0.8985507246376812,
+            "recall": 0.9393939393939394
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9290361628082917,
+          "precision": 0.9252561784207354,
+          "recall": 0.932847158918262
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8781609195402299,
+          "precision": 0.8781609195402299,
+          "recall": 0.8781609195402299
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8888888888888888,
+          "precision": 0.8888888888888888,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8888888888888888,
+            "precision": 0.88,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.864406779661017,
+            "precision": 0.9807692307692307,
+            "recall": 0.7727272727272727
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.957983193277311,
+            "precision": 0.9344262295081968,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7909604519774012,
+            "precision": 0.7608695652173914,
+            "recall": 0.8235294117647058
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.9028571428571428,
+            "precision": 0.8876404494382022,
+            "recall": 0.9186046511627907
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8727272727272727,
+            "precision": 0.8067226890756303,
+            "recall": 0.9504950495049505
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.8981132075471698,
+            "precision": 0.8947368421052632,
+            "recall": 0.9015151515151515
+          }
+        }
+      }
+    ],
+    "vertical": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9273743016759777,
+          "precision": 0.9216686674669868,
+          "recall": 0.9331510179276815
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8756998880179171,
+          "precision": 0.8537117903930131,
+          "recall": 0.8988505747126436
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9473684210526315,
+          "precision": 0.9,
+          "recall": 1.0
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8741721854304636,
+            "precision": 0.8516129032258064,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8888888888888888,
+            "precision": 0.9333333333333333,
+            "recall": 0.8484848484848485
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9193548387096774,
+            "precision": 0.8636363636363636,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7932960893854749,
+            "precision": 0.7553191489361702,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.9101123595505618,
+            "precision": 0.8804347826086957,
+            "recall": 0.9418604651162791
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8623853211009175,
+            "precision": 0.8034188034188035,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9070631970260223,
+            "precision": 0.8905109489051095,
+            "recall": 0.9242424242424242
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9267554479418886,
+          "precision": 0.9231233041905336,
+          "recall": 0.9304162868429049
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.869762174405436,
+          "precision": 0.8571428571428571,
+          "recall": 0.8827586206896552
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9454545454545454,
+          "precision": 0.9285714285714286,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8637873754152824,
+            "precision": 0.8441558441558441,
+            "recall": 0.8843537414965986
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.896,
+            "precision": 0.9491525423728814,
+            "recall": 0.8484848484848485
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9193548387096774,
+            "precision": 0.8636363636363636,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7885714285714286,
+            "precision": 0.7666666666666667,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8977272727272727,
+            "precision": 0.8777777777777778,
+            "recall": 0.9186046511627907
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.867579908675799,
+            "precision": 0.8050847457627118,
+            "recall": 0.9405940594059405
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.898876404494382,
+            "precision": 0.8888888888888888,
+            "recall": 0.9090909090909091
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.927360774818402,
+          "precision": 0.9237262586674706,
+          "recall": 0.9310240048617442
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.875,
+          "precision": 0.8651685393258427,
+          "recall": 0.8850574712643678
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9285714285714286,
+          "precision": 0.896551724137931,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8874172185430463,
+            "precision": 0.864516129032258,
+            "recall": 0.9115646258503401
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.859504132231405,
+            "precision": 0.9454545454545454,
+            "recall": 0.7878787878787878
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9193548387096774,
+            "precision": 0.8636363636363636,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8022598870056498,
+            "precision": 0.7717391304347826,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.896551724137931,
+            "precision": 0.8863636363636364,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8584474885844748,
+            "precision": 0.7966101694915254,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.898876404494382,
+            "precision": 0.8888888888888888,
+            "recall": 0.9090909090909091
+          }
+        }
+      }
+    ],
+    "composite": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9308157099697886,
+          "precision": 0.9255031541003305,
+          "recall": 0.9361896080218779
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8852838933951332,
+          "precision": 0.8925233644859814,
+          "recall": 0.8781609195402299
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8888888888888888,
+          "precision": 0.8888888888888888,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8949152542372881,
+            "precision": 0.8918918918918919,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8976377952755905,
+            "precision": 0.9344262295081968,
+            "recall": 0.8636363636363636
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9655172413793104,
+            "precision": 0.9655172413793104,
+            "recall": 0.9655172413793104
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8,
+            "precision": 0.7777777777777778,
+            "recall": 0.8235294117647058
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8809523809523809,
+            "precision": 0.9024390243902439,
+            "recall": 0.8604651162790697
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8530805687203792,
+            "precision": 0.8181818181818182,
+            "recall": 0.8910891089108911
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9191176470588235,
+            "precision": 0.8928571428571429,
+            "recall": 0.946969696969697
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9291553133514986,
+          "precision": 0.92579185520362,
+          "recall": 0.9325432999088423
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8742791234140715,
+          "precision": 0.8773148148148148,
+          "recall": 0.871264367816092
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8888888888888888,
+          "precision": 0.8888888888888888,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8762541806020067,
+            "precision": 0.8618421052631579,
+            "recall": 0.891156462585034
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8976377952755905,
+            "precision": 0.9344262295081968,
+            "recall": 0.8636363636363636
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9482758620689655,
+            "precision": 0.9482758620689655,
+            "recall": 0.9482758620689655
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7906976744186046,
+            "precision": 0.7816091954022989,
+            "recall": 0.8
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8771929824561403,
+            "precision": 0.8823529411764706,
+            "recall": 0.872093023255814
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8651162790697674,
+            "precision": 0.8157894736842105,
+            "recall": 0.9207920792079208
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9037037037037037,
+            "precision": 0.8840579710144928,
+            "recall": 0.9242424242424242
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9309509388249546,
+          "precision": 0.9278599456685783,
+          "recall": 0.9340625949559405
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8906976744186047,
+          "precision": 0.9011764705882352,
+          "recall": 0.8804597701149425
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9056603773584906,
+          "precision": 0.9230769230769231,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.9010238907849829,
+            "precision": 0.9041095890410958,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.9147286821705426,
+            "precision": 0.9365079365079365,
+            "recall": 0.8939393939393939
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9565217391304348,
+            "precision": 0.9649122807017544,
+            "recall": 0.9482758620689655
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8187134502923976,
+            "precision": 0.813953488372093,
+            "recall": 0.8235294117647058
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8705882352941177,
+            "precision": 0.8809523809523809,
+            "recall": 0.8604651162790697
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8436018957345972,
+            "precision": 0.8090909090909091,
+            "recall": 0.8811881188118812
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.915129151291513,
+            "precision": 0.8920863309352518,
+            "recall": 0.9393939393939394
+          }
+        }
+      }
+    ],
+    "primitives": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9288956127080181,
+          "precision": 0.9249774028321783,
+          "recall": 0.932847158918262
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8761467889908257,
+          "precision": 0.8741418764302059,
+          "recall": 0.8781609195402299
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8679245283018868,
+          "precision": 0.8846153846153846,
+          "recall": 0.8518518518518519
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8851351351351351,
+            "precision": 0.8791946308724832,
+            "recall": 0.891156462585034
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8852459016393442,
+            "precision": 0.9642857142857143,
+            "recall": 0.8181818181818182
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.957983193277311,
+            "precision": 0.9344262295081968,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.797752808988764,
+            "precision": 0.7634408602150538,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8735632183908046,
+            "precision": 0.8636363636363636,
+            "recall": 0.8837209302325582
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8597285067873304,
+            "precision": 0.7916666666666666,
+            "recall": 0.9405940594059405
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9144981412639405,
+            "precision": 0.8978102189781022,
+            "recall": 0.9318181818181818
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9305071915215746,
+          "precision": 0.9272782136391068,
+          "recall": 0.9337587359465208
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8791714614499425,
+          "precision": 0.880184331797235,
+          "recall": 0.8781609195402299
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9090909090909091,
+          "precision": 0.8928571428571429,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.891156462585034,
+            "precision": 0.891156462585034,
+            "recall": 0.891156462585034
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8833333333333333,
+            "precision": 0.9814814814814815,
+            "recall": 0.803030303030303
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9344262295081968,
+            "precision": 0.890625,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7931034482758621,
+            "precision": 0.7752808988764045,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8977272727272727,
+            "precision": 0.8777777777777778,
+            "recall": 0.9186046511627907
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8571428571428571,
+            "precision": 0.8017241379310345,
+            "recall": 0.9207920792079208
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9104477611940298,
+            "precision": 0.8970588235294118,
+            "recall": 0.9242424242424242
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9284525790349417,
+          "precision": 0.9243975903614458,
+          "recall": 0.9325432999088423
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8761467889908257,
+          "precision": 0.8741418764302059,
+          "recall": 0.8781609195402299
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9090909090909091,
+          "precision": 0.8928571428571429,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.882943143812709,
+            "precision": 0.868421052631579,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8571428571428571,
+            "precision": 0.9622641509433962,
+            "recall": 0.7727272727272727
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9344262295081968,
+            "precision": 0.890625,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.797752808988764,
+            "precision": 0.7634408602150538,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.9069767441860465,
+            "precision": 0.9069767441860465,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8715596330275229,
+            "precision": 0.811965811965812,
+            "recall": 0.9405940594059405
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9070631970260223,
+            "precision": 0.8905109489051095,
+            "recall": 0.9242424242424242
+          }
+        }
+      }
+    ],
+    "all_no_coverage": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9309718437783833,
+          "precision": 0.9276018099547512,
+          "recall": 0.9343664539653601
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8793503480278422,
+          "precision": 0.8875878220140515,
+          "recall": 0.871264367816092
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9285714285714286,
+          "precision": 0.896551724137931,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8934707903780069,
+            "precision": 0.9027777777777778,
+            "recall": 0.8843537414965986
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8780487804878049,
+            "precision": 0.9473684210526315,
+            "recall": 0.8181818181818182
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9655172413793104,
+            "precision": 0.9655172413793104,
+            "recall": 0.9655172413793104
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7885714285714286,
+            "precision": 0.7666666666666667,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8850574712643678,
+            "precision": 0.875,
+            "recall": 0.8953488372093024
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8636363636363636,
+            "precision": 0.7983193277310925,
+            "recall": 0.9405940594059405
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.915129151291513,
+            "precision": 0.8920863309352518,
+            "recall": 0.9393939393939394
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9288956127080181,
+          "precision": 0.9249774028321783,
+          "recall": 0.932847158918262
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8799076212471132,
+          "precision": 0.8839907192575406,
+          "recall": 0.8758620689655172
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8888888888888888,
+          "precision": 0.8888888888888888,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8979591836734694,
+            "precision": 0.8979591836734694,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.859504132231405,
+            "precision": 0.9454545454545454,
+            "recall": 0.7878787878787878
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.957983193277311,
+            "precision": 0.9344262295081968,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7771428571428571,
+            "precision": 0.7555555555555555,
+            "recall": 0.8
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.9080459770114943,
+            "precision": 0.8977272727272727,
+            "recall": 0.9186046511627907
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8558558558558559,
+            "precision": 0.7851239669421488,
+            "recall": 0.9405940594059405
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.898876404494382,
+            "precision": 0.8888888888888888,
+            "recall": 0.9090909090909091
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9306122448979591,
+          "precision": 0.9259927797833934,
+          "recall": 0.935278030993619
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8796296296296297,
+          "precision": 0.8857808857808858,
+          "recall": 0.8735632183908046
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9122807017543859,
+          "precision": 0.8666666666666667,
+          "recall": 0.9629629629629629
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8949152542372881,
+            "precision": 0.8918918918918919,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.85,
+            "precision": 0.9444444444444444,
+            "recall": 0.7727272727272727
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.95,
+            "precision": 0.9193548387096774,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7976878612716763,
+            "precision": 0.7840909090909091,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.896551724137931,
+            "precision": 0.8863636363636364,
+            "recall": 0.9069767441860465
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8623853211009175,
+            "precision": 0.8034188034188035,
+            "recall": 0.9306930693069307
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9144981412639405,
+            "precision": 0.8978102189781022,
+            "recall": 0.9318181818181818
+          }
+        }
+      }
+    ],
+    "all": [
+      {
+        "seed": 42,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9300361881785284,
+          "precision": 0.9230769230769231,
+          "recall": 0.9371011850501367
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8891428571428571,
+          "precision": 0.884090909090909,
+          "recall": 0.8942528735632184
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.9090909090909091,
+          "precision": 0.8928571428571429,
+          "recall": 0.9259259259259259
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8963210702341137,
+            "precision": 0.881578947368421,
+            "recall": 0.9115646258503401
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.890625,
+            "precision": 0.9193548387096774,
+            "recall": 0.8636363636363636
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9661016949152542,
+            "precision": 0.95,
+            "recall": 0.9827586206896551
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8044692737430168,
+            "precision": 0.7659574468085106,
+            "recall": 0.8470588235294118
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8941176470588236,
+            "precision": 0.9047619047619048,
+            "recall": 0.8837209302325582
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8679245283018868,
+            "precision": 0.8288288288288288,
+            "recall": 0.9108910891089109
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9191176470588235,
+            "precision": 0.8928571428571429,
+            "recall": 0.946969696969697
+          }
+        }
+      },
+      {
+        "seed": 73,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9313577260356819,
+          "precision": 0.9268733072524827,
+          "recall": 0.9358857490124582
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8865740740740741,
+          "precision": 0.8927738927738927,
+          "recall": 0.8804597701149425
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8727272727272727,
+          "precision": 0.8571428571428571,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8918918918918919,
+            "precision": 0.8859060402684564,
+            "recall": 0.8979591836734694
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.9047619047619048,
+            "precision": 0.95,
+            "recall": 0.8636363636363636
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9482758620689655,
+            "precision": 0.9482758620689655,
+            "recall": 0.9482758620689655
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.7976878612716763,
+            "precision": 0.7840909090909091,
+            "recall": 0.8117647058823529
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.8953488372093024,
+            "precision": 0.8953488372093024,
+            "recall": 0.8953488372093024
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.863849765258216,
+            "precision": 0.8214285714285714,
+            "recall": 0.9108910891089109
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9104477611940298,
+            "precision": 0.8970588235294118,
+            "recall": 0.9242424242424242
+          }
+        }
+      },
+      {
+        "seed": 999,
+        "global": {
+          "n": 5428,
+          "positive": 3291,
+          "f1": 0.9311336461328894,
+          "precision": 0.9276236429433052,
+          "recall": 0.9346703129747796
+        },
+        "comparable": {
+          "n": 809,
+          "positive": 435,
+          "f1": 0.8883774453394706,
+          "precision": 0.8894009216589862,
+          "recall": 0.8873563218390804
+        },
+        "informative": {
+          "n": 46,
+          "positive": 27,
+          "f1": 0.8727272727272727,
+          "precision": 0.8571428571428571,
+          "recall": 0.8888888888888888
+        },
+        "per_dataset": {
+          "au_sydney_roads": {
+            "n": 226,
+            "positive": 147,
+            "f1": 0.8956228956228957,
+            "precision": 0.8866666666666667,
+            "recall": 0.9047619047619048
+          },
+          "fi_helsinki_roads": {
+            "n": 84,
+            "positive": 66,
+            "f1": 0.8976377952755905,
+            "precision": 0.9344262295081968,
+            "recall": 0.8636363636363636
+          },
+          "gb_london_roads": {
+            "n": 201,
+            "positive": 58,
+            "f1": 0.9565217391304348,
+            "precision": 0.9649122807017544,
+            "recall": 0.9482758620689655
+          },
+          "hk_hongkong_roads": {
+            "n": 208,
+            "positive": 85,
+            "f1": 0.8022598870056498,
+            "precision": 0.7717391304347826,
+            "recall": 0.8352941176470589
+          },
+          "de_berlin_roads": {
+            "n": 121,
+            "positive": 86,
+            "f1": 0.9005847953216374,
+            "precision": 0.9058823529411765,
+            "recall": 0.8953488372093024
+          },
+          "nl_amsterdam_roads": {
+            "n": 199,
+            "positive": 101,
+            "f1": 0.8490566037735849,
+            "precision": 0.8108108108108109,
+            "recall": 0.8910891089108911
+          },
+          "us_utah_slc_roads": {
+            "n": 200,
+            "positive": 132,
+            "f1": 0.9185185185185185,
+            "precision": 0.8985507246376812,
+            "recall": 0.9393939393939394
+          }
+        }
+      }
+    ]
+  },
+  "manual_review_queue": [
+    {
+      "dataset": "gb_london_roads",
+      "gers_id": "95cbd72f-1895-4b19-a2e0-df1b0d74d442",
+      "target_id": "gb_london_1346FB30-7E8C-4862-BDC9-58A6FC4AB20F_88194e65e3",
+      "label": "match",
+      "original_confidence": 0.9797296524,
+      "physical_ref_name": "",
+      "physical_target_name": "",
+      "physical_target_domains": "is_tunnel",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": 0.024487655415034948,
+      "physical_flag_positive_match": 0.975512344584965,
+      "vertical_nonzero_fraction_delta": null,
+      "vertical_sign_delta": null,
+      "vertical_positive_match": null,
+      "physical_structure_conflict": 0.024487655415034948,
+      "physical_positive_match": 0.975512344584965,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.7728946606318156,
+      "physical_oof_probability": 0.49712281425793964,
+      "probability_delta": -0.2757718463738759,
+      "abs_probability_delta": 0.2757718463738759,
+      "category": "possible_physical_overreach"
+    },
+    {
+      "dataset": "de_berlin_roads",
+      "gers_id": "329121a0-7d0b-48ff-8e6d-df05c8913915",
+      "target_id": "de_berlin_34355_881f1d4895",
+      "label": "match",
+      "original_confidence": 0.6252185106,
+      "physical_ref_name": "Karl-Liebknecht-Straße",
+      "physical_target_name": "Karl-Liebknecht-Straße",
+      "physical_target_domains": "level",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": null,
+      "physical_flag_positive_match": null,
+      "vertical_nonzero_fraction_delta": 0.04884416127923548,
+      "vertical_sign_delta": 0.02442208063961774,
+      "vertical_positive_match": 0.0,
+      "physical_structure_conflict": 0.04884416127923548,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.6269393364588419,
+      "physical_oof_probability": 0.3798958659172058,
+      "probability_delta": -0.2470434705416361,
+      "abs_probability_delta": 0.2470434705416361,
+      "category": "possible_physical_overreach"
+    },
+    {
+      "dataset": "fi_helsinki_roads",
+      "gers_id": "60ccd4fa-9676-49d6-af3e-b1b8360aa2f2",
+      "target_id": "hel_road_32ecbf16-7bdf-4aad-bb35-f7cad00ce8b6:3_881126d08d",
+      "label": "match",
+      "original_confidence": 0.6098835468,
+      "physical_ref_name": "",
+      "physical_target_name": "Seppämestarintie",
+      "physical_target_domains": "is_bridge,is_tunnel,level",
+      "bridge_fraction_delta": 0.17537646751780755,
+      "tunnel_fraction_delta": 0.0,
+      "physical_flag_positive_match": 0.8246235324821924,
+      "vertical_nonzero_fraction_delta": 0.17537646751780755,
+      "vertical_sign_delta": 0.08768823375890378,
+      "vertical_positive_match": 0.8246235324821924,
+      "physical_structure_conflict": 0.17537646751780755,
+      "physical_positive_match": 0.8246235324821924,
+      "physical_comparable_count": 3.0,
+      "baseline_oof_probability": 0.361853023370107,
+      "physical_oof_probability": 0.602197508017222,
+      "probability_delta": 0.24034448464711505,
+      "abs_probability_delta": 0.24034448464711505,
+      "category": "informative"
+    },
+    {
+      "dataset": "de_berlin_roads",
+      "gers_id": "10a76665-5209-4e95-89ab-4fce137d60a1",
+      "target_id": "de_berlin_410_881f1d488d",
+      "label": "match",
+      "original_confidence": 0.556620717,
+      "physical_ref_name": "",
+      "physical_target_name": "Alt-Moabit",
+      "physical_target_domains": "level",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": null,
+      "physical_flag_positive_match": null,
+      "vertical_nonzero_fraction_delta": 0.5372630171067276,
+      "vertical_sign_delta": 0.2686315085533638,
+      "vertical_positive_match": 0.0,
+      "physical_structure_conflict": 0.5372630171067276,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.6648816466331482,
+      "physical_oof_probability": 0.49177836378415424,
+      "probability_delta": -0.17310328284899396,
+      "abs_probability_delta": 0.17310328284899396,
+      "category": "possible_physical_overreach"
+    },
+    {
+      "dataset": "hk_hongkong_roads",
+      "gers_id": "a1b3e53e-7cce-42af-ac90-7129f44f382b",
+      "target_id": "hk_hongkong_118642_88411ca235",
+      "label": "match",
+      "original_confidence": 0.5221204758,
+      "physical_ref_name": "",
+      "physical_target_name": "KONG SHAM WESTERN HIGHWAY",
+      "physical_target_domains": "level",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": null,
+      "physical_flag_positive_match": null,
+      "vertical_nonzero_fraction_delta": 1.0,
+      "vertical_sign_delta": 0.5,
+      "vertical_positive_match": 0.0,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.7987046639124552,
+      "physical_oof_probability": 0.6680112878481547,
+      "probability_delta": -0.13069337606430054,
+      "abs_probability_delta": 0.13069337606430054,
+      "category": "high_baseline_despite_physical_conflict"
+    },
+    {
+      "dataset": "hk_hongkong_roads",
+      "gers_id": "8c9e97ea-a9d9-43c2-91f7-ba87f4f5474d",
+      "target_id": "hk_hongkong_58537_88411cb10b",
+      "label": "match",
+      "original_confidence": 0.6132988334,
+      "physical_ref_name": "青荃路 Tsing Tsuen Road",
+      "physical_target_name": "TSING TSUEN ROAD",
+      "physical_target_domains": "level",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": null,
+      "physical_flag_positive_match": null,
+      "vertical_nonzero_fraction_delta": 0.0,
+      "vertical_sign_delta": 0.0,
+      "vertical_positive_match": 1.0,
+      "physical_structure_conflict": 0.0,
+      "physical_positive_match": 1.0,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.9255364139874777,
+      "physical_oof_probability": 0.8083710869153341,
+      "probability_delta": -0.11716532707214355,
+      "abs_probability_delta": 0.11716532707214355,
+      "category": "informative"
+    },
+    {
+      "dataset": "au_sydney_roads",
+      "gers_id": "47581368-3e9f-4929-af80-739cd793bcca",
+      "target_id": "au_sydney_1049668_88be0e3435",
+      "label": "no_match",
+      "original_confidence": 0.1436731368,
+      "physical_ref_name": "",
+      "physical_target_name": "CROSS CITY TUNNEL",
+      "physical_target_domains": "is_bridge,is_tunnel",
+      "bridge_fraction_delta": 0.0,
+      "tunnel_fraction_delta": 1.0,
+      "physical_flag_positive_match": 0.0,
+      "vertical_nonzero_fraction_delta": null,
+      "vertical_sign_delta": null,
+      "vertical_positive_match": null,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 2.0,
+      "baseline_oof_probability": 0.49186475078264874,
+      "physical_oof_probability": 0.6017004450162252,
+      "probability_delta": 0.10983569423357648,
+      "abs_probability_delta": 0.10983569423357648,
+      "category": "informative"
+    },
+    {
+      "dataset": "fi_helsinki_roads",
+      "gers_id": "d44b1645-24fe-4938-9099-1180cd3f4ed0",
+      "target_id": "hel_road_ed128684-83fe-4e51-b35d-fbaa816ada5c:3_880899690b",
+      "label": "match",
+      "original_confidence": 0.6115993857,
+      "physical_ref_name": "",
+      "physical_target_name": "",
+      "physical_target_domains": "is_bridge,is_tunnel,level",
+      "bridge_fraction_delta": 0.0,
+      "tunnel_fraction_delta": 0.0,
+      "physical_flag_positive_match": 0.0,
+      "vertical_nonzero_fraction_delta": 1.0,
+      "vertical_sign_delta": 0.5,
+      "vertical_positive_match": 0.0,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 3.0,
+      "baseline_oof_probability": 0.625734289487203,
+      "physical_oof_probability": 0.7336054642995199,
+      "probability_delta": 0.1078711748123169,
+      "abs_probability_delta": 0.1078711748123169,
+      "category": "informative"
+    },
+    {
+      "dataset": "hk_hongkong_roads",
+      "gers_id": "9db4de83-8a91-412a-a26d-d2b061414041",
+      "target_id": "hk_hongkong_2069_88410349b7",
+      "label": "no_match",
+      "original_confidence": 0.193016991,
+      "physical_ref_name": "林士街天橋 Rumsey Street Flyover",
+      "physical_target_name": "CONNAUGHT ROAD CENTRAL",
+      "physical_target_domains": "level",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": null,
+      "physical_flag_positive_match": null,
+      "vertical_nonzero_fraction_delta": 1.0,
+      "vertical_sign_delta": 0.5,
+      "vertical_positive_match": 0.0,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.3597032427787781,
+      "physical_oof_probability": 0.463265061378479,
+      "probability_delta": 0.10356181859970093,
+      "abs_probability_delta": 0.10356181859970093,
+      "category": "informative"
+    },
+    {
+      "dataset": "fi_helsinki_roads",
+      "gers_id": "40c40d03-9c4a-4425-8df0-4d996736b28b",
+      "target_id": "hel_road_6a167c49-b036-4c43-91e2-702083e395b6:4_881126d2e3",
+      "label": "match",
+      "original_confidence": 0.626039803,
+      "physical_ref_name": "",
+      "physical_target_name": "",
+      "physical_target_domains": "is_bridge,is_tunnel,level",
+      "bridge_fraction_delta": 0.0,
+      "tunnel_fraction_delta": 0.0,
+      "physical_flag_positive_match": 0.0,
+      "vertical_nonzero_fraction_delta": 1.0,
+      "vertical_sign_delta": 0.5,
+      "vertical_positive_match": 0.0,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 3.0,
+      "baseline_oof_probability": 0.5237178107102712,
+      "physical_oof_probability": 0.6207027236620585,
+      "probability_delta": 0.09698491295178724,
+      "abs_probability_delta": 0.09698491295178724,
+      "category": "informative"
+    },
+    {
+      "dataset": "de_berlin_roads",
+      "gers_id": "6e2c9a98-5d9c-4430-82c3-7cebe53f5396",
+      "target_id": "de_berlin_299262_881f1d4895",
+      "label": "match",
+      "original_confidence": 0.6239750385,
+      "physical_ref_name": "Karl-Liebknecht-Straße",
+      "physical_target_name": "Karl-Liebknecht-Straße",
+      "physical_target_domains": "level",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": null,
+      "physical_flag_positive_match": null,
+      "vertical_nonzero_fraction_delta": 1.0,
+      "vertical_sign_delta": 0.5,
+      "vertical_positive_match": 0.0,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.8534820675849915,
+      "physical_oof_probability": 0.76243523756663,
+      "probability_delta": -0.09104683001836145,
+      "abs_probability_delta": 0.09104683001836145,
+      "category": "high_baseline_despite_physical_conflict"
+    },
+    {
+      "dataset": "au_sydney_roads",
+      "gers_id": "b637f286-3ebf-481a-a5ff-a60349ac9406",
+      "target_id": "au_sydney_1074308_88be0e3437",
+      "label": "no_match",
+      "original_confidence": 0.1863608062,
+      "physical_ref_name": "Western Distributor Onramp",
+      "physical_target_name": "CROSS CITY TUNNEL",
+      "physical_target_domains": "is_bridge,is_tunnel",
+      "bridge_fraction_delta": 0.0,
+      "tunnel_fraction_delta": 0.0,
+      "physical_flag_positive_match": 1.0,
+      "vertical_nonzero_fraction_delta": null,
+      "vertical_sign_delta": null,
+      "vertical_positive_match": null,
+      "physical_structure_conflict": 0.0,
+      "physical_positive_match": 1.0,
+      "physical_comparable_count": 2.0,
+      "baseline_oof_probability": 0.6351204911867777,
+      "physical_oof_probability": 0.7247981627782186,
+      "probability_delta": 0.08967767159144091,
+      "abs_probability_delta": 0.08967767159144091,
+      "category": "informative"
+    },
+    {
+      "dataset": "de_berlin_roads",
+      "gers_id": "38d55541-1200-4fee-893f-325c1c3cd0a5",
+      "target_id": "de_berlin_22680_881f1d49c5",
+      "label": "match",
+      "original_confidence": 0.7495439649,
+      "physical_ref_name": "Trabener Steg",
+      "physical_target_name": "Halenseepark",
+      "physical_target_domains": "level",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": null,
+      "physical_flag_positive_match": null,
+      "vertical_nonzero_fraction_delta": 0.38298241456483806,
+      "vertical_sign_delta": 0.19149120728241903,
+      "vertical_positive_match": 0.0,
+      "physical_structure_conflict": 0.38298241456483806,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.7158920367558798,
+      "physical_oof_probability": 0.6436483462651571,
+      "probability_delta": -0.07224369049072266,
+      "abs_probability_delta": 0.07224369049072266,
+      "category": "informative"
+    },
+    {
+      "dataset": "de_berlin_roads",
+      "gers_id": "22c6fa27-46bc-4b40-89f4-803bb4656e74",
+      "target_id": "de_berlin_7878_881f18b219",
+      "label": "match",
+      "original_confidence": 0.6247391105,
+      "physical_ref_name": "",
+      "physical_target_name": "Karl-Marx-Straße",
+      "physical_target_domains": "level",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": null,
+      "physical_flag_positive_match": null,
+      "vertical_nonzero_fraction_delta": 1.0,
+      "vertical_sign_delta": 0.5,
+      "vertical_positive_match": 0.0,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.8055587808291117,
+      "physical_oof_probability": 0.7405843536059061,
+      "probability_delta": -0.06497442722320557,
+      "abs_probability_delta": 0.06497442722320557,
+      "category": "high_baseline_despite_physical_conflict"
+    },
+    {
+      "dataset": "gb_london_roads",
+      "gers_id": "e5b3e829-d6c4-4439-9b3c-3359997f4eb4",
+      "target_id": "gb_london_266E2CA7-EE39-4907-92E6-39CEAE0FC2B8_88194ad339",
+      "label": "match",
+      "original_confidence": 0.6929049492,
+      "physical_ref_name": "Blue Lion Place",
+      "physical_target_name": "Bluelion Place",
+      "physical_target_domains": "is_tunnel",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": 1.0,
+      "physical_flag_positive_match": 0.0,
+      "vertical_nonzero_fraction_delta": null,
+      "vertical_sign_delta": null,
+      "vertical_positive_match": null,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.8989758491516113,
+      "physical_oof_probability": 0.8711488246917725,
+      "probability_delta": -0.027827024459838867,
+      "abs_probability_delta": 0.027827024459838867,
+      "category": "high_baseline_despite_physical_conflict"
+    },
+    {
+      "dataset": "au_sydney_roads",
+      "gers_id": "8fd290c4-4467-483f-a458-4a17ebe5498d",
+      "target_id": "au_sydney_2539336_88be08d8b3",
+      "label": "match",
+      "original_confidence": 0.645096302,
+      "physical_ref_name": "",
+      "physical_target_name": "",
+      "physical_target_domains": "is_bridge,is_tunnel",
+      "bridge_fraction_delta": 0.7833631,
+      "tunnel_fraction_delta": 0.0,
+      "physical_flag_positive_match": 0.21663690000000002,
+      "vertical_nonzero_fraction_delta": null,
+      "vertical_sign_delta": null,
+      "vertical_positive_match": null,
+      "physical_structure_conflict": 0.7833631,
+      "physical_positive_match": 0.21663690000000002,
+      "physical_comparable_count": 2.0,
+      "baseline_oof_probability": 0.9654260079065958,
+      "physical_oof_probability": 0.9426970680554708,
+      "probability_delta": -0.022728939851125007,
+      "abs_probability_delta": 0.022728939851125007,
+      "category": "high_baseline_despite_physical_conflict"
+    },
+    {
+      "dataset": "hk_hongkong_roads",
+      "gers_id": "153d4950-aef5-4582-a530-b546ea27d415",
+      "target_id": "hk_hongkong_9324_88411cb323",
+      "label": "no_match",
+      "original_confidence": 0.07904651761,
+      "physical_ref_name": "蝴蝶谷交匯處 Butterfly Valley Interchange",
+      "physical_target_name": "",
+      "physical_target_domains": "level",
+      "bridge_fraction_delta": null,
+      "tunnel_fraction_delta": null,
+      "physical_flag_positive_match": null,
+      "vertical_nonzero_fraction_delta": 1.0,
+      "vertical_sign_delta": 0.5,
+      "vertical_positive_match": 0.0,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 1.0,
+      "baseline_oof_probability": 0.5179956257343292,
+      "physical_oof_probability": 0.4986342092355092,
+      "probability_delta": -0.019361416498820005,
+      "abs_probability_delta": 0.019361416498820005,
+      "category": "physical_variant_corrects_false_positive"
+    },
+    {
+      "dataset": "au_sydney_roads",
+      "gers_id": "0cfc992b-c5ab-4c9d-9ab1-3cae3f7d870a",
+      "target_id": "au_sydney_399888_88be0e2051",
+      "label": "match",
+      "original_confidence": 0.7496164441,
+      "physical_ref_name": "Harbord Road",
+      "physical_target_name": "HARBORD",
+      "physical_target_domains": "is_bridge,is_tunnel",
+      "bridge_fraction_delta": 1.0,
+      "tunnel_fraction_delta": 0.0,
+      "physical_flag_positive_match": 0.0,
+      "vertical_nonzero_fraction_delta": null,
+      "vertical_sign_delta": null,
+      "vertical_positive_match": null,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 2.0,
+      "baseline_oof_probability": 0.978551983833313,
+      "physical_oof_probability": 0.9788786172866821,
+      "probability_delta": 0.0003266334533691406,
+      "abs_probability_delta": 0.0003266334533691406,
+      "category": "high_baseline_despite_physical_conflict"
+    },
+    {
+      "dataset": "au_sydney_roads",
+      "gers_id": "9b094f7c-3ecf-4bf3-b414-8911cb10ebc0",
+      "target_id": "au_sydney_453037_88be0e24d1",
+      "label": "match",
+      "original_confidence": 0.7497617602,
+      "physical_ref_name": "Windsor Road",
+      "physical_target_name": "WINDSOR",
+      "physical_target_domains": "is_bridge,is_tunnel",
+      "bridge_fraction_delta": 1.0,
+      "tunnel_fraction_delta": 0.0,
+      "physical_flag_positive_match": 0.0,
+      "vertical_nonzero_fraction_delta": null,
+      "vertical_sign_delta": null,
+      "vertical_positive_match": null,
+      "physical_structure_conflict": 1.0,
+      "physical_positive_match": 0.0,
+      "physical_comparable_count": 2.0,
+      "baseline_oof_probability": 0.996086835861206,
+      "physical_oof_probability": 0.9962003032366434,
+      "probability_delta": 0.00011346737543738161,
+      "abs_probability_delta": 0.00011346737543738161,
+      "category": "high_baseline_despite_physical_conflict"
+    }
+  ]
+}

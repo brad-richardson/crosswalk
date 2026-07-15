@@ -68,6 +68,18 @@ def test_physical_summary_uses_aligned_range_for_partial_flags() -> None:
     ) == ""
 
 
+def test_physical_summary_preserves_covered_and_indoor_flags() -> None:
+    physical = {
+        "road_flags_lr": [
+            {"between": [0.0, 0.5], "value": ["is_covered"]},
+            {"between": [0.5, 1.0], "value": ["is_indoor"]},
+        ]
+    }
+
+    assert summarize_physical(physical) == "covered (partial); indoor (partial)"
+    assert physical_is_informative(physical) is True
+
+
 def _mr(ref: str, target: str, target_idx: int, ref_range: tuple[float, float]) -> MatchResult:
     return MatchResult(
         ref_id=ref,

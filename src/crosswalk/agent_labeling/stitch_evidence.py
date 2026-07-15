@@ -774,7 +774,10 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("  'corr T#' compares targets with targets. R0 and T0 are independent labels and")
     lines.append("  do not assert cross-side identity. Use corridor context only after judging")
     lines.append("  whether the two segments represent the same traveled way.")
-    lines.append("- 'R physical' / 'T physical' reports bridge, tunnel, and vertical layer rules")
+    lines.append(
+        "- 'R physical' / 'T physical' reports bridge, tunnel, covered/indoor, and"
+    )
+    lines.append("  vertical layer rules")
     lines.append("  clipped to that edge's own aligned fractions. Segment details retain the full")
     lines.append("  linear-referenced rules. Missing physical evidence means unknown, not ground;")
     lines.append("  road flags are positive observations, so an absent flag is not proof that the")

@@ -170,7 +170,7 @@ def clip_physical_attributes(
 
 
 def summarize_physical(physical: dict[str, Any] | None) -> str:
-    """Compact human-readable bridge/tunnel/layer summary."""
+    """Compact human-readable bridge/tunnel/covered/indoor/layer summary."""
     if not physical:
         return ""
     parts: list[str] = []
@@ -195,7 +195,12 @@ def summarize_physical(physical: dict[str, Any] | None) -> str:
             total_start = min(float(r["between"][0]) for r in flag_rules)
             total_end = max(float(r["between"][1]) for r in flag_rules)
             total = max(total_end - total_start, 0.0)
-        for flag, label in (("is_bridge", "bridge"), ("is_tunnel", "tunnel")):
+        for flag, label in (
+            ("is_bridge", "bridge"),
+            ("is_tunnel", "tunnel"),
+            ("is_covered", "covered"),
+            ("is_indoor", "indoor"),
+        ):
             coverage = sum(
                 float(r["between"][1]) - float(r["between"][0])
                 for r in flag_rules
@@ -211,7 +216,7 @@ def summarize_physical(physical: dict[str, Any] | None) -> str:
 
 
 def physical_is_informative(physical: dict[str, Any] | None) -> bool:
-    """Whether a block contains a non-ground layer change, bridge, or tunnel."""
+    """Whether a block contains a non-ground layer or positive physical flag."""
     if not physical:
         return False
     levels = normalize_lr_rules(physical.get("level_lr"))
@@ -227,5 +232,5 @@ def physical_is_informative(physical: dict[str, Any] | None) -> bool:
     return any(
         flag in rule["value"]
         for rule in normalize_lr_rules(physical.get("road_flags_lr"), flags=True)
-        for flag in ("is_bridge", "is_tunnel")
+        for flag in ("is_bridge", "is_tunnel", "is_covered", "is_indoor")
     )
