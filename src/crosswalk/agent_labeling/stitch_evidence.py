@@ -40,6 +40,7 @@ from ..matching.sliver import (
     group_segment_lengths_m,
 )
 from ..matching.stitch_options import build_stitch_options
+from ..utils.physical import summarize_physical
 from .image_renderer import (
     BACKGROUND_COLOR,
     MIN_IMAGE_SIZE,
@@ -89,7 +90,7 @@ MAX_ZOOM_CROPS = 6
 _STRUCT_KEYS = (
     "degree_ref",
     "degree_tgt",
-    "is_bridge",
+    "candidate_graph_bridge",
     "biconnected_block",
     "corridor_ref",
     "corridor_tgt",
@@ -100,6 +101,8 @@ _STRUCT_KEYS = (
     "decision_reason",
     "pruned",
     "selected_elsewhere",
+    "ref_physical",
+    "target_physical",
 )
 
 # Group-level #267 structural summary fields (surfaced compactly, missing omitted).
@@ -404,6 +407,8 @@ def build_metadata(group: dict, options_ctx: dict, *, evidence: dict | None = No
     target_names = group.get("target_names", {})
     ref_classes = group.get("ref_classes", {})
     target_classes = group.get("target_classes", {})
+    ref_physical = group.get("ref_physical", {})
+    target_physical = group.get("target_physical", {})
 
     # Per-edge junction-sliver flags (hybrid fraction + absolute-meters rule).
     # Slivers are ANNOTATED here, never silently dropped: an option may legitimately
@@ -488,6 +493,7 @@ def build_metadata(group: dict, options_ctx: dict, *, evidence: dict | None = No
                     "id": rid,
                     "name": ref_names.get(rid, ""),
                     "class": ref_classes.get(rid, ""),
+                    "physical": ref_physical.get(rid, {}),
                 }
                 for rid in ref_ids
             ],
@@ -497,6 +503,7 @@ def build_metadata(group: dict, options_ctx: dict, *, evidence: dict | None = No
                     "id": tid,
                     "name": target_names.get(tid, ""),
                     "class": target_classes.get(tid, ""),
+                    "physical": target_physical.get(tid, {}),
                 }
                 for tid in target_ids
             ],
@@ -509,7 +516,7 @@ def build_metadata(group: dict, options_ctx: dict, *, evidence: dict | None = No
 
 
 def _edge_struct_str(e: dict) -> str:
-    """Compact per-edge structural line, e.g. ``deg R3/T2, bridge, corr R0/T0``.
+    """Compact per-edge graph + aligned physical evidence line.
 
     Only includes fields present on the edge (older sidecars omit some/all).
     """
@@ -517,11 +524,19 @@ def _edge_struct_str(e: dict) -> str:
     dr, dt = e.get("degree_ref"), e.get("degree_tgt")
     if dr is not None or dt is not None:
         parts.append(f"deg R{dr if dr is not None else '?'}/T{dt if dt is not None else '?'}")
-    if e.get("is_bridge"):
-        parts.append("bridge")
+    if e.get("candidate_graph_bridge") or (
+        "candidate_graph_bridge" not in e and e.get("is_bridge")
+    ):
+        parts.append("candidate-graph cut edge")
     cr, ct = e.get("corridor_ref"), e.get("corridor_tgt")
     if cr is not None or ct is not None:
         parts.append(f"corr R{cr if cr is not None else '?'}/T{ct if ct is not None else '?'}")
+    ref_physical = summarize_physical(e.get("ref_physical"))
+    target_physical = summarize_physical(e.get("target_physical"))
+    if ref_physical:
+        parts.append(f"R physical: {ref_physical}")
+    if target_physical:
+        parts.append(f"T physical: {target_physical}")
     return ", ".join(parts)
 
 
@@ -753,10 +768,17 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("  facts, not verdicts, and favor neither including nor excluding an edge):")
     lines.append("  'deg R#/T#' is how many road segments meet at that edge's ref/target endpoint")
     lines.append("  (a high degree is a busy junction; degree ~2 is a simple continuation);")
-    lines.append("  'bridge' marks an edge whose removal would split the group's graph; 'corr")
-    lines.append("  R#/T#' names the corridor (continuous through-road) each side belongs to, so")
-    lines.append("  two segments sharing a corridor tend to be one physical through-route. Use")
-    lines.append("  these to reason about continuation vs junction-kiss, not as a rule by itself.")
+    lines.append("  'candidate-graph cut edge' means removing that candidate would split the")
+    lines.append("  bipartite candidate graph. It is graph theory, NOT a claim that either road")
+    lines.append("  is a physical bridge. 'corr R#' compares reference segments with references;")
+    lines.append("  'corr T#' compares targets with targets. R0 and T0 are independent labels and")
+    lines.append("  do not assert cross-side identity. Use corridor context only after judging")
+    lines.append("  whether the two segments represent the same traveled way.")
+    lines.append("- 'R physical' / 'T physical' reports bridge, tunnel, and vertical layer rules")
+    lines.append("  clipped to that edge's own aligned fractions. Segment details retain the full")
+    lines.append("  linear-referenced rules. Missing physical evidence means unknown, not ground;")
+    lines.append("  road flags are positive observations, so an absent flag is not proof that the")
+    lines.append("  provider surveyed that attribute.")
     lines.append("- The optimizer's own proposed option is labeled below; it is often but not")
     lines.append(
         "  always correct. Judge from the geometry, not from which one is the optimizer's."
@@ -833,11 +855,17 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
         else:
             lines.append("    edges: (none)")
     lines.append("")
-    lines.append("SEGMENTS (name / class):")
+    lines.append("SEGMENTS (name / class / segment-wide physical evidence):")
     for s in metadata["segments"]["reference"]:
-        lines.append(f"  {s['label']}: name='{s['name']}' class='{s['class']}'")
+        physical = summarize_physical(s.get("physical")) or "unknown"
+        lines.append(
+            f"  {s['label']}: name='{s['name']}' class='{s['class']}' physical='{physical}'"
+        )
     for s in metadata["segments"]["target"]:
-        lines.append(f"  {s['label']}: name='{s['name']}' class='{s['class']}'")
+        physical = summarize_physical(s.get("physical")) or "unknown"
+        lines.append(
+            f"  {s['label']}: name='{s['name']}' class='{s['class']}' physical='{physical}'"
+        )
     lines.append("")
     lines.append("Look at overview.png first, then each option image. Then respond with ONLY a")
     lines.append("single JSON object (no prose, no markdown fence) of the form:")

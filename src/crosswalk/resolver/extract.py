@@ -102,6 +102,7 @@ STRUCTURAL_OVERLAP_TO_ENRICH = {
     "degree_ref",
     "degree_tgt",
     "is_bridge",
+    "candidate_graph_bridge",
     "is_sliver",
     "biconnected_block",
     "corridor_ref",
@@ -638,7 +639,9 @@ def _edge_row(
         "confidence": float(edge.get("confidence", float("nan"))),
         "degree_ref": int(edge.get("degree_ref", 0)),
         "degree_tgt": int(edge.get("degree_tgt", 0)),
-        "is_bridge": bool(edge.get("is_bridge", False)),
+        "is_bridge": bool(
+            edge.get("candidate_graph_bridge", edge.get("is_bridge", False))
+        ),
         "is_sliver": bool(edge.get("is_sliver", False)),
         "biconnected_block": int(edge.get("biconnected_block", -1)),
         "corridor_ref": int(edge.get("corridor_ref", -1)),

@@ -350,3 +350,37 @@ For future diagnostic evaluations, the UI should offer an optional exact-pair
 adjudication mode after membership is chosen. This is especially valuable for
 frontage, braided, and layered networks. The existing v7 labels remain valid
 membership truth; they simply should not be reported as pair-level exactness.
+
+### Physical-evidence follow-up (implemented 2026-07-15)
+
+The evidence contract now makes the graph/physical distinction explicit:
+
+- New groups write `candidate_graph_bridge`; old `is_bridge` sidecars remain
+  readable, but agent and human evidence canonicalizes the old field to the new
+  name and calls it a candidate-graph cut edge.
+- Segment metadata retains the complete `level_lr` and `road_flags_lr` rule
+  lists. Each candidate edge separately carries those rules clipped to its own
+  GERS and target alignment fractions. This prevents a bridge or layer change
+  on an unaligned part of a long segment from contaminating the reviewed edge.
+- Missing target attributes now remain unknown. The fetch fallback no longer
+  invents `level=0` and empty flags when a source supplied neither field.
+- The evidence prompt clarifies that reference (`R#`) and target (`T#`)
+  corridor numbers are side-local labels; equal numbers do not assert identity.
+
+The retained `source_tags` in the current local target snapshots exposed seven
+usable mappings:
+
+| Dataset | Source field | Locally observed physical rows |
+| --- | --- | ---: |
+| Sydney roads | `roadontype` | 2,356 bridge; 348 tunnel |
+| Helsinki/Digiroad | `silta_alik` | 4,359 bridge; 85 explicit tunnel, plus signed underpass levels |
+| London/OS Open Roads | `road_structure` | 119 tunnel |
+| Hong Kong roads | `ELEVATION` | 2,236 nonzero layer |
+| Berlin roads | `verkehrsebene` | 355 nonzero layer |
+| Amsterdam/NWB | `rel_hoogte` | 1,130 nonzero relative-height rows |
+| Utah/Salt Lake roads | `VERT_LEVEL` | 508 nonzero layer |
+
+These mappings are declarative in the dataset recipes and flow through ArcGIS,
+download, OGC, and OS-download ingestion. Existing snapshots are also normalized
+at pipeline load from their retained `source_tags`, so the evidence is available
+without a network refetch; the next fetch writes the same fields natively.

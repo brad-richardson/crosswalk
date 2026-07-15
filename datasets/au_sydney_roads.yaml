@@ -23,6 +23,13 @@ fetch:
     '9': path
     '10': service
     '11': unclassified
+  # NSW RoadOnType coded domain: 2=OnBridge, 3=InTunnel. Other values
+  # describe ground/floodway/culvert/dam/water/stairs and are not promoted to
+  # bridge/tunnel evidence.
+  bridge_column: roadontype
+  bridge_values: [2]
+  tunnel_column: roadontype
+  tunnel_values: [3]
   bbox:
   - 150.85
   - -34.15

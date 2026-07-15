@@ -23,6 +23,7 @@ from ...matching.sliver import (
     group_segment_lengths_m,
 )
 from ...matching.stitch_options import build_stitch_options as _build_stitch_options
+from ...utils.physical import summarize_physical
 from ..jinja import templates
 from ..services import (
     get_unreviewed_stitch_groups,
@@ -456,6 +457,8 @@ def _build_group_context(group: dict, dataset: str = "") -> dict:
     target_names = group.get("target_names", {})
     ref_classes = group.get("ref_classes", {})
     target_classes = group.get("target_classes", {})
+    ref_physical = group.get("ref_physical", {})
+    target_physical = group.get("target_physical", {})
 
     ref_class_vals = [ref_classes.get(rid, "") for rid in ref_id_list]
     ref_name_vals = [ref_names.get(rid, "") for rid in ref_id_list]
@@ -508,11 +511,21 @@ def _build_group_context(group: dict, dataset: str = "") -> dict:
 
     # Build details for expanded view
     ref_details = [
-        {"id": rid, "cls": ref_classes.get(rid, ""), "name": ref_names.get(rid, "")}
+        {
+            "id": rid,
+            "cls": ref_classes.get(rid, ""),
+            "name": ref_names.get(rid, ""),
+            "physical": summarize_physical(ref_physical.get(rid)),
+        }
         for rid in ref_id_list
     ]
     target_details = [
-        {"id": tid, "cls": target_classes.get(tid, ""), "name": target_names.get(tid, "")}
+        {
+            "id": tid,
+            "cls": target_classes.get(tid, ""),
+            "name": target_names.get(tid, ""),
+            "physical": summarize_physical(target_physical.get(tid)),
+        }
         for tid in target_id_list
     ]
 

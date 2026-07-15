@@ -49,6 +49,10 @@ class FetchConfig(BaseModel):
     subclass_column: str | None = None  # Optional subclass column
     subclass_mapping: dict[str | int, str] | None = None  # Subclass value -> subclass
     level_column: str | None = None  # Column for z-level (bridges/tunnels)
+    bridge_column: str | None = None  # Column indicating a physical bridge
+    tunnel_column: str | None = None  # Column indicating a physical tunnel
+    bridge_values: list[str | int | float] | None = None  # Explicit bridge-coded values
+    tunnel_values: list[str | int | float] | None = None  # Explicit tunnel-coded values
     bbox: tuple[float, float, float, float] | None = None  # xmin, ymin, xmax, ymax
     crs: str = "EPSG:4326"  # Coordinate reference system
     source_crs: str | None = None  # Source data CRS if different (e.g., "EPSG:5179")

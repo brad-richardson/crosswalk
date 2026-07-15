@@ -23,10 +23,12 @@ Usage:
     list_datasets()
 """
 
+import json
 import os
 import shutil
 import tempfile
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +42,7 @@ from ..datasets.schema import FetchConfig, get_dataset_config, list_dataset_conf
 from ..filenames import target_filename
 from ..utils.geometry import convert_polygons_to_centerlines, flatten_to_linestring
 from ..utils.linear_ref import create_trivial_lr
-from .arcgis import fetch_arcgis_layer
+from .arcgis import _build_level_rules, _build_road_flags, fetch_arcgis_layer
 from .normalize import (
     default_class_for_type,
     map_column,
@@ -164,6 +166,9 @@ def _transform_download_data(
     speed_limit_column = fetch_config.speed_limit_column
     speed_limit_unit = fetch_config.speed_limit_unit
     polygon_to_centerline = fetch_config.polygon_to_centerline
+    level_column = fetch_config.level_column
+    bridge_column = fetch_config.bridge_column
+    tunnel_column = fetch_config.tunnel_column
 
     # Convert polygons to centerlines if enabled (before any other processing)
     if polygon_to_centerline:
@@ -177,6 +182,9 @@ def _transform_download_data(
     subclass_column = resolve_column(gdf, subclass_column)
     oneway_column = resolve_column(gdf, oneway_column)
     speed_limit_column = resolve_column(gdf, speed_limit_column)
+    level_column = resolve_column(gdf, level_column)
+    bridge_column = resolve_column(gdf, bridge_column)
+    tunnel_column = resolve_column(gdf, tunnel_column)
 
     # Apply exclude filter if configured
     if exclude:
@@ -246,8 +254,18 @@ def _transform_download_data(
         "sources": gdf[id_col]
         .apply(lambda x: [{"dataset": source_name, "record_id": str(x)}])
         .values,
-        "road_flags": [[] for _ in range(len(gdf))],
-        "level_rules": [[] for _ in range(len(gdf))],
+        "road_flags": _build_road_flags(
+            gdf,
+            bridge_column,
+            tunnel_column,
+            bridge_values=fetch_config.bridge_values,
+            tunnel_values=fetch_config.tunnel_values,
+        ),
+        "level_rules": (
+            gdf[level_column].apply(_build_level_rules).values
+            if level_column and level_column in gdf.columns
+            else [None for _ in range(len(gdf))]
+        ),
         "source_tags": source_tags_data,
     }
 
@@ -317,6 +335,92 @@ def _transform_download_data(
     return result
 
 
+def backfill_physical_lr_from_source_tags(
+    gdf: gpd.GeoDataFrame,
+    fetch_config: FetchConfig,
+) -> gpd.GeoDataFrame:
+    """Apply configured physical fields to an already-fetched target snapshot.
+
+    Target GeoParquet retains every upstream attribute in ``source_tags``. That
+    lets a newly declared level/bridge/tunnel mapping take effect immediately,
+    without forcing a network refetch merely to rebuild normalized columns.
+    Only configured fields that are actually present are replaced; unrelated
+    native LR attributes are left untouched.
+    """
+    configured = {
+        "level": fetch_config.level_column,
+        "bridge": fetch_config.bridge_column,
+        "tunnel": fetch_config.tunnel_column,
+    }
+    if not any(configured.values()) or "source_tags" not in gdf.columns:
+        return gdf
+
+    def _as_mapping(raw: Any) -> Mapping[str, Any] | None:
+        if isinstance(raw, Mapping):
+            return raw
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return None
+            return parsed if isinstance(parsed, Mapping) else None
+        return None
+
+    def _extract(column: str | None) -> tuple[pd.Series, bool]:
+        if not column:
+            return pd.Series([None] * len(gdf), index=gdf.index, dtype=object), False
+        wanted = column.casefold()
+        found = False
+        values: list[Any] = []
+        for raw in gdf["source_tags"]:
+            tags = _as_mapping(raw)
+            if tags is None:
+                values.append(None)
+                continue
+            if column in tags:
+                found = True
+                values.append(tags[column])
+                continue
+            key = next((key for key in tags if str(key).casefold() == wanted), None)
+            found = found or key is not None
+            values.append(tags.get(key) if key is not None else None)
+        return pd.Series(values, index=gdf.index, dtype=object), found
+
+    level_values, level_found = _extract(configured["level"])
+    bridge_values, bridge_found = _extract(configured["bridge"])
+    tunnel_values, tunnel_found = _extract(configured["tunnel"])
+    if not (level_found or bridge_found or tunnel_found):
+        return gdf
+
+    result = gdf.copy()
+    if level_found:
+        result["level_rules"] = level_values.apply(_build_level_rules)
+        result["level_lr"] = result["level_rules"].apply(
+            lambda rules: create_trivial_lr(rules[0]["value"] if rules else None).to_dict_list()
+        )
+
+    if bridge_found or tunnel_found:
+        physical_fields = pd.DataFrame(index=gdf.index)
+        if bridge_found:
+            physical_fields["__bridge"] = bridge_values
+        if tunnel_found:
+            physical_fields["__tunnel"] = tunnel_values
+        flags = _build_road_flags(
+            physical_fields,
+            "__bridge" if bridge_found else None,
+            "__tunnel" if tunnel_found else None,
+            bridge_values=fetch_config.bridge_values,
+            tunnel_values=fetch_config.tunnel_values,
+        )
+        result["road_flags"] = flags
+        result["road_flags_lr"] = [
+            create_trivial_lr(sorted(value) if isinstance(value, list) else None).to_dict_list()
+            for value in flags
+        ]
+
+    return result
+
+
 def _add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """Add trivial linear-referenced columns for target-side data.
 
@@ -350,14 +454,14 @@ def _add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     else:
         gdf["subclass_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
 
-    # Level LR - extract from level_rules if present, otherwise use 0
+    # Empty level rules mean unknown, not known ground level.
     def get_level(row):
         level_rules = row.get("level_rules")
         if isinstance(level_rules, list) and len(level_rules) > 0:
             first = level_rules[0]
             if isinstance(first, dict):
-                return first.get("value", 0)
-        return 0
+                return first.get("value")
+        return None
 
     gdf["level_lr"] = gdf.apply(
         lambda row: create_trivial_lr(get_level(row)).to_dict_list(),
@@ -369,7 +473,7 @@ def _add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         road_flags = row.get("road_flags")
         if isinstance(road_flags, list):
             return sorted(road_flags)
-        return []
+        return None
 
     gdf["road_flags_lr"] = gdf.apply(
         lambda row: create_trivial_lr(get_flags(row)).to_dict_list(),
@@ -1420,6 +1524,11 @@ def fetch_dataset(
                 "class_mapping": fetch_config.class_mapping,
                 "subclass_column": fetch_config.subclass_column,
                 "subclass_mapping": fetch_config.subclass_mapping,
+                "level_column": fetch_config.level_column,
+                "bridge_column": fetch_config.bridge_column,
+                "tunnel_column": fetch_config.tunnel_column,
+                "bridge_values": fetch_config.bridge_values,
+                "tunnel_values": fetch_config.tunnel_values,
                 "source_name": source_name,
             }
             if page_size is not None:

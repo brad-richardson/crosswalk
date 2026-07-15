@@ -13,6 +13,7 @@ from crosswalk.datasets.schema import FetchConfig
 from crosswalk.fetch.target import (
     _load_ms_roads_tsv,
     _transform_download_data,
+    backfill_physical_lr_from_source_tags,
     fetch_dataset,
     fetch_datasets_by_prefix,
     list_datasets,
@@ -95,6 +96,63 @@ class TestTransformDownloadData:
         assert result["class"].iloc[0] == "major"
         assert result["class"].iloc[1] == "minor"
         assert result["class"].iloc[2] == "local"
+
+    def test_physical_fields_are_mapped_with_explicit_unknowns(self, sample_gdf):
+        sample_gdf = sample_gdf.assign(LEVEL=[0, 2, -1], ONTYPE=[1, 2, 3])
+        fetch_config = FetchConfig(
+            id_prefix="test",
+            id_column="OBJECTID",
+            level_column="LEVEL",
+            bridge_column="ONTYPE",
+            bridge_values=[2],
+            tunnel_column="ONTYPE",
+            tunnel_values=[3],
+        )
+
+        result = _transform_download_data(sample_gdf, fetch_config, "TestSource")
+
+        assert [rules[0]["value"] for rules in result["level_lr"]] == [0, 2, -1]
+        assert [rules[0]["value"] for rules in result["road_flags_lr"]] == [
+            [],
+            ["is_bridge"],
+            ["is_tunnel"],
+        ]
+
+        unknown = _transform_download_data(
+            sample_gdf,
+            FetchConfig(id_prefix="test", id_column="OBJECTID"),
+            "TestSource",
+        )
+        assert all(rules[0]["value"] is None for rules in unknown["level_lr"])
+        assert all(rules[0]["value"] is None for rules in unknown["road_flags_lr"])
+
+    def test_existing_snapshot_backfills_physical_lr_from_source_tags(self, sample_gdf):
+        stale = sample_gdf.assign(
+            source_tags=[
+                {"LEVEL": 0, "ONTYPE": 1},
+                {"LEVEL": 2, "ONTYPE": 2},
+                {"LEVEL": -1, "ONTYPE": 3},
+            ],
+            level_lr=[[{"between": [0.0, 1.0], "value": 0}]] * 3,
+            road_flags_lr=[[{"between": [0.0, 1.0], "value": []}]] * 3,
+        )
+        result = backfill_physical_lr_from_source_tags(
+            stale,
+            FetchConfig(
+                level_column="level",  # case-insensitive source_tags lookup
+                bridge_column="ontype",
+                bridge_values=[2],
+                tunnel_column="ontype",
+                tunnel_values=[3],
+            ),
+        )
+
+        assert [rules[0]["value"] for rules in result["level_lr"]] == [0, 2, -1]
+        assert [rules[0]["value"] for rules in result["road_flags_lr"]] == [
+            [],
+            ["is_bridge"],
+            ["is_tunnel"],
+        ]
 
     def test_missing_id_column_raises_error(self):
         """Test that missing id_column raises ValueError."""

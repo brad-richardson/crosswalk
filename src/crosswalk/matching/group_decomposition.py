@@ -329,6 +329,8 @@ _SUBGROUP_ID_MAPS = (
     "target_names",
     "ref_classes",
     "target_classes",
+    "ref_physical",
+    "target_physical",
 )
 
 
@@ -352,7 +354,7 @@ def build_subproblem_group(parent: Mapping, sub: SubProblem, n_subproblems: int)
     dicts filtered to the sub-problem (so confidences, alignment fracs, and
     the #267 per-edge structural fields — computed on the FULL parent graph,
     the more truthful context — carry over verbatim); geometries, names, and
-    classes are filtered to the sub-problem's endpoints. Sibling segments are
+    classes, and physical LR rules are filtered to the sub-problem's endpoints. Sibling segments are
     NOT copied: the standard spatial-context fill re-adds anything nearby as
     context from the raw datasets, at the sub-problem's own (small) envelope.
     """

@@ -39,6 +39,8 @@ def fetch_arcgis_layer(
     level_column: str | None = None,
     bridge_column: str | None = None,
     tunnel_column: str | None = None,
+    bridge_values: list[str | int | float] | None = None,
+    tunnel_values: list[str | int | float] | None = None,
     status_column: str | None = None,
     status_mapping: dict | None = None,
     source_name: str = "ArcGIS",
@@ -118,6 +120,8 @@ def fetch_arcgis_layer(
         level_column=level_column,
         bridge_column=bridge_column,
         tunnel_column=tunnel_column,
+        bridge_values=bridge_values,
+        tunnel_values=tunnel_values,
         status_column=status_column,
         status_mapping=status_mapping,
         source_name=source_name,
@@ -297,6 +301,8 @@ def _transform_to_overture_schema(
     id_column: str | None = None,
     polygon_to_centerline: bool = False,
     dataset_type: str | None = None,
+    bridge_values: list[str | int | float] | None = None,
+    tunnel_values: list[str | int | float] | None = None,
 ) -> gpd.GeoDataFrame:
     """Transform ArcGIS data to match osm_segments.parquet schema.
 
@@ -423,7 +429,13 @@ def _transform_to_overture_schema(
     )
 
     # Road flags (bridge/tunnel indicators)
-    data["road_flags"] = _build_road_flags(gdf, bridge_column, tunnel_column)
+    data["road_flags"] = _build_road_flags(
+        gdf,
+        bridge_column,
+        tunnel_column,
+        bridge_values=bridge_values,
+        tunnel_values=tunnel_values,
+    )
 
     # Level rules
     if level_column and level_column in gdf.columns:
@@ -510,8 +522,6 @@ def _build_level_rules(value: Any) -> list:
         return []
     try:
         level = int(value)
-        if level == 0:
-            return []  # Ground level is omitted
         return [{"value": level}]
     except (ValueError, TypeError):
         return []
@@ -521,7 +531,10 @@ def _build_road_flags(
     gdf: gpd.GeoDataFrame,
     bridge_column: str | None,
     tunnel_column: str | None,
-) -> list[list[str]]:
+    *,
+    bridge_values: list[str | int | float] | None = None,
+    tunnel_values: list[str | int | float] | None = None,
+) -> list[list[str] | None]:
     """Build road_flags arrays from bridge/tunnel columns.
 
     Args:
@@ -532,6 +545,13 @@ def _build_road_flags(
     Returns:
         List of road flag lists (one per row)
     """
+    configured = bool(
+        (bridge_column and bridge_column in gdf.columns)
+        or (tunnel_column and tunnel_column in gdf.columns)
+    )
+    if not configured:
+        return [None for _ in range(len(gdf))]
+
     result = []
 
     for idx in range(len(gdf)):
@@ -540,18 +560,36 @@ def _build_road_flags(
         # Check bridge
         if bridge_column and bridge_column in gdf.columns:
             val = gdf.iloc[idx][bridge_column]
-            if _is_truthy(val):
+            if _matches_flag_value(val, bridge_values):
                 flags.append("is_bridge")
 
         # Check tunnel
         if tunnel_column and tunnel_column in gdf.columns:
             val = gdf.iloc[idx][tunnel_column]
-            if _is_truthy(val):
+            if _matches_flag_value(val, tunnel_values):
                 flags.append("is_tunnel")
 
         result.append(flags)
 
     return result
+
+
+def _matches_flag_value(value: Any, accepted: list[str | int | float] | None) -> bool:
+    """Match a source flag against an explicit coded domain or truthy fallback."""
+    if accepted is None:
+        return _is_truthy(value)
+    if pd.isna(value):
+        return False
+    value_text = str(value).strip().casefold()
+    for candidate in accepted:
+        if value_text == str(candidate).strip().casefold():
+            return True
+        try:
+            if float(value) == float(candidate):
+                return True
+        except (TypeError, ValueError):
+            pass
+    return False
 
 
 def _is_truthy(value: Any) -> bool:
@@ -619,14 +657,15 @@ def add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     else:
         gdf["subclass_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
 
-    # Level LR - extract from level_rules if present, otherwise use 0
+    # Level LR. Empty rules mean the source did not establish a level; do not
+    # fabricate ground level (0), which is materially different from unknown.
     def get_level(row):
         level_rules = row.get("level_rules")
         if isinstance(level_rules, list) and len(level_rules) > 0:
             first = level_rules[0]
             if isinstance(first, dict):
-                return first.get("value", 0)
-        return 0
+                return first.get("value")
+        return None
 
     gdf["level_lr"] = gdf.apply(
         lambda row: create_trivial_lr(get_level(row)).to_dict_list(),
@@ -638,7 +677,7 @@ def add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         road_flags = row.get("road_flags")
         if isinstance(road_flags, list):
             return sorted(road_flags)
-        return []
+        return None
 
     gdf["road_flags_lr"] = gdf.apply(
         lambda row: create_trivial_lr(get_flags(row)).to_dict_list(),

@@ -22,6 +22,7 @@ fetch:
     # PLAT→pedestrian, FUBR→footway, PSTR→path, KGA/PARK→service) are
     # applied by `matcher data reclassify de_berlin_roads` after fetch.
     V: service
+  level_column: verkehrsebene
   bbox:
   - 13.088
   - 52.34

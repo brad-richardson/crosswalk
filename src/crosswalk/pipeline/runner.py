@@ -21,6 +21,7 @@ from ..config import (
     NAMES_COLUMN,
     settings,
 )
+from ..fetch.target import backfill_physical_lr_from_source_tags
 from ..filenames import candidates_sidecar_path, extract_version_from_filename, groups_sidecar_path
 from ..matching import MatchDecision, optimize_matches_with_grouping
 from ..matching.optimizer import compute_sliver_candidate_edges
@@ -29,6 +30,7 @@ from ..resolution import generate_bridge_file, generate_unmatched_report
 from ..utils import ensure_projected_crs
 from ..utils.crs import ProjectionResult
 from ..utils.geometry import filter_to_linestrings
+from ..utils.physical import clip_physical_attributes, physical_attributes
 
 
 class PipelineError(Exception):
@@ -389,7 +391,7 @@ GEOJSON_COORD_PRECISION = 7
 # 7 decimal places gives sub-mm precision on typical road segments.
 ALIGNMENT_FRAC_PRECISION = 7
 
-CANDIDATE_SIDECAR_SCHEMA_VERSION = "1.0"
+CANDIDATE_SIDECAR_SCHEMA_VERSION = "1.1"
 
 
 def _is_nan(val) -> bool:
@@ -815,6 +817,7 @@ def _export_candidates_sidecar(
                 decision_reason = "optimizer_rejected"
 
             edge_structure = structure.get(pair, {})
+            candidate_graph_bridge = bool(edge_structure.get("is_bridge", False))
             row: dict[str, Any] = {
                 "dataset_id": dataset_id or "",
                 "group_id": gid,
@@ -836,7 +839,11 @@ def _export_candidates_sidecar(
                 "local_end_frac": result.local_end_frac,
                 "degree_ref": edge_structure.get("degree_ref"),
                 "degree_tgt": edge_structure.get("degree_tgt"),
-                "is_bridge": bool(edge_structure.get("is_bridge", False)),
+                "candidate_graph_bridge": candidate_graph_bridge,
+                # Resolver feature compatibility: the trained feature schema still
+                # calls this graph-theory value ``is_bridge``. New human-facing
+                # evidence uses the explicit name above.
+                "is_bridge": candidate_graph_bridge,
                 "biconnected_block": edge_structure.get("biconnected_block"),
                 "corridor_ref": edge_structure.get("corridor_ref"),
                 "corridor_tgt": edge_structure.get("corridor_tgt"),
@@ -906,6 +913,7 @@ def _export_candidates_sidecar(
         "selected_elsewhere",
         "pruned",
         "is_sliver",
+        "candidate_graph_bridge",
         "is_bridge",
         "oversized_group",
         "calibration_active",
@@ -1172,6 +1180,16 @@ def _export_groups_sidecar(
         else {}
     )
 
+    def _physical_at_pos(frame: gpd.GeoDataFrame, idx: int | None) -> dict[str, Any]:
+        """Physical LR block for one scored row; positional to preserve duplicate ids."""
+        if idx is None or idx < 0 or idx >= len(frame):
+            return {}
+        row = frame.iloc[idx]
+        return physical_attributes(
+            row.get("level_lr") if "level_lr" in frame.columns else None,
+            row.get("road_flags_lr") if "road_flags_lr" in frame.columns else None,
+        )
+
     # Serialize geometries as GeoJSON with coordinate rounding (defined once).
     def _round_coords(coords):
         """Recursively round coordinates to GEOJSON_COORD_PRECISION."""
@@ -1230,6 +1248,27 @@ def _export_groups_sidecar(
             edge["local_end_frac"] = round(float(r.local_end_frac), ALIGNMENT_FRAC_PRECISION)
         if struct:
             edge.update(struct)
+        # ``compute_group_structure`` historically called the graph-theory cut
+        # edge bit ``is_bridge``. Rename it at the evidence boundary so it can
+        # never be mistaken for a physical bridge; readers retain a legacy
+        # fallback for old sidecars.
+        if "is_bridge" in edge:
+            edge["candidate_graph_bridge"] = bool(edge.pop("is_bridge"))
+
+        ref_physical = clip_physical_attributes(
+            _physical_at_pos(reference, getattr(r, "ref_idx", None)),
+            getattr(r, "gers_start_frac", None),
+            getattr(r, "gers_end_frac", None),
+        )
+        target_physical = clip_physical_attributes(
+            _physical_at_pos(target, getattr(r, "target_idx", None)),
+            getattr(r, "local_start_frac", None),
+            getattr(r, "local_end_frac", None),
+        )
+        if ref_physical:
+            edge["ref_physical"] = ref_physical
+        if target_physical:
+            edge["target_physical"] = target_physical
         if pair in group_owned_pruned:
             edge["pruned"] = True
         if pair in group_assignment_decisions:
@@ -1492,6 +1531,20 @@ def _export_groups_sidecar(
             if cls is not None:
                 target_classes[tid] = str(cls) if not _is_nan(cls) else ""
 
+        # Segment-wide LR rules accompany the aligned, clipped copies on each
+        # edge. This preserves attribution changes along a segment for audit/UI
+        # while the edge block answers the actual aligned-range question.
+        ref_physical = {
+            rid: physical
+            for rid, idx in ref_idx_by_id.items()
+            if (physical := _physical_at_pos(reference, idx))
+        }
+        target_physical = {
+            tid: physical
+            for tid, idx in tgt_idx_by_id.items()
+            if (physical := _physical_at_pos(target, idx))
+        }
+
         oversized = not group_is_structurally_simple(
             per_group["n_corridors"],
             per_group["n_assignment_components"],
@@ -1515,6 +1568,8 @@ def _export_groups_sidecar(
                 "target_names": target_names,
                 "ref_classes": ref_classes,
                 "target_classes": target_classes,
+                "ref_physical": ref_physical,
+                "target_physical": target_physical,
                 "n_edges": per_group["n_edges"],
                 "n_corridors": per_group["n_corridors"],
                 "n_assignment_components": per_group["n_assignment_components"],
@@ -1613,6 +1668,7 @@ def _to_wgs84(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 def load_and_filter_inputs(
     reference_path: Path,
     target_path: Path,
+    dataset_id: str | None = None,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     """Load reference/target parquets and apply the pipeline's Step-1 filtering.
 
@@ -1621,6 +1677,10 @@ def load_and_filter_inputs(
     scores — positional ``ref_idx`` / ``target_idx`` in cached ``MatchResult``
     objects index into these frames, so the filtering (null-geometry drop +
     LineString-only) must match byte-for-byte.
+
+    When ``dataset_id`` is supplied, newly configured physical target fields are
+    normalized from retained ``source_tags`` before filtering. This is row-order
+    preserving and lets existing snapshots feed bridge/tunnel/layer LR evidence.
 
     Raises:
         PipelineError: If a file is missing or empty after filtering.
@@ -1640,6 +1700,13 @@ def load_and_filter_inputs(
         target = gpd.read_parquet(target_path)
     except Exception as e:
         raise PipelineError(f"Failed to read target file {target_path}: {e}") from e
+
+    if dataset_id:
+        from ..datasets.schema import get_dataset_config
+
+        dataset_config = get_dataset_config(dataset_id)
+        if dataset_config is not None and dataset_config.fetch is not None:
+            target = backfill_physical_lr_from_source_tags(target, dataset_config.fetch)
 
     if reference.geometry.isna().any():
         n_null = reference.geometry.isna().sum()
@@ -1947,7 +2014,8 @@ def run_pipeline(
     logger.info("=" * 60)
 
     # Step 1: Load + filter inputs (shared with the factory reoptimize path).
-    reference, target = load_and_filter_inputs(reference_path, target_path)
+    load_kwargs = {"dataset_id": prune_dataset_key} if prune_dataset_key else {}
+    reference, target = load_and_filter_inputs(reference_path, target_path, **load_kwargs)
 
     if progress_callback:
         progress_callback(10)

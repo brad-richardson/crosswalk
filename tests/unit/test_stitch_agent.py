@@ -1383,7 +1383,7 @@ def test_valid_edges_passes_through_structural_fields():
     for k in (
         "degree_ref",
         "degree_tgt",
-        "is_bridge",
+        "candidate_graph_bridge",
         "biconnected_block",
         "corridor_ref",
         "corridor_tgt",
@@ -1400,7 +1400,7 @@ def test_valid_edges_omits_missing_structural_fields():
     for opt in ctx["options"]:
         for e in opt["edges"]:
             assert "degree_ref" not in e
-            assert "is_bridge" not in e
+            assert "candidate_graph_bridge" not in e
 
 
 def test_build_metadata_surfaces_overlap_tag_and_structure():
@@ -1421,6 +1421,31 @@ def test_build_metadata_surfaces_overlap_tag_and_structure():
     # The full-coverage continuation is untagged.
     e1 = next(x for x in opt_a["edges"] if x["target"] == "T1")
     assert "tag" not in e1
+
+
+def test_metadata_and_prompt_surface_aligned_physical_evidence(tmp_path):
+    g = make_struct_group()
+    physical = {
+        "aligned_range": [0.5, 1.0],
+        "level_lr": [{"between": [0.5, 1.0], "value": 1}],
+        "road_flags_lr": [{"between": [0.5, 1.0], "value": ["is_bridge"]}],
+    }
+    g["ref_physical"] = {R1: physical}
+    g["edges"][0]["ref_physical"] = physical
+
+    ctx = build_stitch_options(g)
+    meta = build_metadata(g, ctx)
+    assert meta["segments"]["reference"][0]["physical"] == physical
+    edge = next(e for e in meta["options"][0]["edges"] if e["target"] == "T1")
+    assert edge["ref_physical"]["aligned_range"] == [0.5, 1.0]
+
+    group_dir = tmp_path / "physical"
+    generate_group_evidence(g, group_dir)
+    prompt = (group_dir / "prompt.txt").read_text()
+    assert "R physical: layer 1; bridge" in prompt
+    assert "physical='layer 1; bridge'" in prompt
+    assert "candidate-graph cut edge" in prompt
+    assert "NOT a claim that either road" in prompt
 
 
 def test_build_metadata_graceful_without_structure():

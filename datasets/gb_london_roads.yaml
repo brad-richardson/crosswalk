@@ -21,6 +21,10 @@ fetch:
     Unclassified: residential
     Not Classified: service
     Unknown: unclassified
+  # OS Open Roads currently populates road_structure only for tunnel links.
+  tunnel_column: road_structure
+  tunnel_values:
+  - Road In Tunnel
   bbox:
   - -0.51
   - 51.28

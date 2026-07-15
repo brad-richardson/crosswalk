@@ -126,7 +126,8 @@ def test_rejected_edges_persisted_with_selected_false(tmp_path):
     assert g["rejected_truncated"] is False
     # rejected edges carry the structural layer (degree etc.)
     for e in g["rejected_edges"]:
-        assert "degree_ref" in e and "is_bridge" in e and "confidence" in e
+        assert "degree_ref" in e and "candidate_graph_bridge" in e and "confidence" in e
+        assert "is_bridge" not in e
 
 
 def test_edges_and_gate_fields_invariant_to_rejected_persistence(tmp_path):

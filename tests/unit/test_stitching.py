@@ -729,7 +729,8 @@ class TestExportGroupsSidecarOptimizerAssignment:
         assert "n_corridors" in group
         assert "oversized_group" in group
         for e in group["edges"]:
-            assert "is_bridge" in e
+            assert "candidate_graph_bridge" in e
+            assert "is_bridge" not in e
             assert "corridor_ref" in e
             assert "selected" in e
 
@@ -3678,6 +3679,14 @@ class TestStitchingUiHooks:
                     "ref_names": {"r1": "Main St"},
                     "target_classes": {"t1": "residential", "t2": "footway"},
                     "target_names": {"t1": "Main St", "t2": "Path"},
+                    "ref_physical": {
+                        "r1": {
+                            "level_lr": [{"between": [0.0, 1.0], "value": 1}],
+                            "road_flags_lr": [
+                                {"between": [0.0, 1.0], "value": ["is_bridge"]}
+                            ],
+                        }
+                    },
                 }
             ],
         }
@@ -3724,6 +3733,8 @@ class TestStitchingUiHooks:
             assert "GERS ID" in html
             assert "Target ID" in html
             assert "Group ID" in html
+            assert "Physical" in html
+            assert "layer 1; bridge" in html
             assert 'class="detail-id" title="r1">r1</span>' in html
             short_id_title = (
                 'class="detail-short-id" '

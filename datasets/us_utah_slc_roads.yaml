@@ -28,6 +28,7 @@ fetch:
     '15': service
     '16': path
     '17': unclassified
+  level_column: VERT_LEVEL
   bbox:
   - -112.26
   - 40.41

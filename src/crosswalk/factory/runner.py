@@ -220,7 +220,11 @@ def run_dataset(
     t0 = time.perf_counter()
     try:
         logger.info(f"[{pair.name}] start (release={release}, buffer={buffer_distance_m}m)")
-        reference, target = load_and_filter_inputs(pair.reference_path, pair.target_path)
+        reference, target = load_and_filter_inputs(
+            pair.reference_path,
+            pair.target_path,
+            dataset_id=pair.name,
+        )
 
         t_score0 = time.perf_counter()
         results, projection_result = score_candidates_from_geodataframes(
@@ -389,7 +393,11 @@ def reoptimize_dataset(
     t0 = time.perf_counter()
     try:
         logger.info(f"[{pair.name}] reoptimize from cache")
-        reference, target = load_and_filter_inputs(pair.reference_path, pair.target_path)
+        reference, target = load_and_filter_inputs(
+            pair.reference_path,
+            pair.target_path,
+            dataset_id=pair.name,
+        )
         projection_result = ensure_projected_crs(reference, target)
         reference_wgs84 = _to_wgs84(reference)
         target_wgs84 = _to_wgs84(target)

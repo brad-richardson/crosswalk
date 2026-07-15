@@ -23,6 +23,14 @@ fetch:
     7: residential
     8: service
     9: service
+  # Digiroad SILTA_ALIK is a signed, segment-wide physical level: positive
+  # values are bridge levels; -1/-2/-3 are underpasses/underground levels;
+  # -11 is an explicit tunnel.
+  level_column: silta_alik
+  bridge_column: silta_alik
+  bridge_values: [1, 2, 3, 4, 5]
+  tunnel_column: silta_alik
+  tunnel_values: [-11]
   bbox:
   - 24.4
   - 60.0

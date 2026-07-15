@@ -315,6 +315,7 @@
                     <span>Group ID</span>
                     <span>Class</span>
                     <span>Name</span>
+                    <span>Physical</span>
                 </div>
                 {% for ref in ref_details %}
                 <div class="detail-row">
@@ -322,6 +323,7 @@
                     <span class="detail-short-id" title="Short ID used by the map and assignment controls">R{{ loop.index }}</span>
                     <span class="detail-attr">{{ ref.cls or '—' }}</span>
                     <span class="detail-attr">{{ ref.name or '—' }}</span>
+                    <span class="detail-attr">{{ ref.physical or '—' }}</span>
                 </div>
                 {% endfor %}
             </div>
@@ -332,6 +334,7 @@
                     <span>Group ID</span>
                     <span>Class</span>
                     <span>Name</span>
+                    <span>Physical</span>
                 </div>
                 {% for tgt in target_details %}
                 <div class="detail-row">
@@ -339,6 +342,7 @@
                     <span class="detail-short-id" title="Short ID used by the map and assignment controls">T{{ loop.index }}</span>
                     <span class="detail-attr">{{ tgt.cls or '—' }}</span>
                     <span class="detail-attr">{{ tgt.name or '—' }}</span>
+                    <span class="detail-attr">{{ tgt.physical or '—' }}</span>
                 </div>
                 {% endfor %}
             </div>

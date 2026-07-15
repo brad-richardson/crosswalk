@@ -593,7 +593,11 @@ def test_run_dataset_wires_prune_dataset_key(tmp_path, monkeypatch):
     monkeypatch.setattr(
         fr, "build_keys", lambda *a, **k: {"full_key": "k", "inputs": {}, "model": {}}
     )
-    monkeypatch.setattr(pipeline, "load_and_filter_inputs", lambda ref, tgt: ("REF", "TGT"))
+    monkeypatch.setattr(
+        pipeline,
+        "load_and_filter_inputs",
+        lambda ref, tgt, dataset_id=None: ("REF", "TGT"),
+    )
     monkeypatch.setattr(
         pipeline,
         "score_candidates_from_geodataframes",

@@ -201,6 +201,13 @@ def test_build_subproblem_group_filters_parent():
         "target_names": {"hub": "Hub St"},
         "ref_classes": {f"r{i}": "residential" for i in range(1, 7)},
         "target_classes": {"hub": "residential"},
+        "ref_physical": {
+            f"r{i}": {"level_lr": [{"between": [0.0, 1.0], "value": i % 2}]}
+            for i in range(1, 7)
+        },
+        "target_physical": {
+            "hub": {"road_flags_lr": [{"between": [0.0, 1.0], "value": ["is_bridge"]}]}
+        },
         "alternatives": ["should-not-carry-over"],
     }
     d = decompose_group(parent, max_edges=3)
@@ -219,6 +226,8 @@ def test_build_subproblem_group_filters_parent():
         assert set(sub["ref_geometries"]) == set(sub["ref_ids"])
         assert set(sub["target_geometries"]) == {"hub"}
         assert set(sub["ref_classes"]) == set(sub["ref_ids"])
+        assert set(sub["ref_physical"]) == set(sub["ref_ids"])
+        assert set(sub["target_physical"]) == {"hub"}
         # Optimizer assignment restricted to the sub-problem's edges.
         for e in sub["optimizer_assignment"]:
             assert (e["ref_id"], e["target_id"]) in set(sp.edges)

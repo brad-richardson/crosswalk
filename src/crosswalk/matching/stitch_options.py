@@ -13,21 +13,25 @@ alignment fractions from the group's own edges).
 
 import string
 
+from ..utils.physical import physical_is_informative
+
 _ALIGN_KEYS = ("gers_start_frac", "gers_end_frac", "local_start_frac", "local_end_frac")
 
 # Per-edge structural features (#267) persisted in every groups sidecar. Passed
 # through verbatim so evidence packs can surface them (a degree-4 junction
-# endpoint / bridge / corridor membership explains a junction-kiss far better
+# endpoint / graph cut-edge / corridor membership explains a junction-kiss far better
 # than a bare confidence number). Older sidecar vintages may lack some or all of
 # these; missing keys are simply omitted (never defaulted), so downstream
 # display degrades gracefully rather than fabricating structure.
 _STRUCT_KEYS = (
     "degree_ref",
     "degree_tgt",
-    "is_bridge",
+    "candidate_graph_bridge",
     "biconnected_block",
     "corridor_ref",
     "corridor_tgt",
+    "ref_physical",
+    "target_physical",
 )
 
 # Decision provenance is audit context, not an input to option construction.
@@ -95,6 +99,20 @@ def build_stitch_options(group: dict) -> dict:
                 for sk in _STRUCT_KEYS:
                     if sk in src:
                         enriched[sk] = src[sk]
+                # Historical sidecars used the ambiguous name ``is_bridge`` for
+                # a graph-theory cut edge. Canonicalize it while reading; never
+                # pass that name into new human/agent evidence.
+                if "candidate_graph_bridge" not in enriched and "is_bridge" in src:
+                    enriched["candidate_graph_bridge"] = bool(src["is_bridge"])
+                # Keep neutral ground/no-flag rules in the sidecar audit map, but
+                # do not repeat them on every option edge unless the opposite
+                # side makes the physical comparison informative.
+                if not (
+                    physical_is_informative(enriched.get("ref_physical"))
+                    or physical_is_informative(enriched.get("target_physical"))
+                ):
+                    enriched.pop("ref_physical", None)
+                    enriched.pop("target_physical", None)
                 for dk in _DECISION_KEYS:
                     if dk in src:
                         enriched[dk] = src[dk]

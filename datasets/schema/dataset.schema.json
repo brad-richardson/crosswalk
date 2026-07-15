@@ -138,6 +138,24 @@
         "level_column": {
           "type": "string"
         },
+        "bridge_column": {
+          "type": "string"
+        },
+        "tunnel_column": {
+          "type": "string"
+        },
+        "bridge_values": {
+          "type": "array",
+          "items": {
+            "type": ["string", "number"]
+          }
+        },
+        "tunnel_values": {
+          "type": "array",
+          "items": {
+            "type": ["string", "number"]
+          }
+        },
         "bbox": {
           "description": "xmin, ymin, xmax, ymax in `crs`.",
           "type": "array",

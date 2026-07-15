@@ -16,6 +16,7 @@ fetch:
     zh: STREET_CNAME
     alias_en: ALIAS_ENAME
     alias_zh: ALIAS_CNAME
+  level_column: ELEVATION
   bbox:
   - 113.82
   - 22.15

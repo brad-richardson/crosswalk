@@ -31,6 +31,7 @@ fetch:
     # hierarchy, but simple mapping defaults to residential (most common).
     # Run `matcher data reclassify nl_amsterdam_roads` for frc-based fallback.
     RB: residential
+  level_column: rel_hoogte
   bbox:
   - 4.75
   - 52.3
