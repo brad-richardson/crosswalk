@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import pyproj
@@ -28,6 +29,12 @@ class CoincidentAlternativeResult:
     alternative_count: int
     has_role_conflict: bool
     alternative_ids: tuple[str, ...] = ()
+
+
+@lru_cache(maxsize=64)
+def _cached_transformer(source_crs: str, target_crs: str) -> pyproj.Transformer:
+    """Reuse CRS pipelines while scanning thousands of groups in one dataset."""
+    return pyproj.Transformer.from_crs(source_crs, target_crs, always_xy=True)
 
 
 def compute_coincident_alternatives(
@@ -124,11 +131,11 @@ def compute_same_side_coincidence_context(
 
     union = shapely.union_all(list(valid.values()))
     centroid = union.centroid
-    zone = min(60, max(1, int((centroid.x + 180) / 6) + 1))
-    epsg = (32600 if centroid.y >= 0 else 32700) + zone
-    transformer = pyproj.Transformer.from_crs(
-        source_crs, f"EPSG:{epsg}", always_xy=True
-    )
+    to_wgs84 = _cached_transformer(source_crs, "EPSG:4326")
+    centroid_lon, centroid_lat = to_wgs84.transform(centroid.x, centroid.y)
+    zone = min(60, max(1, int((centroid_lon + 180) / 6) + 1))
+    epsg = (32600 if centroid_lat >= 0 else 32700) + zone
+    transformer = _cached_transformer(source_crs, f"EPSG:{epsg}")
     projected = {
         segment_id: transform(transformer.transform, geometry)
         for segment_id, geometry in valid.items()

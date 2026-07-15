@@ -2116,6 +2116,7 @@ VOTES_COLUMNS = [
     "latency_s",
     "timestamp",
     "error",
+    "abstain_reason",
     "invocation_route",
     "evidence_delivery",
     "pack_feedback",
@@ -2163,6 +2164,7 @@ def _vote_row(v: Vote) -> dict:
         "latency_s": v.latency_s,
         "timestamp": v.timestamp,
         "error": v.error,
+        "abstain_reason": str(v.abstain_reason),
         "invocation_route": v.invocation_route,
         "evidence_delivery": v.evidence_delivery,
         "pack_feedback": v.pack_feedback,
@@ -2455,6 +2457,12 @@ def run_batch(
                         confidence=float(row["confidence"]),
                         reasoning=_text(row.get("reasoning")),
                         edge_set=option_edges[_text(row["choice"])],
+                        abstain_reason=(
+                            AbstainReason(_text(row.get("abstain_reason")))
+                            if _text(row.get("abstain_reason"))
+                            in {reason.value for reason in AbstainReason}
+                            else AbstainReason.UNSET
+                        ),
                         invocation_route=_text(row.get("invocation_route")),
                     )
                     for row in vote_group.to_dict("records")
