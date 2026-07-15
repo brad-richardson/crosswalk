@@ -32,40 +32,43 @@ def test_physical_rules_clip_to_the_aligned_interval() -> None:
 
     assert clipped["aligned_range"] == [0.6, 0.9]
     assert clipped["level_lr"] == [{"between": [0.6, 0.9], "value": 1}]
-    assert clipped["road_flags_lr"] == [
-        {"between": [0.6, 0.9], "value": ["is_bridge"]}
-    ]
+    assert clipped["road_flags_lr"] == [{"between": [0.6, 0.9], "value": ["is_bridge"]}]
     assert summarize_physical(clipped) == "layer 1; bridge"
     assert physical_is_informative(clipped) is True
 
 
 def test_missing_physical_metadata_stays_unknown() -> None:
     assert physical_attributes(None, None) == {}
-    assert physical_attributes(
-        [{"between": [0.0, 1.0], "value": None}],
-        [{"between": [0.0, 1.0], "value": None}],
-    ) == {}
-    assert summarize_physical({}) == ""
-    assert physical_is_informative(
+    assert (
         physical_attributes(
-            [{"between": [0.0, 1.0], "value": 0}],
-            [{"between": [0.0, 1.0], "value": []}],
+            [{"between": [0.0, 1.0], "value": None}],
+            [{"between": [0.0, 1.0], "value": None}],
         )
-    ) is False
+        == {}
+    )
+    assert summarize_physical({}) == ""
+    assert (
+        physical_is_informative(
+            physical_attributes(
+                [{"between": [0.0, 1.0], "value": 0}],
+                [{"between": [0.0, 1.0], "value": []}],
+            )
+        )
+        is False
+    )
 
 
 def test_physical_summary_uses_aligned_range_for_partial_flags() -> None:
-    assert summarize_physical(
-        {
-            "aligned_range": [0.0, 1.0],
-            "road_flags_lr": [
-                {"between": [0.5, 1.0], "value": ["is_bridge"]}
-            ],
-        }
-    ) == "bridge (partial)"
-    assert summarize_physical(
-        {"road_flags_lr": [{"between": [0.0, 1.0], "value": []}]}
-    ) == ""
+    assert (
+        summarize_physical(
+            {
+                "aligned_range": [0.0, 1.0],
+                "road_flags_lr": [{"between": [0.5, 1.0], "value": ["is_bridge"]}],
+            }
+        )
+        == "bridge (partial)"
+    )
+    assert summarize_physical({"road_flags_lr": [{"between": [0.0, 1.0], "value": []}]}) == ""
 
 
 def test_physical_summary_preserves_covered_and_indoor_flags() -> None:
@@ -104,17 +107,21 @@ def test_groups_sidecar_preserves_segment_rules_and_clips_edge_evidence(tmp_path
         crs="EPSG:3857",
     )
     ref["level_lr"] = pd.Series(
-        [[
-            {"between": [0.0, 0.5], "value": 0},
-            {"between": [0.5, 1.0], "value": 1},
-        ]],
+        [
+            [
+                {"between": [0.0, 0.5], "value": 0},
+                {"between": [0.5, 1.0], "value": 1},
+            ]
+        ],
         dtype=object,
     )
     ref["road_flags_lr"] = pd.Series(
-        [[
-            {"between": [0.0, 0.5], "value": []},
-            {"between": [0.5, 1.0], "value": ["is_bridge"]},
-        ]],
+        [
+            [
+                {"between": [0.0, 0.5], "value": []},
+                {"between": [0.5, 1.0], "value": ["is_bridge"]},
+            ]
+        ],
         dtype=object,
     )
     target = gpd.GeoDataFrame(
@@ -159,9 +166,7 @@ def test_groups_sidecar_preserves_segment_rules_and_clips_edge_evidence(tmp_path
     ]
     elevated = next(edge for edge in group["edges"] if edge["target_id"] == "t1")
     assert elevated["ref_physical"]["aligned_range"] == [0.6, 0.9]
-    assert elevated["ref_physical"]["level_lr"] == [
-        {"between": [0.6, 0.9], "value": 1}
-    ]
+    assert elevated["ref_physical"]["level_lr"] == [{"between": [0.6, 0.9], "value": 1}]
     assert elevated["ref_physical"]["road_flags_lr"][0]["value"] == ["is_bridge"]
     assert elevated["target_physical"]["level_lr"][0]["value"] == 0
     assert "candidate_graph_bridge" in elevated

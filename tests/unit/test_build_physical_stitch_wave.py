@@ -19,9 +19,7 @@ sys.modules[SPEC.name] = wave
 SPEC.loader.exec_module(wave)
 
 RUNNER_SCRIPT = Path(__file__).parents[2] / "scripts" / "run_physical_stitch_wave.py"
-RUNNER_SPEC = importlib.util.spec_from_file_location(
-    "run_physical_stitch_wave", RUNNER_SCRIPT
-)
+RUNNER_SPEC = importlib.util.spec_from_file_location("run_physical_stitch_wave", RUNNER_SCRIPT)
 assert RUNNER_SPEC is not None and RUNNER_SPEC.loader is not None
 wave_runner = importlib.util.module_from_spec(RUNNER_SPEC)
 sys.modules[RUNNER_SPEC.name] = wave_runner
@@ -109,15 +107,11 @@ def test_target_capabilities_and_sanitization_remove_unsupported_domains() -> No
     assert sydney.flag_domains == frozenset({"is_bridge", "is_tunnel"})
 
     group = _group()
-    group["target_physical"]["target-a"]["road_flags_lr"][0]["value"].append(
-        "is_covered"
-    )
+    group["target_physical"]["target-a"]["road_flags_lr"][0]["value"].append("is_covered")
     wave._sanitize_group_target_physical(group, sydney)
 
     assert "level_lr" not in group["target_physical"]["target-a"]
-    assert group["target_physical"]["target-a"]["road_flags_lr"][0]["value"] == [
-        "is_bridge"
-    ]
+    assert group["target_physical"]["target-a"]["road_flags_lr"][0]["value"] == ["is_bridge"]
     assert "level_lr" not in group["edges"][0]["target_physical"]
 
     london = wave._target_capabilities("gb_london_roads")
@@ -207,10 +201,7 @@ def test_unsupported_target_layer_never_reaches_pack_display(
     prompt = (group_dir / "prompt.txt").read_text()
     metadata = yaml.safe_load((group_dir / "metadata.yaml").read_text())
     assert "T physical: layer" not in prompt
-    assert all(
-        "level_lr" not in segment["physical"]
-        for segment in metadata["segments"]["target"]
-    )
+    assert all("level_lr" not in segment["physical"] for segment in metadata["segments"]["target"])
 
 
 def test_factorial_packs_keep_menu_fixed_and_toggle_only_requested_context(
@@ -245,9 +236,9 @@ def test_factorial_packs_keep_menu_fixed_and_toggle_only_requested_context(
     }
 
     evidence = {
-        variant: json.loads(
-            (batch_dir / group["group_id"] / "evidence.json").read_text()
-        )["evidence"]
+        variant: json.loads((batch_dir / group["group_id"] / "evidence.json").read_text())[
+            "evidence"
+        ]
         for variant, batch_dir in dirs.items()
     }
     assert len({row["option_menu_sha256"] for row in evidence.values()}) == 1
@@ -266,10 +257,7 @@ def test_factorial_packs_keep_menu_fixed_and_toggle_only_requested_context(
     assert "Same-side coincidence" not in prompts["minimal"]
 
     selections = {"fi_helsinki_roads": [ranked]}
-    batch_dirs = {
-        ("fi_helsinki_roads", variant): batch_dir
-        for variant, batch_dir in dirs.items()
-    }
+    batch_dirs = {("fi_helsinki_roads", variant): batch_dir for variant, batch_dir in dirs.items()}
     required_pair = (
         group["edges"][0]["ref_id"],
         group["edges"][0]["target_id"],
@@ -354,18 +342,10 @@ def test_schedule_runner_halts_on_wave_level_consecutive_timeouts() -> None:
             ]
         )
 
-    wave_runner._record_wave_timeout_streaks(
-        votes("ABSTAIN", "timeout"), streaks, "group-1"
-    )
-    wave_runner._record_wave_timeout_streaks(
-        votes("ABSTAIN", "timeout"), streaks, "group-2"
-    )
-    with pytest.raises(
-        wave_runner.ProviderInvocationError, match="3 consecutive scheduled groups"
-    ):
-        wave_runner._record_wave_timeout_streaks(
-            votes("ABSTAIN", "timeout"), streaks, "group-3"
-        )
+    wave_runner._record_wave_timeout_streaks(votes("ABSTAIN", "timeout"), streaks, "group-1")
+    wave_runner._record_wave_timeout_streaks(votes("ABSTAIN", "timeout"), streaks, "group-2")
+    with pytest.raises(wave_runner.ProviderInvocationError, match="3 consecutive scheduled groups"):
+        wave_runner._record_wave_timeout_streaks(votes("ABSTAIN", "timeout"), streaks, "group-3")
 
     wave_runner._record_wave_timeout_streaks(votes("A"), streaks, "group-4")
     assert streaks["codex"] == 0
@@ -391,9 +371,9 @@ def test_schedule_retry_drops_timeout_partials_and_reinvokes_group(
                 }
             )
     pd.DataFrame(vote_rows).to_csv(batch_dir / "votes.partial.csv", index=False)
-    pd.DataFrame(
-        [{"group_id": "timed-out"}, {"group_id": "successful"}]
-    ).to_csv(batch_dir / "consensus.partial.csv", index=False)
+    pd.DataFrame([{"group_id": "timed-out"}, {"group_id": "successful"}]).to_csv(
+        batch_dir / "consensus.partial.csv", index=False
+    )
 
     schedule = [
         {

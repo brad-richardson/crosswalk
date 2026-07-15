@@ -124,9 +124,7 @@ def _physical_lookups(
     for row in target.itertuples(index=False):
         target_lookup[str(row.id)] = {
             "level_lr": getattr(row, "level_lr", None) if target_has_level else None,
-            "road_flags_lr": (
-                getattr(row, "road_flags_lr", None) if target_domains else None
-            ),
+            "road_flags_lr": (getattr(row, "road_flags_lr", None) if target_domains else None),
             "name": _plain_name(row.names),
         }
     return ref_lookup, target_lookup, target_domains, target_has_level
@@ -220,7 +218,9 @@ def _aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     for slice_name in ("global", "comparable", "informative"):
         result[slice_name] = {}
         for metric in ("n", "positive", "f1", "precision", "recall"):
-            values = [run[slice_name][metric] for run in runs if run[slice_name][metric] is not None]
+            values = [
+                run[slice_name][metric] for run in runs if run[slice_name][metric] is not None
+            ]
             if not values:
                 result[slice_name][metric + "_mean"] = None
                 result[slice_name][metric + "_std"] = None
@@ -228,13 +228,7 @@ def _aggregate_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
             result[slice_name][metric + "_mean"] = float(np.mean(values))
             result[slice_name][metric + "_std"] = float(np.std(values))
     result["per_dataset"] = {}
-    dataset_ids = sorted(
-        {
-            dataset_id
-            for run in runs
-            for dataset_id in run.get("per_dataset", {})
-        }
-    )
+    dataset_ids = sorted({dataset_id for run in runs for dataset_id in run.get("per_dataset", {})})
     for dataset_id in dataset_ids:
         dataset_runs = [
             run["per_dataset"][dataset_id]
@@ -349,8 +343,7 @@ def _manual_queue(
             break
 
     return [
-        {str(key): _json_scalar(value) for key, value in row.to_dict().items()}
-        for row in selected
+        {str(key): _json_scalar(value) for key, value in row.to_dict().items()} for row in selected
     ]
 
 
@@ -377,9 +370,7 @@ def run_experiment(
         | frame["physical_positive_match"].fillna(0).gt(0)
     ).to_numpy()
 
-    runs_by_variant: dict[str, list[dict[str, Any]]] = {
-        variant: [] for variant in FEATURE_VARIANTS
-    }
+    runs_by_variant: dict[str, list[dict[str, Any]]] = {variant: [] for variant in FEATURE_VARIANTS}
     probabilities_by_variant: dict[str, list[np.ndarray]] = {
         variant: [] for variant in FEATURE_VARIANTS
     }
@@ -414,9 +405,7 @@ def run_experiment(
             )
             probabilities_by_variant[variant].append(oof_probability)
 
-    summary = {
-        variant: _aggregate_runs(runs) for variant, runs in runs_by_variant.items()
-    }
+    summary = {variant: _aggregate_runs(runs) for variant, runs in runs_by_variant.items()}
     baseline = summary["baseline"]
     for _variant, metrics in summary.items():
         for slice_name in ("global", "comparable", "informative"):
@@ -457,9 +446,7 @@ def run_experiment(
                     ).sum()
                 ),
                 "n_conflicts": int(subset["physical_structure_conflict"].fillna(0).gt(0).sum()),
-                "n_positive_matches": int(
-                    subset["physical_positive_match"].fillna(0).gt(0).sum()
-                ),
+                "n_positive_matches": int(subset["physical_positive_match"].fillna(0).gt(0).sum()),
             }
         )
 
@@ -481,9 +468,7 @@ def run_experiment(
         "signal_summary": _signal_summary(frame),
         "summary": summary,
         "runs": runs_by_variant,
-        "manual_review_queue": _manual_queue(
-            frame, y, baseline_probability, physical_probability
-        ),
+        "manual_review_queue": _manual_queue(frame, y, baseline_probability, physical_probability),
     }
 
 

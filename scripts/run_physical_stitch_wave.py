@@ -25,10 +25,7 @@ WAVE_TIMEOUT_BREAKER_N = 3
 
 
 def _panel_descriptor(panel: list[Any]) -> list[dict[str, str | None]]:
-    return [
-        {"provider": spec.name, "model": spec.model, "effort": spec.effort}
-        for spec in panel
-    ]
+    return [{"provider": spec.name, "model": spec.model, "effort": spec.effort} for spec in panel]
 
 
 def load_and_validate_manifest(path: Path) -> tuple[dict, list[Any]]:
@@ -84,10 +81,9 @@ def _record_wave_timeout_streaks(
     """Preserve run_batch's provider-down timeout breaker across row-wise calls."""
     for row in votes.to_dict("records"):
         provider = str(row["provider"])
-        timed_out = (
-            str(row.get("choice", "")) == "ABSTAIN"
-            and str(row.get("abstain_reason", "")) == str(AbstainReason.TIMEOUT)
-        )
+        timed_out = str(row.get("choice", "")) == "ABSTAIN" and str(
+            row.get("abstain_reason", "")
+        ) == str(AbstainReason.TIMEOUT)
         consecutive_timeouts[provider] = (
             consecutive_timeouts.get(provider, 0) + 1 if timed_out else 0
         )
@@ -119,9 +115,7 @@ def _drop_timeout_groups_from_partials(batch_dirs: set[Path]) -> set[tuple[Path,
         timeout_ids = set(timeout_rows["group_id"].astype(str))
         if not timeout_ids:
             continue
-        votes[~votes["group_id"].astype(str).isin(timeout_ids)].to_csv(
-            votes_path, index=False
-        )
+        votes[~votes["group_id"].astype(str).isin(timeout_ids)].to_csv(votes_path, index=False)
         consensus[~consensus["group_id"].astype(str).isin(timeout_ids)].to_csv(
             consensus_path, index=False
         )
@@ -154,8 +148,7 @@ def execute_schedule(
         batch_dir = Path(row["batch_dir"])
         group_id = str(row["group_id"])
         print(
-            f"[{position}/{len(schedule)}] {row['dataset_id']} {group_id} "
-            f"variant={row['variant']}",
+            f"[{position}/{len(schedule)}] {row['dataset_id']} {group_id} variant={row['variant']}",
             flush=True,
         )
         votes, consensus = run_batch(
@@ -214,9 +207,7 @@ def main() -> None:
     schedule = manifest["run_schedule"]
     print(
         f"Validated {len(schedule)} scheduled packs with panel "
-        + ", ".join(
-            f"{spec.name}={spec.model}/{spec.effort}" for spec in panel
-        ),
+        + ", ".join(f"{spec.name}={spec.model}/{spec.effort}" for spec in panel),
         flush=True,
     )
     if args.validate_only:

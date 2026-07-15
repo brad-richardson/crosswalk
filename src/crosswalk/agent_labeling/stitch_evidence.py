@@ -456,9 +456,7 @@ def build_metadata(
         return rows
 
     coincidence_meta = {
-        side: _coincidence_rows(side)
-        for side in ("reference", "target")
-        if coincidence.get(side)
+        side: _coincidence_rows(side) for side in ("reference", "target") if coincidence.get(side)
     }
 
     # Per-edge junction-sliver flags (hybrid fraction + absolute-meters rule).
@@ -836,19 +834,31 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
         for edge in option.get("edges", [])
     )
     if has_physical:
-        lines.append(
-            "- 'R physical' / 'T physical' reports bridge, tunnel, covered/indoor, and"
-        )
+        lines.append("- 'R physical' / 'T physical' reports bridge, tunnel, covered/indoor, and")
         lines.append("  vertical layer rules")
-        lines.append("  clipped to that edge's own aligned fractions. Segment details retain the full")
-        lines.append("  linear-referenced rules. Missing physical evidence means unknown, not ground;")
-        lines.append("  road flags are positive observations, so an absent flag is not proof that the")
+        lines.append(
+            "  clipped to that edge's own aligned fractions. Segment details retain the full"
+        )
+        lines.append(
+            "  linear-referenced rules. Missing physical evidence means unknown, not ground;"
+        )
+        lines.append(
+            "  road flags are positive observations, so an absent flag is not proof that the"
+        )
         lines.append("  provider surveyed that attribute.")
     if metadata.get("same_side_coincidence"):
-        lines.append("- 'Same-side coincidence' is geometry-derived ambiguity: two R segments or two")
-        lines.append("  T segments occupy effectively the same centerline for at least 20m. It does")
-        lines.append("  NOT assert a bridge, tunnel, or layer. When pairwise geometry is non-identifying,")
-        lines.append("  use road role and network continuity to decide which representation belongs.")
+        lines.append(
+            "- 'Same-side coincidence' is geometry-derived ambiguity: two R segments or two"
+        )
+        lines.append(
+            "  T segments occupy effectively the same centerline for at least 20m. It does"
+        )
+        lines.append(
+            "  NOT assert a bridge, tunnel, or layer. When pairwise geometry is non-identifying,"
+        )
+        lines.append(
+            "  use road role and network continuity to decide which representation belongs."
+        )
     lines.append("- The optimizer's own proposed option is labeled below; it is often but not")
     lines.append(
         "  always correct. Judge from the geometry, not from which one is the optimizer's."
@@ -1077,9 +1087,7 @@ def generate_stitch_evidence(
 
     generated: list[str] = []
     experiment = batch.get("experiment") or {}
-    include_same_side_coincidence = bool(
-        experiment.get("same_side_coincidence_visible", False)
-    )
+    include_same_side_coincidence = bool(experiment.get("same_side_coincidence_visible", False))
     for group in groups:
         gid = group.get("group_id")
         if wanted is not None and gid not in wanted:

@@ -5,9 +5,7 @@ from pathlib import Path
 
 from crosswalk.utils.physical import clip_physical_attributes, summarize_physical
 
-FIXTURE_PATH = (
-    Path(__file__).parents[1] / "fixtures" / "physical_match_regressions.json"
-)
+FIXTURE_PATH = Path(__file__).parents[1] / "fixtures" / "physical_match_regressions.json"
 
 
 def _fixture() -> dict:
@@ -18,8 +16,7 @@ def test_v7_physical_regression_fixture_has_unique_provenanced_pairs() -> None:
     fixture = _fixture()
     pairs = fixture["pair_cases"]
     keys = [
-        (case["dataset_id"], case["group_id"], case["ref_id"], case["target_id"])
-        for case in pairs
+        (case["dataset_id"], case["group_id"], case["ref_id"], case["target_id"]) for case in pairs
     ]
 
     assert fixture["source_wave"] == "breadth_v7"
@@ -29,18 +26,12 @@ def test_v7_physical_regression_fixture_has_unique_provenanced_pairs() -> None:
 
 
 def test_hong_kong_known_negatives_clip_to_tunnel_vs_ground() -> None:
-    cases = [
-        case
-        for case in _fixture()["pair_cases"]
-        if case["group_id"] == "4eed5e80"
-    ]
+    cases = [case for case in _fixture()["pair_cases"] if case["group_id"] == "4eed5e80"]
 
     assert len(cases) == 3
     for case in cases:
         ref = clip_physical_attributes(case["ref_physical"], *case["ref_alignment"])
-        target = clip_physical_attributes(
-            case["target_physical"], *case["target_alignment"]
-        )
+        target = clip_physical_attributes(case["target_physical"], *case["target_alignment"])
         assert summarize_physical(ref) == "layer -1; tunnel"
         assert summarize_physical(target) == "layer 0"
         assert case["pair_truth"] == "negative"

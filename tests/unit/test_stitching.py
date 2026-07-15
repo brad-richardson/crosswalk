@@ -3682,9 +3682,7 @@ class TestStitchingUiHooks:
                     "ref_physical": {
                         "r1": {
                             "level_lr": [{"between": [0.0, 1.0], "value": 1}],
-                            "road_flags_lr": [
-                                {"between": [0.0, 1.0], "value": ["is_bridge"]}
-                            ],
+                            "road_flags_lr": [{"between": [0.0, 1.0], "value": ["is_bridge"]}],
                         }
                     },
                 }
@@ -3737,8 +3735,7 @@ class TestStitchingUiHooks:
             assert "layer 1; bridge" in html
             assert 'class="detail-id" title="r1">r1</span>' in html
             short_id_title = (
-                'class="detail-short-id" '
-                'title="Short ID used by the map and assignment controls">'
+                'class="detail-short-id" title="Short ID used by the map and assignment controls">'
             )
             assert f"{short_id_title}R1</span>" in html
             assert f"{short_id_title}T1</span>" in html

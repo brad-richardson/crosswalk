@@ -179,9 +179,7 @@ def _sanitize_target_physical_block(
         for rule in result.get("road_flags_lr") or []:
             sanitized = copy.deepcopy(rule)
             sanitized["value"] = [
-                flag
-                for flag in sanitized.get("value", [])
-                if flag in capabilities.flag_domains
+                flag for flag in sanitized.get("value", []) if flag in capabilities.flag_domains
             ]
             rules.append(sanitized)
         result["road_flags_lr"] = rules
@@ -202,9 +200,7 @@ def _sanitize_group_target_physical(
 
     for source in ("edges", "candidate_edges", "rejected_edges"):
         for edge in group.get(source, []) or []:
-            sanitized = _sanitize_target_physical_block(
-                edge.get("target_physical"), capabilities
-            )
+            sanitized = _sanitize_target_physical_block(edge.get("target_physical"), capabilities)
             if sanitized:
                 edge["target_physical"] = sanitized
             else:
@@ -273,8 +269,7 @@ def _group_coincidence(group: dict) -> tuple[int, int, list[str]]:
         conflicts += sum(item.has_role_conflict for item in result.values())
         for segment_id, item in result.items():
             labels.append(
-                f"{side}:{label_map.get(segment_id, segment_id)}="
-                f"{','.join(item.alternative_ids)}"
+                f"{side}:{label_map.get(segment_id, segment_id)}={','.join(item.alternative_ids)}"
             )
     return rows, conflicts, labels
 
@@ -469,19 +464,13 @@ def select_dataset_groups(
     missing_pairs = sorted(required_pairs - set(required_pair_groups))
     if missing_pairs:
         raise RuntimeError(
-            f"{dataset_id}: required regression pairs are not offered by any group: "
-            f"{missing_pairs}"
+            f"{dataset_id}: required regression pairs are not offered by any group: {missing_pairs}"
         )
     missing_refs = sorted(forced_ref_ids - set(required_ref_groups))
     if missing_refs:
-        raise RuntimeError(
-            f"{dataset_id}: required regression refs are absent: {missing_refs}"
-        )
+        raise RuntimeError(f"{dataset_id}: required regression refs are absent: {missing_refs}")
 
-    ordered = {
-        tag: [item[2] for item in sorted(pool, reverse=True)]
-        for tag, pool in pools.items()
-    }
+    ordered = {tag: [item[2] for item in sorted(pool, reverse=True)] for tag, pool in pools.items()}
     required = {
         ranked.group_id: ranked
         for ranked in [*required_pair_groups.values(), *required_ref_groups.values()]
@@ -620,10 +609,7 @@ def _factorial_subset(
         for ranked in groups
         if ranked.audit["physical_comparable_edges"] > 0
         and ranked.audit["coincidence_rows"] > 0
-        and (
-            ranked.audit["physical_conflict"] > 0
-            or ranked.audit["physical_agreement"] > 0
-        )
+        and (ranked.audit["physical_conflict"] > 0 or ranked.audit["physical_agreement"] > 0)
     ]
     candidates.sort(key=lambda item: (item[0], item[2].score), reverse=True)
     result: dict[str, list[RankedGroup]] = defaultdict(list)
@@ -655,9 +641,7 @@ def _planned_batch_dirs(
     }
     for dataset_id in factorial:
         for variant in ("no_physical", "no_coincidence", "minimal"):
-            planned[(dataset_id, variant)] = (
-                output_root / f"{dataset_id}_{wave_name}_{variant}"
-            )
+            planned[(dataset_id, variant)] = output_root / f"{dataset_id}_{wave_name}_{variant}"
     return planned
 
 
@@ -683,16 +667,11 @@ def _assert_required_pairs_in_generated_menus(
     for dataset_id, pairs in required_pairs.items():
         menu_pairs: set[tuple[str, str]] = set()
         for ranked in selections[dataset_id]:
-            evidence_path = (
-                batch_dirs[(dataset_id, "enriched")]
-                / ranked.group_id
-                / "evidence.json"
-            )
+            evidence_path = batch_dirs[(dataset_id, "enriched")] / ranked.group_id / "evidence.json"
             evidence = json.loads(evidence_path.read_text())["evidence"]
             for option in evidence["option_menu"]:
                 menu_pairs.update(
-                    (str(edge["ref_id"]), str(edge["target_id"]))
-                    for edge in option["edges"]
+                    (str(edge["ref_id"]), str(edge["target_id"])) for edge in option["edges"]
                 )
         missing = sorted(pairs - menu_pairs)
         if missing:
@@ -707,12 +686,16 @@ def main() -> None:
     parser.add_argument(
         "--sidecar-root", type=Path, default=Path("data/experiments/stitch_physical_v7")
     )
-    parser.add_argument(
-        "--output-root", type=Path, default=Path("data/agents/stitching/batches")
-    )
+    parser.add_argument("--output-root", type=Path, default=Path("data/agents/stitching/batches"))
     parser.add_argument("--wave-name", default="physical_context_v7_20260715")
-    parser.add_argument("--manual-queue", type=Path, default=Path("research/results/physical_feature_ablation_2026-07-15.json"))
-    parser.add_argument("--regressions", type=Path, default=Path("tests/fixtures/physical_match_regressions.json"))
+    parser.add_argument(
+        "--manual-queue",
+        type=Path,
+        default=Path("research/results/physical_feature_ablation_2026-07-15.json"),
+    )
+    parser.add_argument(
+        "--regressions", type=Path, default=Path("tests/fixtures/physical_match_regressions.json")
+    )
     parser.add_argument("--factorial-count", type=int, default=5)
     parser.add_argument("--alternatives", type=int, default=8)
     args = parser.parse_args()
@@ -721,9 +704,7 @@ def main() -> None:
     regression_payload = json.loads(args.regressions.read_text())
     required_pairs: dict[str, set[tuple[str, str]]] = defaultdict(set)
     for case in regression_payload.get("pair_cases", []):
-        required_pairs[str(case["dataset_id"])].add(
-            (str(case["ref_id"]), str(case["target_id"]))
-        )
+        required_pairs[str(case["dataset_id"])].add((str(case["ref_id"]), str(case["target_id"])))
     forced_refs: dict[str, set[str]] = defaultdict(set)
     for case in regression_payload.get("group_cases", []):
         if case.get("ambiguous_ref_id"):
@@ -788,18 +769,12 @@ def main() -> None:
             assert written == batch_dirs[(dataset_id, variant)]
             gc.collect()
 
-    _assert_required_pairs_in_generated_menus(
-        selections, required_pairs, batch_dirs
-    )
+    _assert_required_pairs_in_generated_menus(selections, required_pairs, batch_dirs)
 
     factorial_rows = sorted(
-        (dataset_id, ranked)
-        for dataset_id, groups in factorial.items()
-        for ranked in groups
+        (dataset_id, ranked) for dataset_id, groups in factorial.items() for ranked in groups
     )
-    factorial_ids = {
-        (dataset_id, ranked.group_id) for dataset_id, ranked in factorial_rows
-    }
+    factorial_ids = {(dataset_id, ranked.group_id) for dataset_id, ranked in factorial_rows}
     ordinary = [
         {
             "dataset_id": dataset_id,
@@ -859,9 +834,7 @@ def main() -> None:
         "batch_dirs": [str(path) for path in batch_dirs.values()],
         "run_schedule": schedule,
         "selections": {
-            dataset_id: [
-                {"group_id": ranked.group_id, **ranked.audit} for ranked in groups
-            ]
+            dataset_id: [{"group_id": ranked.group_id, **ranked.audit} for ranked in groups]
             for dataset_id, groups in selections.items()
         },
         "factorial_controls": {

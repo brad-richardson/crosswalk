@@ -202,8 +202,7 @@ def test_build_subproblem_group_filters_parent():
         "ref_classes": {f"r{i}": "residential" for i in range(1, 7)},
         "target_classes": {"hub": "residential"},
         "ref_physical": {
-            f"r{i}": {"level_lr": [{"between": [0.0, 1.0], "value": i % 2}]}
-            for i in range(1, 7)
+            f"r{i}": {"level_lr": [{"between": [0.0, 1.0], "value": i % 2}]} for i in range(1, 7)
         },
         "target_physical": {
             "hub": {"road_flags_lr": [{"between": [0.0, 1.0], "value": ["is_bridge"]}]}

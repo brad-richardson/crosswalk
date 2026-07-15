@@ -73,10 +73,7 @@ def compute_coincident_alternatives(
         symmetric_fraction = max(segment_fraction, alternative_fraction)
         max_symmetric_fraction = max(max_symmetric_fraction, symmetric_fraction)
         coincident_length = min(segment_overlap, alternative_overlap)
-        if (
-            symmetric_fraction < qualifying_fraction
-            or coincident_length < min_coincident_length_m
-        ):
+        if symmetric_fraction < qualifying_fraction or coincident_length < min_coincident_length_m:
             continue
         alternative_count += 1
         qualifying_buffers.append(geometry.buffer(tolerance_m))

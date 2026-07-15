@@ -316,12 +316,8 @@ def load_overture_segments(path: Path) -> gpd.GeoDataFrame:
     # ``road_flags`` as a top-level segment property; retain the nested
     # ``road.road_flags`` fallback for older snapshots.
     if "road_flags" in gdf.columns:
-        gdf["is_bridge"] = gdf["road_flags"].apply(
-            lambda x: _has_road_flag_rules(x, "is_bridge")
-        )
-        gdf["is_tunnel"] = gdf["road_flags"].apply(
-            lambda x: _has_road_flag_rules(x, "is_tunnel")
-        )
+        gdf["is_bridge"] = gdf["road_flags"].apply(lambda x: _has_road_flag_rules(x, "is_bridge"))
+        gdf["is_tunnel"] = gdf["road_flags"].apply(lambda x: _has_road_flag_rules(x, "is_tunnel"))
     elif "road" in gdf.columns:
         gdf["is_bridge"] = gdf["road"].apply(
             lambda x: _has_road_flag(x, "is_bridge") if x else False

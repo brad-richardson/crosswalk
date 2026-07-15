@@ -1458,9 +1458,7 @@ def test_metadata_and_prompt_surface_same_side_coincidence(tmp_path):
     g["ref_classes"] = {R1: "trunk", R2: "cycleway"}
 
     group_dir = tmp_path / "coincidence"
-    meta = generate_group_evidence(
-        g, group_dir, include_same_side_coincidence=True
-    )
+    meta = generate_group_evidence(g, group_dir, include_same_side_coincidence=True)
     rows = meta["same_side_coincidence"]["reference"]
     assert {row["label"] for row in rows} == {"R1", "R2"}
     assert all(row["role_conflict"] for row in rows)
