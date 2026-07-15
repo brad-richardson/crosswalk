@@ -27,9 +27,12 @@ re-exporting the same batches is a no-op.
 
 ## Scope / limitations
 
-- Provenance is archived **at export time**, so it covers every batch that
-  produced a committed label. Batches whose groups were never exported (e.g.
-  all routed to human review) are not captured here.
+- Provenance is normally archived **at export time**, so it covers every batch
+  that produced a committed panel label. Explicitly retained calibration or
+  research waves may also be archived without panel export when their human
+  labels and analysis are committed together; their `source_batch` values make
+  that scope auditable. Other unexported batches (for example disposable smoke
+  runs) are not captured here.
 - Historical vote data from panel runs **before** this mechanism landed lives
   only on the machine that ran them. Recovered legacy batches can be archived
   for audit with `write_vote_provenance(..., require_evidence=False)`, but the

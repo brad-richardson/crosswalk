@@ -3719,6 +3719,19 @@ class TestStitchingUiHooks:
             assert 'data-cls="residential"' in html
             assert 'data-name="Main St"' in html
             assert 'data-cls="footway"' in html
+            # Expanded metadata identifies the full source id and the same
+            # short R/T label used by the map pills, alongside class + name.
+            assert "GERS ID" in html
+            assert "Target ID" in html
+            assert "Group ID" in html
+            assert 'class="detail-id" title="r1">r1</span>' in html
+            short_id_title = (
+                'class="detail-short-id" '
+                'title="Short ID used by the map and assignment controls">'
+            )
+            assert f"{short_id_title}R1</span>" in html
+            assert f"{short_id_title}T1</span>" in html
+            assert f"{short_id_title}T2</span>" in html
             # Sliver tags are passive evidence: show an indicator, never an
             # exclusion control that disagrees with SET-membership storage.
             assert "SLIVER warnings" in html

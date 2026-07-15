@@ -310,9 +310,16 @@
         <div class="group-details" id="group-details">
             <div class="details-section">
                 <div class="details-header">Ref</div>
+                <div class="detail-row detail-column-head" aria-hidden="true">
+                    <span>GERS ID</span>
+                    <span>Group ID</span>
+                    <span>Class</span>
+                    <span>Name</span>
+                </div>
                 {% for ref in ref_details %}
                 <div class="detail-row">
                     <span class="detail-id" title="{{ ref.id }}">{{ ref.id }}</span>
+                    <span class="detail-short-id" title="Short ID used by the map and assignment controls">R{{ loop.index }}</span>
                     <span class="detail-attr">{{ ref.cls or '—' }}</span>
                     <span class="detail-attr">{{ ref.name or '—' }}</span>
                 </div>
@@ -320,9 +327,16 @@
             </div>
             <div class="details-section">
                 <div class="details-header">Target</div>
+                <div class="detail-row detail-column-head" aria-hidden="true">
+                    <span>Target ID</span>
+                    <span>Group ID</span>
+                    <span>Class</span>
+                    <span>Name</span>
+                </div>
                 {% for tgt in target_details %}
                 <div class="detail-row">
                     <span class="detail-id" title="{{ tgt.id }}">{{ tgt.id }}</span>
+                    <span class="detail-short-id" title="Short ID used by the map and assignment controls">T{{ loop.index }}</span>
                     <span class="detail-attr">{{ tgt.cls or '—' }}</span>
                     <span class="detail-attr">{{ tgt.name or '—' }}</span>
                 </div>

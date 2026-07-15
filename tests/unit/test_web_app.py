@@ -58,6 +58,13 @@ class TestRoutes:
         response = client.get("/labeling")
         assert '<div id="map">' in response.text
 
+    def test_dashboard_menu_links_to_stitching_review(self, client):
+        """The standalone dashboard menu exposes every review mode."""
+        response = client.get("/dashboard")
+        assert response.status_code == 200
+        assert 'href="/stitching-review"' in response.text
+        assert "Stitching Review" in response.text
+
 
 class TestBaseTemplate:
     """Tests for the base HTML template content."""

@@ -2075,10 +2075,20 @@ body {
 }
 
 .detail-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(96px, 1.35fr) 48px minmax(68px, 0.8fr) minmax(80px, 1fr);
     gap: 8px;
     line-height: 1.6;
     align-items: baseline;
+}
+
+.detail-column-head {
+    color: var(--text-muted);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.35;
+    text-transform: uppercase;
 }
 
 .detail-id {
@@ -2088,8 +2098,15 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 120px;
-    flex-shrink: 0;
+    min-width: 0;
+}
+
+.detail-short-id {
+    color: var(--accent-primary);
+    font-family: monospace;
+    font-size: 0.7rem;
+    font-weight: 700;
+    white-space: nowrap;
 }
 
 .detail-attr {
@@ -2097,6 +2114,7 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
 }
 
 /* Group card positioning */
