@@ -1448,6 +1448,27 @@ def test_metadata_and_prompt_surface_aligned_physical_evidence(tmp_path):
     assert "NOT a claim that either road" in prompt
 
 
+def test_metadata_and_prompt_surface_same_side_coincidence(tmp_path):
+    g = make_struct_group()
+    g["ref_ids"] = [R1, R2]
+    g["ref_geometries"] = {
+        R1: _line([[6.0, 46.0], [6.001, 46.0]]),
+        R2: _line([[6.0002, 46.00001], [6.0008, 46.00001]]),
+    }
+    g["ref_classes"] = {R1: "trunk", R2: "cycleway"}
+
+    group_dir = tmp_path / "coincidence"
+    meta = generate_group_evidence(g, group_dir)
+    rows = meta["same_side_coincidence"]["reference"]
+    assert {row["label"] for row in rows} == {"R1", "R2"}
+    assert all(row["role_conflict"] for row in rows)
+
+    prompt = (group_dir / "prompt.txt").read_text()
+    assert "Same-side coincidence (experimental, neutral context):" in prompt
+    assert "R1 overlaps R2" in prompt
+    assert "NOT assert a bridge, tunnel, or layer" in prompt
+
+
 def test_build_metadata_graceful_without_structure():
     """No #267 fields anywhere -> empty structure dict, no per-edge struct keys."""
     g = make_group()

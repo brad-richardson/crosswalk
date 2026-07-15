@@ -13,7 +13,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+import pyproj
 import shapely
+from shapely.ops import transform
 
 
 @dataclass(frozen=True)
@@ -25,11 +27,12 @@ class CoincidentAlternativeResult:
     max_symmetric_fraction: float
     alternative_count: int
     has_role_conflict: bool
+    alternative_ids: tuple[str, ...] = ()
 
 
 def compute_coincident_alternatives(
     segment,
-    alternatives: Iterable[tuple[Any, Any]],
+    alternatives: Iterable[tuple[Any, Any] | tuple[Any, Any, Any]],
     *,
     segment_role: Any = None,
     tolerance_m: float = 3.0,
@@ -50,7 +53,10 @@ def compute_coincident_alternatives(
     max_symmetric_fraction = 0.0
     alternative_count = 0
     has_role_conflict = False
-    for geometry, role in alternatives:
+    alternative_ids: list[str] = []
+    for alternative in alternatives:
+        geometry, role = alternative[:2]
+        alternative_id = str(alternative[2]) if len(alternative) > 2 else None
         if geometry is None or geometry.is_empty or geometry.length <= 0:
             continue
         segment_overlap = segment.intersection(geometry.buffer(tolerance_m)).length
@@ -67,6 +73,8 @@ def compute_coincident_alternatives(
             continue
         alternative_count += 1
         qualifying_buffers.append(geometry.buffer(tolerance_m))
+        if alternative_id is not None:
+            alternative_ids.append(alternative_id)
         if segment_role is not None and role is not None and role != segment_role:
             has_role_conflict = True
 
@@ -82,4 +90,69 @@ def compute_coincident_alternatives(
         max_symmetric_fraction=max_symmetric_fraction,
         alternative_count=alternative_count,
         has_role_conflict=has_role_conflict,
+        alternative_ids=tuple(alternative_ids),
     )
+
+
+def compute_same_side_coincidence_context(
+    geometries: dict[str, Any],
+    *,
+    roles: dict[str, Any] | None = None,
+    labels: dict[str, str] | None = None,
+    source_crs: str = "EPSG:4326",
+    tolerance_m: float = 3.0,
+    qualifying_fraction: float = 0.8,
+    min_coincident_length_m: float = 20.0,
+) -> dict[str, CoincidentAlternativeResult]:
+    """Measure coincident alternatives for every segment on one provider side.
+
+    Stitch sidecars store WGS84 GeoJSON, while the primitive above deliberately
+    operates in metric coordinates. This adapter projects the small group into
+    its local UTM zone and returns only segments with a qualifying alternative.
+    Labels are carried into ``alternative_ids`` so evidence packs can name the
+    exact R#/T# alternatives instead of exposing a context-free scalar.
+    """
+    roles = roles or {}
+    labels = labels or {}
+    valid = {
+        str(segment_id): geometry
+        for segment_id, geometry in geometries.items()
+        if geometry is not None and not geometry.is_empty and geometry.length > 0
+    }
+    if len(valid) < 2:
+        return {}
+
+    union = shapely.union_all(list(valid.values()))
+    centroid = union.centroid
+    zone = min(60, max(1, int((centroid.x + 180) / 6) + 1))
+    epsg = (32600 if centroid.y >= 0 else 32700) + zone
+    transformer = pyproj.Transformer.from_crs(
+        source_crs, f"EPSG:{epsg}", always_xy=True
+    )
+    projected = {
+        segment_id: transform(transformer.transform, geometry)
+        for segment_id, geometry in valid.items()
+    }
+
+    results: dict[str, CoincidentAlternativeResult] = {}
+    for segment_id, geometry in projected.items():
+        alternatives = [
+            (
+                other_geometry,
+                roles.get(other_id),
+                labels.get(other_id, other_id),
+            )
+            for other_id, other_geometry in projected.items()
+            if other_id != segment_id
+        ]
+        result = compute_coincident_alternatives(
+            geometry,
+            alternatives,
+            segment_role=roles.get(segment_id),
+            tolerance_m=tolerance_m,
+            qualifying_fraction=qualifying_fraction,
+            min_coincident_length_m=min_coincident_length_m,
+        )
+        if result.alternative_count:
+            results[segment_id] = result
+    return results

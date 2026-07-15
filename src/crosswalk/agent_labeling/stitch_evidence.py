@@ -34,6 +34,7 @@ from shapely.geometry import shape as shape_from_geojson
 from shapely.ops import nearest_points
 
 from ..config import SLIVER_ABS_OVERLAP_M, SLIVER_SPAN_THRESHOLD, settings
+from ..features.coincidence import compute_same_side_coincidence_context
 from ..matching.sliver import (
     edge_overlap_m,
     edge_sliver_tag,
@@ -410,6 +411,49 @@ def build_metadata(group: dict, options_ctx: dict, *, evidence: dict | None = No
     ref_physical = group.get("ref_physical", {})
     target_physical = group.get("target_physical", {})
 
+    # Same-side near-coincidence is geometry-derived ambiguity, not a fabricated
+    # physical layer. Surface it at group level so a resolver can value network
+    # continuity when pairwise geometry cannot identify which overlapping road
+    # representation is intended (for example Geneva's covered trench).
+    ref_lines = dict(_iter_lines(group.get("ref_geometries", {})))
+    target_lines = dict(_iter_lines(group.get("target_geometries", {})))
+    coincidence = {
+        "reference": compute_same_side_coincidence_context(
+            ref_lines,
+            roles=ref_classes,
+            labels=ref_labels,
+        ),
+        "target": compute_same_side_coincidence_context(
+            target_lines,
+            roles=target_classes,
+            labels=target_labels,
+        ),
+    }
+
+    def _coincidence_rows(side: str) -> list[dict]:
+        side_labels = ref_labels if side == "reference" else target_labels
+        rows = []
+        for segment_id, result in coincidence[side].items():
+            rows.append(
+                {
+                    "label": side_labels.get(segment_id, segment_id),
+                    "id": segment_id,
+                    "covered_fraction": round(result.covered_fraction, 3),
+                    "covered_length_m": round(result.covered_length_m, 1),
+                    "max_symmetric_fraction": round(result.max_symmetric_fraction, 3),
+                    "alternative_count": result.alternative_count,
+                    "alternatives": list(result.alternative_ids),
+                    "role_conflict": result.has_role_conflict,
+                }
+            )
+        return rows
+
+    coincidence_meta = {
+        side: _coincidence_rows(side)
+        for side in ("reference", "target")
+        if coincidence[side]
+    }
+
     # Per-edge junction-sliver flags (hybrid fraction + absolute-meters rule).
     # Slivers are ANNOTATED here, never silently dropped: an option may legitimately
     # exclude one, and the agent should be able to see which edges are artifacts.
@@ -486,6 +530,7 @@ def build_metadata(group: dict, options_ctx: dict, *, evidence: dict | None = No
         "context_clipped": bool(group.get("context_clipped", False)),
         "optimizer_letter": options_ctx.get("optimizer_letter"),
         "structure": group_structure,
+        "same_side_coincidence": coincidence_meta,
         "segments": {
             "reference": [
                 {
@@ -782,6 +827,10 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("  linear-referenced rules. Missing physical evidence means unknown, not ground;")
     lines.append("  road flags are positive observations, so an absent flag is not proof that the")
     lines.append("  provider surveyed that attribute.")
+    lines.append("- 'Same-side coincidence' is geometry-derived ambiguity: two R segments or two")
+    lines.append("  T segments occupy effectively the same centerline for at least 20m. It does")
+    lines.append("  NOT assert a bridge, tunnel, or layer. When pairwise geometry is non-identifying,")
+    lines.append("  use road role and network continuity to decide which representation belongs.")
     lines.append("- The optimizer's own proposed option is labeled below; it is often but not")
     lines.append(
         "  always correct. Judge from the geometry, not from which one is the optimizer's."
@@ -802,6 +851,18 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     struct_summary = _group_struct_str(metadata.get("structure"))
     if struct_summary:
         lines.append(struct_summary)
+    coincidence = metadata.get("same_side_coincidence", {})
+    if coincidence:
+        lines.append("Same-side coincidence (experimental, neutral context):")
+        for side in ("reference", "target"):
+            for row in coincidence.get(side, []):
+                role = "; role/class differs" if row["role_conflict"] else ""
+                alternatives = ", ".join(row["alternatives"])
+                lines.append(
+                    f"  {row['label']} overlaps {alternatives} on the {side} side: "
+                    f"{row['covered_fraction']:.0%} / ~{row['covered_length_m']:.1f}m "
+                    f"covered{role}."
+                )
     lines.append("")
     # EDGES legend: describe every DISTINCT candidate edge exactly once, each given a
     # short id (e1, e2, ... in first-seen order) alongside its R#->T# endpoints.

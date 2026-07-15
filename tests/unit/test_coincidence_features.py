@@ -3,7 +3,10 @@ from __future__ import annotations
 import pytest
 from shapely import LineString
 
-from crosswalk.features.coincidence import compute_coincident_alternatives
+from crosswalk.features.coincidence import (
+    compute_coincident_alternatives,
+    compute_same_side_coincidence_context,
+)
 
 
 def test_short_role_conflicting_line_over_long_line_is_ambiguous() -> None:
@@ -68,3 +71,22 @@ def test_short_endpoint_stub_does_not_create_layer_ambiguity() -> None:
     assert result.max_symmetric_fraction == pytest.approx(1.0)
     assert result.alternative_count == 0
     assert result.covered_length_m == 0.0
+
+
+def test_same_side_context_projects_wgs84_and_names_alternatives() -> None:
+    # Roughly 77m long at Geneva's latitude, offset by ~1.1m.
+    geometries = {
+        "covered": LineString([(6.0, 46.0), (6.001, 46.0)]),
+        "surface": LineString([(6.0002, 46.00001), (6.0008, 46.00001)]),
+        "crossing": LineString([(6.0005, 45.9995), (6.0005, 46.0005)]),
+    }
+    result = compute_same_side_coincidence_context(
+        geometries,
+        roles={"covered": "trunk", "surface": "cycleway", "crossing": "road"},
+        labels={"covered": "R1", "surface": "R2", "crossing": "R3"},
+    )
+
+    assert set(result) == {"covered", "surface"}
+    assert result["covered"].alternative_ids == ("R2",)
+    assert result["surface"].alternative_ids == ("R1",)
+    assert result["covered"].has_role_conflict is True
