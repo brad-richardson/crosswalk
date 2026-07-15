@@ -121,9 +121,7 @@ def compute_physical_pair_features(
         if flag not in target_domains or flag not in ref_domains:
             flag_deltas[feature] = float("nan")
             continue
-        ref_fraction = _flag_fraction(
-            ref_road_flags_lr, flag, ref_start_frac, ref_end_frac
-        )
+        ref_fraction = _flag_fraction(ref_road_flags_lr, flag, ref_start_frac, ref_end_frac)
         target_fraction = _flag_fraction(
             target_road_flags_lr, flag, target_start_frac, target_end_frac
         )
@@ -149,9 +147,7 @@ def compute_physical_pair_features(
         vertical_nonzero_delta = abs(ref_nonzero - target_nonzero)
         vertical_sign_delta = abs(ref_sign - target_sign) / 2.0
         same_nonzero_sign = ref_sign != 0.0 and target_sign != 0.0 and ref_sign * target_sign > 0
-        vertical_positive_match = (
-            min(ref_nonzero, target_nonzero) if same_nonzero_sign else 0.0
-        )
+        vertical_positive_match = min(ref_nonzero, target_nonzero) if same_nonzero_sign else 0.0
 
     primitive_conflicts = _finite(
         [
@@ -160,9 +156,7 @@ def compute_physical_pair_features(
             vertical_sign_delta,
         ]
     )
-    positive_matches = _finite(
-        [physical_flag_positive_match, vertical_positive_match]
-    )
+    positive_matches = _finite([physical_flag_positive_match, vertical_positive_match])
     comparable_count = sum(
         not math.isnan(value)
         for value in (
@@ -181,8 +175,6 @@ def compute_physical_pair_features(
         "physical_structure_conflict": (
             max(primitive_conflicts) if primitive_conflicts else float("nan")
         ),
-        "physical_positive_match": (
-            max(positive_matches) if positive_matches else float("nan")
-        ),
+        "physical_positive_match": (max(positive_matches) if positive_matches else float("nan")),
         "physical_comparable_count": float(comparable_count),
     }

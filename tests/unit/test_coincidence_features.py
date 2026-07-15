@@ -90,3 +90,23 @@ def test_same_side_context_projects_wgs84_and_names_alternatives() -> None:
     assert result["covered"].alternative_ids == ("R2",)
     assert result["surface"].alternative_ids == ("R1",)
     assert result["covered"].has_role_conflict is True
+
+
+def test_same_side_context_selects_utm_from_non_wgs84_centroid() -> None:
+    # EPSG:3857 coordinates around Geneva. The adapter must transform the
+    # centroid to lon/lat before choosing a UTM zone.
+    transformer = __import__("pyproj").Transformer.from_crs(
+        "EPSG:4326", "EPSG:3857", always_xy=True
+    )
+    first = [transformer.transform(6.0, 46.0), transformer.transform(6.001, 46.0)]
+    second = [
+        transformer.transform(6.0002, 46.00001),
+        transformer.transform(6.0008, 46.00001),
+    ]
+
+    result = compute_same_side_coincidence_context(
+        {"a": LineString(first), "b": LineString(second)},
+        source_crs="EPSG:3857",
+    )
+
+    assert set(result) == {"a", "b"}

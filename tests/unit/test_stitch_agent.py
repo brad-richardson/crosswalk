@@ -1458,15 +1458,30 @@ def test_metadata_and_prompt_surface_same_side_coincidence(tmp_path):
     g["ref_classes"] = {R1: "trunk", R2: "cycleway"}
 
     group_dir = tmp_path / "coincidence"
-    meta = generate_group_evidence(g, group_dir)
+    meta = generate_group_evidence(g, group_dir, include_same_side_coincidence=True)
     rows = meta["same_side_coincidence"]["reference"]
     assert {row["label"] for row in rows} == {"R1", "R2"}
     assert all(row["role_conflict"] for row in rows)
 
     prompt = (group_dir / "prompt.txt").read_text()
-    assert "Same-side coincidence (experimental, neutral context):" in prompt
+    assert "Same-side coincidence (experimental geometry context):" in prompt
     assert "R1 overlaps R2" in prompt
     assert "NOT assert a bridge, tunnel, or layer" in prompt
+
+
+def test_same_side_coincidence_is_opt_in_for_general_evidence(tmp_path):
+    g = make_struct_group()
+    g["ref_ids"] = [R1, R2]
+    g["ref_geometries"] = {
+        R1: _line([[6.0, 46.0], [6.001, 46.0]]),
+        R2: _line([[6.0002, 46.00001], [6.0008, 46.00001]]),
+    }
+
+    group_dir = tmp_path / "no-coincidence"
+    meta = generate_group_evidence(g, group_dir)
+
+    assert meta["same_side_coincidence"] == {}
+    assert "Same-side coincidence" not in (group_dir / "prompt.txt").read_text()
 
 
 def test_build_metadata_graceful_without_structure():
@@ -2239,6 +2254,21 @@ def test_evaluate_batch_uses_batch_json_candidate_edges(tmp_path):
 def test_pack_feedback_column_present_in_votes_schema():
     # The votes.csv schema must carry the diagnostic self-report column.
     assert "pack_feedback" in sr.VOTES_COLUMNS
+
+
+def test_abstain_reason_is_persisted_in_votes_schema():
+    vote = sr.Vote(
+        group_id="group",
+        provider="codex",
+        model="model",
+        choice="ABSTAIN",
+        confidence=0.0,
+        reasoning="",
+        abstain_reason=sr.AbstainReason.TIMEOUT,
+    )
+
+    assert "abstain_reason" in sr.VOTES_COLUMNS
+    assert sr._vote_row(vote)["abstain_reason"] == "timeout"
 
 
 def test_augment_prompt_only_adds_feedback_request():

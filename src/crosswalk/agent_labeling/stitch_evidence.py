@@ -398,7 +398,13 @@ def prune_options_for_panel(
     }
 
 
-def build_metadata(group: dict, options_ctx: dict, *, evidence: dict | None = None) -> dict:
+def build_metadata(
+    group: dict,
+    options_ctx: dict,
+    *,
+    evidence: dict | None = None,
+    include_same_side_coincidence: bool = False,
+) -> dict:
     """Build the metadata dict describing the group and its options."""
     ref_ids = group.get("ref_ids", list(group.get("ref_geometries", {}).keys()))
     target_ids = group.get("target_ids", list(group.get("target_geometries", {}).keys()))
@@ -411,29 +417,30 @@ def build_metadata(group: dict, options_ctx: dict, *, evidence: dict | None = No
     ref_physical = group.get("ref_physical", {})
     target_physical = group.get("target_physical", {})
 
-    # Same-side near-coincidence is geometry-derived ambiguity, not a fabricated
-    # physical layer. Surface it at group level so a resolver can value network
-    # continuity when pairwise geometry cannot identify which overlapping road
-    # representation is intended (for example Geneva's covered trench).
-    ref_lines = dict(_iter_lines(group.get("ref_geometries", {})))
-    target_lines = dict(_iter_lines(group.get("target_geometries", {})))
-    coincidence = {
-        "reference": compute_same_side_coincidence_context(
-            ref_lines,
-            roles=ref_classes,
-            labels=ref_labels,
-        ),
-        "target": compute_same_side_coincidence_context(
-            target_lines,
-            roles=target_classes,
-            labels=target_labels,
-        ),
-    }
+    # Same-side near-coincidence is experimental geometry context. Keep it off
+    # for ordinary evidence generation until the calibration wave is reviewed;
+    # an experiment opts in through its batch metadata.
+    coincidence = {}
+    if include_same_side_coincidence:
+        ref_lines = dict(_iter_lines(group.get("ref_geometries", {})))
+        target_lines = dict(_iter_lines(group.get("target_geometries", {})))
+        coincidence = {
+            "reference": compute_same_side_coincidence_context(
+                ref_lines,
+                roles=ref_classes,
+                labels=ref_labels,
+            ),
+            "target": compute_same_side_coincidence_context(
+                target_lines,
+                roles=target_classes,
+                labels=target_labels,
+            ),
+        }
 
     def _coincidence_rows(side: str) -> list[dict]:
         side_labels = ref_labels if side == "reference" else target_labels
         rows = []
-        for segment_id, result in coincidence[side].items():
+        for segment_id, result in coincidence.get(side, {}).items():
             rows.append(
                 {
                     "label": side_labels.get(segment_id, segment_id),
@@ -449,9 +456,7 @@ def build_metadata(group: dict, options_ctx: dict, *, evidence: dict | None = No
         return rows
 
     coincidence_meta = {
-        side: _coincidence_rows(side)
-        for side in ("reference", "target")
-        if coincidence[side]
+        side: _coincidence_rows(side) for side in ("reference", "target") if coincidence.get(side)
     }
 
     # Per-edge junction-sliver flags (hybrid fraction + absolute-meters rule).
@@ -819,18 +824,41 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("  'corr T#' compares targets with targets. R0 and T0 are independent labels and")
     lines.append("  do not assert cross-side identity. Use corridor context only after judging")
     lines.append("  whether the two segments represent the same traveled way.")
-    lines.append(
-        "- 'R physical' / 'T physical' reports bridge, tunnel, covered/indoor, and"
+    has_physical = any(
+        segment.get("physical")
+        for side in metadata.get("segments", {}).values()
+        for segment in side
+    ) or any(
+        "physical" in str(edge.get("structural", ""))
+        for option in metadata.get("options", [])
+        for edge in option.get("edges", [])
     )
-    lines.append("  vertical layer rules")
-    lines.append("  clipped to that edge's own aligned fractions. Segment details retain the full")
-    lines.append("  linear-referenced rules. Missing physical evidence means unknown, not ground;")
-    lines.append("  road flags are positive observations, so an absent flag is not proof that the")
-    lines.append("  provider surveyed that attribute.")
-    lines.append("- 'Same-side coincidence' is geometry-derived ambiguity: two R segments or two")
-    lines.append("  T segments occupy effectively the same centerline for at least 20m. It does")
-    lines.append("  NOT assert a bridge, tunnel, or layer. When pairwise geometry is non-identifying,")
-    lines.append("  use road role and network continuity to decide which representation belongs.")
+    if has_physical:
+        lines.append("- 'R physical' / 'T physical' reports bridge, tunnel, covered/indoor, and")
+        lines.append("  vertical layer rules")
+        lines.append(
+            "  clipped to that edge's own aligned fractions. Segment details retain the full"
+        )
+        lines.append(
+            "  linear-referenced rules. Missing physical evidence means unknown, not ground;"
+        )
+        lines.append(
+            "  road flags are positive observations, so an absent flag is not proof that the"
+        )
+        lines.append("  provider surveyed that attribute.")
+    if metadata.get("same_side_coincidence"):
+        lines.append(
+            "- 'Same-side coincidence' is geometry-derived ambiguity: two R segments or two"
+        )
+        lines.append(
+            "  T segments occupy effectively the same centerline for at least 20m. It does"
+        )
+        lines.append(
+            "  NOT assert a bridge, tunnel, or layer. When pairwise geometry is non-identifying,"
+        )
+        lines.append(
+            "  use road role and network continuity to decide which representation belongs."
+        )
     lines.append("- The optimizer's own proposed option is labeled below; it is often but not")
     lines.append(
         "  always correct. Judge from the geometry, not from which one is the optimizer's."
@@ -853,7 +881,7 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
         lines.append(struct_summary)
     coincidence = metadata.get("same_side_coincidence", {})
     if coincidence:
-        lines.append("Same-side coincidence (experimental, neutral context):")
+        lines.append("Same-side coincidence (experimental geometry context):")
         for side in ("reference", "target"):
             for row in coincidence.get(side, []):
                 role = "; role/class differs" if row["role_conflict"] else ""
@@ -944,6 +972,7 @@ def generate_group_evidence(
     *,
     source_artifacts: dict | None = None,
     batch_generation_source: dict | None = None,
+    include_same_side_coincidence: bool = False,
 ) -> dict | None:
     """Generate the full evidence pack for one group. Returns the metadata dict.
 
@@ -1001,7 +1030,12 @@ def generate_group_evidence(
         img = render_option(group, opt)
         img.save(group_dir / f"option_{opt['letter']}.png")
 
-    metadata = build_metadata(group, options_ctx, evidence=evidence)
+    metadata = build_metadata(
+        group,
+        options_ctx,
+        evidence=evidence,
+        include_same_side_coincidence=include_same_side_coincidence,
+    )
     if prune_info is not None:
         metadata["options_pruned"] = prune_info
 
@@ -1052,6 +1086,8 @@ def generate_stitch_evidence(
     wanted = set(group_ids) if group_ids else None
 
     generated: list[str] = []
+    experiment = batch.get("experiment") or {}
+    include_same_side_coincidence = bool(experiment.get("same_side_coincidence_visible", False))
     for group in groups:
         gid = group.get("group_id")
         if wanted is not None and gid not in wanted:
@@ -1061,6 +1097,7 @@ def generate_stitch_evidence(
             output_dir / str(gid),
             source_artifacts=batch.get("source_artifacts"),
             batch_generation_source=batch.get("batch_generation_source"),
+            include_same_side_coincidence=include_same_side_coincidence,
         )
         if meta is not None:
             generated.append(gid)
