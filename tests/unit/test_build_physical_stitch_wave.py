@@ -457,10 +457,12 @@ def test_parallel_schedule_serializes_same_batch_dir_and_completes_all(
     panel = get_panel("v7-candidate")
     batch_a = tmp_path / "batch-a"
     batch_b = tmp_path / "batch-b"
+    # Contiguous-per-dir order mirrors the real manifests: a dispatcher must
+    # skip ahead past a busy dir (a-2) to reach b-1 for any parallelism.
     schedule = [
         _schedule_row(1, batch_a, "a-1"),
-        _schedule_row(2, batch_b, "b-1"),
-        _schedule_row(3, batch_a, "a-2"),
+        _schedule_row(2, batch_a, "a-2"),
+        _schedule_row(3, batch_b, "b-1"),
         _schedule_row(4, batch_b, "b-2"),
     ]
 
@@ -469,20 +471,27 @@ def test_parallel_schedule_serializes_same_batch_dir_and_completes_all(
     max_active_per_dir: dict[Path, int] = {}
     max_active_total = 0
     completed: set[str] = set()
+    spans: dict[str, tuple[float, float]] = {}
 
     def fake_run_batch(batch_dir, *, group_ids, panel, **_kwargs):
         nonlocal max_active_total
         batch_dir = Path(batch_dir)
+        begin = time.monotonic()
         with state_lock:
             active[batch_dir] = active.get(batch_dir, 0) + 1
             max_active_per_dir[batch_dir] = max(
                 max_active_per_dir.get(batch_dir, 0), active[batch_dir]
             )
             max_active_total = max(max_active_total, sum(active.values()))
-        time.sleep(0.02)
+        time.sleep(0.05)
         with state_lock:
             active[batch_dir] -= 1
             completed.update(group_ids)
+            if len(group_ids) == 1:
+                # Per-pack spans only: the final consolidation pass re-calls
+                # run_batch with each dir's full roster and must not overwrite
+                # the scheduled pack's timing.
+                spans[group_ids[0]] = (begin, time.monotonic())
         votes = _panel_votes(panel, group_ids)
         consensus = pd.DataFrame([{"group_id": group_id} for group_id in group_ids])
         return votes, consensus
@@ -500,6 +509,13 @@ def test_parallel_schedule_serializes_same_batch_dir_and_completes_all(
     # concurrent run_batch calls, while distinct batch dirs may overlap.
     assert max(max_active_per_dir.values()) == 1
     assert completed == {"a-1", "a-2", "b-1", "b-2"}
+    # Real parallelism happened: the dispatcher skipped past busy-dir a-2 and
+    # ran b-1 while a-1 was still in flight.
+    assert max_active_total >= 2
+    assert spans["b-1"][0] < spans["a-1"][1]
+    # Manifest order within a dir is preserved.
+    assert spans["a-2"][0] >= spans["a-1"][1]
+    assert spans["b-2"][0] >= spans["b-1"][1]
 
 
 def test_parallel_schedule_halts_all_lanes_after_first_failure(
@@ -532,9 +548,15 @@ def test_parallel_schedule_halts_all_lanes_after_first_failure(
             raise wave_runner.ProviderInvocationError("claude: quota symptom")
         if group_ids == ["slow-1"]:
             slow_started.set()
-            # Hold this pack in flight until the other lane has failed, so the
-            # stop event is set before this lane considers slow-2.
+            # Hold this pack in flight until the other worker has failed, so
+            # the stop event is set before this worker considers slow-2. The
+            # short sleep gives the failing worker's `stop.set()` (which runs
+            # a few frames after failure_raised.set()) a wide margin over this
+            # worker's post-return bookkeeping.
             assert failure_raised.wait(timeout=10)
+            import time
+
+            time.sleep(0.05)
         votes = _panel_votes(panel, group_ids)
         consensus = pd.DataFrame([{"group_id": group_id} for group_id in group_ids])
         return votes, consensus
@@ -556,6 +578,85 @@ def test_parallel_schedule_halts_all_lanes_after_first_failure(
     # is cancelled or exits on the stop event without invoking the panel.
     assert "slow-2" not in started
     assert "queued-1" not in started
+
+
+@pytest.mark.parametrize("group_workers", [1, 2])
+def test_pause_drains_in_flight_pack_and_skips_consolidation(
+    group_workers: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    panel = get_panel("v7-candidate")
+    # Two packs in one dir plus a second dir: pausing during the very first
+    # pack must prevent every later pack AND the final consolidation pass
+    # (which would otherwise invoke the panel on not-yet-voted groups).
+    schedule = [
+        _schedule_row(1, tmp_path / "batch-a", "a-1"),
+        _schedule_row(2, tmp_path / "batch-a", "a-2"),
+        _schedule_row(3, tmp_path / "batch-b", "b-1"),
+    ]
+    pause = threading.Event()
+    calls: list[list[str]] = []
+    calls_lock = threading.Lock()
+
+    def fake_run_batch(_batch_dir, *, group_ids, panel, **_kwargs):
+        with calls_lock:
+            calls.append(list(group_ids))
+        if group_ids == ["a-1"]:
+            pause.set()
+        votes = _panel_votes(panel, group_ids)
+        consensus = pd.DataFrame([{"group_id": group_id} for group_id in group_ids])
+        return votes, consensus
+
+    monkeypatch.setattr(wave_runner, "run_batch", fake_run_batch)
+    paused = wave_runner.execute_schedule(
+        {"run_schedule": schedule},
+        panel,
+        timeout=600,
+        invocation_budget=600,
+        group_workers=group_workers,
+        pause=pause,
+    )
+
+    assert paused is True
+    # a-2 never starts; b-1 may only have started before the pause landed
+    # (parallel mode); no multi-group consolidation call ever happens.
+    flat = [group_id for call in calls for group_id in call]
+    assert "a-1" in flat
+    assert "a-2" not in flat
+    assert all(len(call) == 1 for call in calls)
+
+
+def test_pause_handler_debounces_duplicate_signals_then_aborts() -> None:
+    import threading
+
+    pause = threading.Event()
+    monotonic = {"now": 100.0}
+    handler = {}
+
+    def fake_signal(signum, fn):
+        handler[signum] = fn
+
+    original_signal, original_monotonic = wave_runner.signal.signal, wave_runner.time.monotonic
+    wave_runner.signal.signal = fake_signal
+    wave_runner.time.monotonic = lambda: monotonic["now"]
+    try:
+        wave_runner._install_pause_handler(pause)
+        sigint = handler[wave_runner.signal.SIGINT]
+
+        sigint(wave_runner.signal.SIGINT, None)
+        assert pause.is_set()
+        # uv run forwards the same Ctrl-C to the child: a duplicate inside the
+        # debounce window must NOT abort the drain.
+        monotonic["now"] = 100.5
+        sigint(wave_runner.signal.SIGINT, None)
+        # A deliberate second signal after the window force-aborts.
+        monotonic["now"] = 103.0
+        with pytest.raises(KeyboardInterrupt):
+            sigint(wave_runner.signal.SIGINT, None)
+    finally:
+        wave_runner.signal.signal = original_signal
+        wave_runner.time.monotonic = original_monotonic
 
 
 def test_parallel_schedule_applies_wave_timeout_breaker(
