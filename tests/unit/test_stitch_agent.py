@@ -30,6 +30,7 @@ from crosswalk.agent_labeling.stitch_evidence import (
     build_prompt,
     generate_group_evidence,
     prune_options_for_panel,
+    render_option,
 )
 from crosswalk.agent_labeling.stitch_provenance import (
     EvidenceProvenanceError,
@@ -91,6 +92,112 @@ def make_group() -> dict:
         "ref_classes": {R1: "residential", R2: "residential"},
         "target_classes": {T1: "local", T2: "local"},
     }
+
+
+# ---------------------------------------------------------------------------
+# Option image pair (edge) rendering
+# ---------------------------------------------------------------------------
+
+
+def _pair_group() -> dict:
+    """A 2x2 group whose two options share members but differ only in pairing.
+
+    R1/R2 and T1/T2 are near-vertical parallel segments (R1,T1 on the left;
+    R2,T2 on the right). Option X ties R1-T1 + R2-T2 (short local ties); option Y
+    ties R1-T2 + R2-T1 (long crossing ties). Both options' member sets are exactly
+    {R1,R2}x{T1,T2}, so pre-fix member-only highlighting made them identical.
+    """
+    return {
+        "group_id": "gx",
+        "match_type": "M:N",
+        "ref_ids": ["r1", "r2"],
+        "target_ids": ["t1", "t2"],
+        "ref_geometries": {
+            "r1": _line([[0.0, 0.0], [0.0, 1.0]]),
+            "r2": _line([[1.0, 0.0], [1.0, 1.0]]),
+        },
+        "target_geometries": {
+            "t1": _line([[0.05, 0.0], [0.05, 1.0]]),
+            "t2": _line([[1.05, 0.0], [1.05, 1.0]]),
+        },
+    }
+
+
+def _pair_option(letter: str, pairs: list[tuple[str, str]], **edge_extra) -> dict:
+    edges = [{"ref_id": r, "target_id": t, **edge_extra} for r, t in pairs]
+    return {
+        "letter": letter,
+        "is_optimizer": False,
+        "edges": edges,
+        "active_refs": sorted({r for r, _ in pairs}),
+        "active_targets": sorted({t for _, t in pairs}),
+    }
+
+
+def test_render_option_distinguishes_identical_members_different_edges():
+    """Acceptance: same member set, different pairings -> different image bytes."""
+    group = _pair_group()
+    opt_x = _pair_option("X", [("r1", "t1"), ("r2", "t2")])
+    opt_y = _pair_option("Y", [("r1", "t2"), ("r2", "t1")])
+    # Sanity: the two options really do share an identical member set.
+    assert opt_x["active_refs"] == opt_y["active_refs"]
+    assert opt_x["active_targets"] == opt_y["active_targets"]
+
+    img_x = render_option(group, opt_x)
+    img_y = render_option(group, opt_y)
+    assert img_x.size == img_y.size
+    assert img_x.tobytes() != img_y.tobytes()
+
+
+def test_render_option_deterministic():
+    """Same group + option renders to byte-identical images across calls."""
+    group = _pair_group()
+    opt = _pair_option("X", [("r1", "t1"), ("r2", "t2")])
+    assert render_option(group, opt).tobytes() == render_option(group, opt).tobytes()
+
+
+def test_render_option_legacy_edges_without_fracs_do_not_crash():
+    """Edges lacking alignment fracs (or absent entirely) fall back gracefully."""
+    group = _pair_group()
+    # Legacy edges: no gers_/local_ fracs -> geometric-midpoint fallback tie.
+    legacy = _pair_option("X", [("r1", "t1"), ("r2", "t2")])
+    img_legacy = render_option(group, legacy)
+    assert img_legacy.size[0] > 0
+
+    # No edges at all (pre-edges option dict): renders members only, no crash.
+    no_edges = {
+        "letter": "Z",
+        "is_optimizer": False,
+        "active_refs": ["r1"],
+        "active_targets": ["t1"],
+    }
+    img_no_edges = render_option(group, no_edges)
+    assert img_no_edges.size == img_legacy.size
+
+
+def test_render_option_uses_aligned_span_midpoints():
+    """Two edges sharing a ref but aligning to different spans tie at different
+    points, so per-edge aligned-span midpoints (not one shared segment midpoint)
+    drive the connectors."""
+    group = _pair_group()
+    # Same pairing, but edge fracs place the R1 tie endpoint at opposite ends.
+    lower = _pair_option(
+        "A",
+        [("r1", "t1")],
+        gers_start_frac=0.0,
+        gers_end_frac=0.2,
+        local_start_frac=0.0,
+        local_end_frac=0.2,
+    )
+    upper = _pair_option(
+        "B",
+        [("r1", "t1")],
+        gers_start_frac=0.8,
+        gers_end_frac=1.0,
+        local_start_frac=0.8,
+        local_end_frac=1.0,
+    )
+    assert render_option(group, lower).tobytes() != render_option(group, upper).tobytes()
 
 
 # ---------------------------------------------------------------------------
