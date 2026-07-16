@@ -70,6 +70,15 @@ LABEL_COLOR = (30, 30, 30)
 OPTION_LINE_WIDTH = 4
 GROUP_LINE_WIDTH = 3
 CONTEXT_WIDTH = 1
+# Pair (edge) tie: a thin connector drawn between the aligned-span midpoints of an
+# option's paired ref/target segments. A saturated dark green, deliberately
+# distinct from REFERENCE_COLOR (blue), TARGET_COLOR (red), and the faded/context
+# grays, so the option's exact edge set reads clearly on top of the members.
+TIE_COLOR = (46, 125, 50)
+TIE_LINE_WIDTH = 2
+TIE_ENDPOINT_RADIUS = 2
+PAIR_KEY_PADDING = 4
+PAIR_KEY_LINE_HEIGHT = 11
 
 # Stitch groups can span whole chains (1-2km) now that group geometry is never
 # clipped to a 500m box. The generic 512px render cap would squash a long chain
@@ -221,11 +230,114 @@ def render_group_overview(group: dict, size: tuple[int, int] | None = None) -> I
     return img
 
 
+def _edge_tie_endpoints(
+    edge: dict, ref_line: LineString | None, tgt_line: LineString | None
+) -> tuple | None:
+    """Return ``(ref_point, target_point)`` for a pair edge's tie connector.
+
+    Each endpoint is the midpoint of that side's ALIGNED span — interpolated from
+    ``gers_start_frac``/``gers_end_frac`` (ref) and ``local_start_frac``/
+    ``local_end_frac`` (target) when present — so distinct edges that share a
+    segment land their ties at distinct points and stay visually separable. Falls
+    back to the geometric midpoint (0.5) for a side whose fracs are absent (legacy
+    edges). Returns ``None`` when either side's geometry is missing/degenerate.
+    """
+    if ref_line is None or tgt_line is None:
+        return None
+
+    def _mid(line: LineString, start, end):
+        try:
+            if start is not None and end is not None:
+                return line.interpolate((float(start) + float(end)) / 2.0, normalized=True)
+            return line.interpolate(0.5, normalized=True)
+        except Exception:
+            return None
+
+    rp = _mid(ref_line, edge.get("gers_start_frac"), edge.get("gers_end_frac"))
+    tp = _mid(tgt_line, edge.get("local_start_frac"), edge.get("local_end_frac"))
+    if rp is None or tp is None:
+        return None
+    return rp, tp
+
+
+def _pair_key_lines(
+    option: dict,
+    ref_labels: dict[str, str],
+    target_labels: dict[str, str],
+    image_width: int,
+) -> list[str]:
+    """Return compact, wrapped text lines describing an option's exact pairs.
+
+    Spatial ties can collapse to identical pixels when two or more segments are
+    geometrically coincident. The pair key is therefore the deterministic
+    fallback that keeps distinct edge sets visually distinguishable even in
+    that degenerate-but-valid case.
+    """
+    pairs = []
+    for edge in option.get("edges", []) or []:
+        ref_id = str(edge.get("ref_id", ""))
+        target_id = str(edge.get("target_id", ""))
+        ref_label = ref_labels.get(ref_id, ref_id or "?")
+        target_label = target_labels.get(target_id, target_id or "?")
+        pairs.append(f"{ref_label}-{target_label}")
+    if not pairs:
+        return []
+    pairs.sort()
+
+    # PIL's default bitmap font is about 6px per character. Greedy wrapping
+    # keeps the key within the image without adding a font dependency.
+    max_chars = max(20, (image_width - 2 * PAIR_KEY_PADDING) // 6)
+    lines: list[str] = []
+    current = "Pairs:"
+    for pair in pairs:
+        candidate = f"{current} {pair}" if current else pair
+        if len(candidate) <= max_chars or current == "Pairs:":
+            current = candidate
+        else:
+            lines.append(current)
+            current = pair
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _draw_pair_key(
+    draw: ImageDraw.ImageDraw,
+    option: dict,
+    ref_labels: dict[str, str],
+    target_labels: dict[str, str],
+    size: tuple[int, int],
+) -> None:
+    """Draw the option's textual pair key over an opaque map-safe box."""
+    lines = _pair_key_lines(option, ref_labels, target_labels, size[0])
+    if not lines:
+        return
+    text_width = max(draw.textbbox((0, 0), line)[2] for line in lines)
+    box_width = text_width + 2 * PAIR_KEY_PADDING
+    box_height = len(lines) * PAIR_KEY_LINE_HEIGHT + 2 * PAIR_KEY_PADDING
+    draw.rectangle(
+        [(0, 0), (box_width, box_height)],
+        fill=BACKGROUND_COLOR,
+        outline=TIE_COLOR,
+        width=1,
+    )
+    for index, line in enumerate(lines):
+        draw.text(
+            (PAIR_KEY_PADDING, PAIR_KEY_PADDING + index * PAIR_KEY_LINE_HEIGHT),
+            line,
+            fill=TIE_COLOR,
+        )
+
+
 def render_option(group: dict, option: dict, size: tuple[int, int] | None = None) -> Image.Image:
     """Render one option: its edges' segments highlighted, others de-emphasized.
 
     Segments participating in the option are drawn bright/solid (blue ref, red
-    target); other group segments are drawn faded; context is gray dashed.
+    target); other group segments are drawn faded; context is gray dashed. On top,
+    each edge in ``option["edges"]`` is drawn as a thin green tie line between the
+    aligned-span midpoints of its paired ref/target segments, so the option's
+    exact edge (pair) structure is visible additively — two options with identical
+    member sets but different pairings render as distinguishable images.
     """
     bbox = _group_bbox(group, include_context=True)
     if bbox is None:
@@ -274,6 +386,35 @@ def render_option(group: dict, option: dict, size: tuple[int, int] | None = None
                 decoration_spacing=42,
             )
             _draw_label(draw, ln, bbox, size, target_labels.get(sid, ""))
+
+    # Pair (edge) ties, drawn last so they sit on top of the highlighted members.
+    # For each edge, connect the aligned-span midpoints of its ref and target
+    # segments. This depicts the option's exact edge set: options whose member
+    # sets are identical but whose pairings differ now render differently.
+    ref_lines = dict(_iter_lines(group.get("ref_geometries", {})))
+    tgt_lines = dict(_iter_lines(group.get("target_geometries", {})))
+    for e in option.get("edges", []) or []:
+        endpoints = _edge_tie_endpoints(
+            e, ref_lines.get(str(e.get("ref_id"))), tgt_lines.get(str(e.get("target_id")))
+        )
+        if endpoints is None:
+            continue
+        rp, tp = endpoints
+        rpx = _geo_to_pixel(rp.x, rp.y, bbox, size)
+        tpx = _geo_to_pixel(tp.x, tp.y, bbox, size)
+        draw.line([rpx, tpx], fill=TIE_COLOR, width=TIE_LINE_WIDTH)
+        for px, py in (rpx, tpx):
+            draw.ellipse(
+                [
+                    (px - TIE_ENDPOINT_RADIUS, py - TIE_ENDPOINT_RADIUS),
+                    (px + TIE_ENDPOINT_RADIUS, py + TIE_ENDPOINT_RADIUS),
+                ],
+                fill=TIE_COLOR,
+                outline=TIE_COLOR,
+            )
+    # A compact pair key is the exact-structure fallback for coincident geometry,
+    # where two different ties can otherwise collapse to the same pixels.
+    _draw_pair_key(draw, option, ref_labels, target_labels, size)
     return img
 
 
@@ -781,6 +922,13 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     )
     lines.append("- One image PER OPTION below. In an option image, the segments included in")
     lines.append("  that option are drawn bright/solid; excluded group segments are faded/dashed.")
+    lines.append(
+        "  A thin green tie line connects each paired ref/target segment at the midpoint of"
+    )
+    lines.append("  their aligned overlap, so the option's exact edges (which ref pairs with which")
+    lines.append("  target) are visible even when two options include the same set of segments.")
+    lines.append("  The green pair key in the image corner lists those exact R#-T# edges; use it")
+    lines.append("  when overlapping geometry makes a spatial tie hard to see.")
     lines.append(
         "  Use these images to judge the exact edge set; do not choose the closest picture."
     )
