@@ -25,9 +25,26 @@ tunable via ``CROSSWALK_PANEL_MONITOR_*`` env vars):
     CONSTANT_CONFIDENCE  A voter reports a near-constant confidence: the number
                          carries no information (a rubber stamp).
 
-Confidence statistics are computed over VALID ballots only — a real letter choice
-with no error. A forced ABSTAIN carries a synthetic 0.0 confidence that is the
-*system's*, not the model's, and would corrupt the std / calibration view.
+``NONE`` vs ``ABSTAIN`` — two very different non-letter rows:
+
+    ``NONE`` is a DECISIVE reject-all verdict: a first-class ballot choice with a
+    real, model-reported confidence. It is counted as a cast ballot everywhere the
+    verdict and its confidence matter — decided/dissent counting (a ``NONE`` vote
+    against a letter consensus is dissent; a letter vote against a ``NONE``
+    consensus is dissent; ``NONE`` agreeing with a ``NONE`` consensus is agreement),
+    confidence stats, calibration, and CONSTANT_CONFIDENCE detection. It is EXCLUDED
+    only from letter-POSITION statistics (POSITION_ANCHOR), because it occupies no
+    letter slot.
+
+    ``ABSTAIN`` (and blank / errored rows) is a FAILURE, not a verdict. It carries a
+    synthetic 0.0 confidence that is the *system's*, not the model's, and would
+    corrupt the std / calibration view, so it is excluded from every decided,
+    confidence, position, and dissent statistic and only counted in ``n_abstain``.
+
+Field accounting: ``n_ballots == n_valid + n_none + n_abstain``. ``n_valid`` is the
+letter-choice count (the POSITION-stat denominator); ``n_none`` the reject-all
+verdicts; ``n_abstain`` the ABSTAIN/blank/error failures. Confidence statistics are
+computed over CAST ballots (letters + ``NONE``); ``n_scored`` is that sample size.
 """
 
 from __future__ import annotations
@@ -44,8 +61,12 @@ from ..config import settings
 POSITION_ANCHOR = "POSITION_ANCHOR"
 CONSTANT_CONFIDENCE = "CONSTANT_CONFIDENCE"
 
-# Non-letter ballots: excluded from position/confidence/dissent statistics.
-_NON_CHOICES = frozenset({"NONE", "ABSTAIN"})
+# The decisive reject-all verdict: a real ballot with real confidence, excluded
+# only from letter-POSITION statistics (it occupies no letter slot). Failure
+# rows (no verdict — blank, error, ABSTAIN) are anything that is neither a
+# single letter nor ``NONE``; they are excluded from every decided/confidence/
+# position/dissent statistic and counted only in ``n_abstain``.
+_NONE = "NONE"
 
 # Columns used, in priority order, to join a vote to its group's consensus row.
 # Whichever of these are present in BOTH frames form the join key: the committed
@@ -73,24 +94,48 @@ def _is_letter(value: object) -> bool:
     return _position(value) is not None
 
 
+def _norm_choice(value: object) -> str:
+    """Uppercased, stripped string form of a choice (``""`` for non-strings)."""
+    if not isinstance(value, str):
+        return ""
+    return value.strip().upper()
+
+
+def _is_none(value: object) -> bool:
+    """True for the decisive reject-all ``NONE`` verdict."""
+    return _norm_choice(value) == _NONE
+
+
+def _is_decision(value: object) -> bool:
+    """True for a real verdict — a letter slot or the reject-all ``NONE``.
+
+    Used both for a voter's cast ballot and for a group's consensus choice: a
+    group is "decided" when its consensus is a letter OR ``NONE``; an empty /
+    non-verdict consensus is undecided.
+    """
+    return _is_letter(value) or _is_none(value)
+
+
 @dataclass
 class VoterStats:
     """Per-voter (provider x model) summary over a set of ballots."""
 
     provider: str
     model: str
-    n_ballots: int  # every recorded row for this voter (incl. abstains/errors)
-    n_valid: int  # letter choice with no error
-    n_abstain: int  # ABSTAIN/NONE or error rows
-    abstain_rate: float
-    position_counts: dict[int, int]  # letter index -> count (valid ballots only)
+    n_ballots: int  # every recorded row for this voter (incl. NONE/abstains/errors)
+    n_valid: int  # letter choice with no error (POSITION-stat denominator)
+    n_none: int  # decisive reject-all NONE verdicts (cast ballots, no letter slot)
+    n_abstain: int  # ABSTAIN/blank/error FAILURE rows (n_ballots - n_valid - n_none)
+    n_scored: int  # cast ballots (letters + NONE) with a finite confidence
+    abstain_rate: float  # n_abstain / n_ballots — the failure rate
+    position_counts: dict[int, int]  # letter index -> count (letter ballots only)
     modal_position: int | None
     modal_position_share: float  # modal count / n_valid (0.0 when n_valid == 0)
-    n_decided: int  # valid ballots on groups that reached a consensus choice
-    n_dissent: int  # decided ballots whose choice != the consensus choice
+    n_decided: int  # cast ballots (letters + NONE) on groups that reached a verdict
+    n_dissent: int  # decided ballots whose verdict != the consensus verdict
     dissent_rate: float  # n_dissent / n_decided (NaN when n_decided == 0)
     conf_mean: float
-    conf_std: float  # POPULATION std (ddof=0) over valid ballots
+    conf_std: float  # POPULATION std (ddof=0) over cast ballots (letters + NONE)
     conf_min: float
     conf_max: float
     conf_on_agree: float  # mean confidence when the voter agreed with consensus
@@ -131,10 +176,15 @@ def constant_confidence_tripped(
     std: float | None = None,
     min_n: int | None = None,
 ) -> bool:
-    """True when confidence is near-constant over enough valid ballots."""
+    """True when confidence is near-constant over enough scored ballots.
+
+    Keyed on ``n_scored`` (cast ballots — letters + ``NONE`` — carrying a finite
+    confidence), the exact sample the ``conf_std`` is computed over, so a voter who
+    reject-alls at a flat confidence is still caught.
+    """
     std = settings.panel_monitor_constant_confidence_std if std is None else std
     min_n = settings.panel_monitor_constant_confidence_min_n if min_n is None else min_n
-    return stat.n_valid >= min_n and not np.isnan(stat.conf_std) and stat.conf_std < std
+    return stat.n_scored >= min_n and not np.isnan(stat.conf_std) and stat.conf_std < std
 
 
 def default_alarms(stat: VoterStats) -> list[str]:
@@ -195,19 +245,24 @@ def compute_voter_stats(
 
     df["_pos"] = df["choice"].map(_position)
     has_error = df["error"].notna() & (df["error"].astype(str).str.strip() != "")
-    df["_valid"] = df["_pos"].notna() & ~has_error
-    df["_decided"] = df["_cons_choice"].map(_is_letter)
+    df["_is_none"] = df["choice"].map(_is_none)
+    # A cast ballot is a real verdict with no error: a letter slot OR reject-all NONE.
+    df["_letter"] = df["_pos"].notna() & ~has_error
+    df["_ballot"] = (df["_pos"].notna() | df["_is_none"]) & ~has_error
+    df["_decided"] = df["_cons_choice"].map(_is_decision)
 
     stats: list[VoterStats] = []
     group_cols = ["provider", "model"]
     for (provider, model), g in df.groupby(group_cols, dropna=False, sort=True):
-        valid = g[g["_valid"]]
+        letters = g[g["_letter"]]  # letter ballots (POSITION statistics)
+        ballots = g[g["_ballot"]]  # cast verdicts: letters + NONE
         n_ballots = len(g)
-        n_valid = len(valid)
-        n_abstain = n_ballots - n_valid
+        n_valid = len(letters)
+        n_none = int((ballots["_is_none"]).sum())
+        n_abstain = n_ballots - n_valid - n_none
 
         position_counts: dict[int, int] = {
-            int(k): int(v) for k, v in valid["_pos"].value_counts().sort_index().items()
+            int(k): int(v) for k, v in letters["_pos"].value_counts().sort_index().items()
         }
         if position_counts:
             modal_position = max(position_counts, key=lambda k: (position_counts[k], -k))
@@ -216,8 +271,11 @@ def compute_voter_stats(
             modal_position = None
             modal_share = 0.0
 
-        conf = pd.to_numeric(valid["confidence"], errors="coerce").to_numpy(dtype=float)
+        # Confidence over CAST ballots (letters + NONE): a NONE verdict's confidence
+        # is the model's own and belongs in the mean / std / calibration view.
+        conf = pd.to_numeric(ballots["confidence"], errors="coerce").to_numpy(dtype=float)
         conf = conf[~np.isnan(conf)]
+        n_scored = int(conf.size)
         if conf.size:
             conf_mean = float(np.mean(conf))
             conf_std = float(np.std(conf, ddof=0))
@@ -226,9 +284,13 @@ def compute_voter_stats(
         else:
             conf_mean = conf_std = conf_min = conf_max = float("nan")
 
-        decided = valid[valid["_decided"]]
+        decided = ballots[ballots["_decided"]]
         n_decided = len(decided)
-        dissent_mask = decided["choice"] != decided["_cons_choice"]
+        # Compare verdict identities (letter slot or NONE), case/space-normalized, so
+        # NONE-vs-letter and NONE-vs-NONE resolve correctly against the consensus.
+        dissent_mask = decided["choice"].map(_norm_choice) != decided["_cons_choice"].map(
+            _norm_choice
+        )
         n_dissent = int(dissent_mask.sum())
         dissent_rate = (n_dissent / n_decided) if n_decided else float("nan")
 
@@ -243,7 +305,9 @@ def compute_voter_stats(
             model=str(model) if model == model else "",  # NaN-safe
             n_ballots=n_ballots,
             n_valid=n_valid,
+            n_none=n_none,
             n_abstain=n_abstain,
+            n_scored=n_scored,
             abstain_rate=(n_abstain / n_ballots) if n_ballots else 0.0,
             position_counts=position_counts,
             modal_position=modal_position,

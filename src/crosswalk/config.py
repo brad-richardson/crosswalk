@@ -825,11 +825,13 @@ class MatcherSettings(BaseSettings):
     panel_monitor_constant_confidence_std: float = Field(
         default=0.02,
         description="CONSTANT_CONFIDENCE alarm: population std of a voter's confidence over "
-        "its valid ballots below this flags a rubber-stamped constant (e.g. agy's flat 0.95).",
+        "its cast ballots (letter choices and reject-all NONE verdicts) below this flags a "
+        "rubber-stamped constant (e.g. agy's flat 0.95).",
     )
     panel_monitor_constant_confidence_min_n: int = Field(
         default=10,
-        description="Minimum valid ballots before CONSTANT_CONFIDENCE can trip.",
+        description="Minimum scored (finite-confidence) cast ballots before CONSTANT_CONFIDENCE "
+        "can trip.",
     )
     panel_monitor_wave_min_n: int = Field(
         default=8,

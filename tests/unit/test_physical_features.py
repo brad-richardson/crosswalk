@@ -156,6 +156,67 @@ def test_overlapping_flag_rules_use_union_coverage() -> None:
     assert features["tunnel_fraction_delta"] == pytest.approx(0.6)
 
 
+def test_overlapping_same_value_levels_do_not_double_count() -> None:
+    """Two overlapping level=1 ranges ([0,0.6] and [0.4,1.0]) describe a fully
+    elevated segment: the nonzero fraction is 1.0, never 1.2 or capped garbage.
+
+    (``normalize_lr_rules`` merges the same-value overlap upstream; this pins the
+    invariant so a regression that summed raw spans would surface.)"""
+    features = compute_physical_pair_features(
+        ref_level_lr=[
+            {"between": [0.0, 0.6], "value": 1},
+            {"between": [0.4, 1.0], "value": 1},
+        ],
+        target_level_lr=_lr(1),
+        ref_road_flags_lr=None,
+        target_road_flags_lr=None,
+    )
+
+    # ref nonzero fraction == target nonzero fraction == 1.0.
+    assert features["vertical_nonzero_fraction_delta"] == pytest.approx(0.0)
+    assert features["vertical_sign_delta"] == pytest.approx(0.0)
+    assert features["vertical_positive_match"] == pytest.approx(1.0)
+
+
+def test_overlapping_different_value_levels_use_union_denominator() -> None:
+    """Overlapping level ranges of DIFFERENT values ([0,0.8]=1 elevated, [0.6,1.0]=0
+    ground) cannot merge, so the known-coverage denominator must be their union
+    (1.0), not the raw sum (1.2). Elevated covers [0,0.8] -> nonzero fraction 0.8;
+    the raw-sum bug gives 0.667."""
+    features = compute_physical_pair_features(
+        ref_level_lr=[
+            {"between": [0.0, 0.8], "value": 1},
+            {"between": [0.6, 1.0], "value": 0},
+        ],
+        target_level_lr=_lr(1),  # fully elevated -> nonzero fraction 1.0
+        ref_road_flags_lr=None,
+        target_road_flags_lr=None,
+    )
+
+    # |0.8 - 1.0| = 0.2 with the union denominator; raw-sum arithmetic gives 0.333.
+    assert features["vertical_nonzero_fraction_delta"] == pytest.approx(0.2)
+    assert features["vertical_sign_delta"] == pytest.approx(0.1)
+
+
+def test_overlapping_same_flag_ranges_use_union_coverage() -> None:
+    """Two partially overlapping same-flag ranges ([0,0.6] and [0.4,1.0] both
+    is_bridge) cover the whole segment: the bridge fraction is 1.0, so the delta
+    against a fully-bridged target is 0.0 (raw-sum arithmetic would over-count)."""
+    features = compute_physical_pair_features(
+        ref_level_lr=None,
+        target_level_lr=None,
+        ref_road_flags_lr=[
+            {"between": [0.0, 0.6], "value": ["is_bridge"]},
+            {"between": [0.4, 1.0], "value": ["is_bridge"]},
+        ],
+        target_road_flags_lr=_lr(["is_bridge"]),
+        target_flag_domains={"is_bridge"},
+    )
+
+    assert features["bridge_fraction_delta"] == pytest.approx(0.0)
+    assert features["physical_flag_positive_match"] == pytest.approx(1.0)
+
+
 def test_missing_levels_are_unknown_not_ground() -> None:
     features = compute_physical_pair_features(
         ref_level_lr=_lr(0),

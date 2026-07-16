@@ -1755,6 +1755,7 @@ def panel_stats(
     table.add_column("modal pos", justify="right")
     table.add_column("share", justify="right")
     table.add_column("dissent", justify="right")
+    table.add_column("none", justify="right")
     table.add_column("abstain", justify="right")
     table.add_column("conf μ", justify="right")
     table.add_column("conf σ", justify="right")
@@ -1777,6 +1778,7 @@ def panel_stats(
             f"{s.modal_letter}",
             share_txt,
             _f(s.dissent_rate, pct=True),
+            str(s.n_none),
             _f(s.abstain_rate, pct=True),
             _f(s.conf_mean),
             std_txt,
