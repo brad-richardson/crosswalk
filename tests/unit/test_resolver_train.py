@@ -779,3 +779,93 @@ def test_load_model_missing_file_raises(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         load_model(tmp_path / "nope.joblib")
+
+
+def _write_dataset(tmp_path, dataset_id, keep_ref):
+    """Write a one-group sidecar + curated label CSV for a dataset, return spec."""
+    groups = [
+        {
+            "group_id": "g1",
+            "match_type": "N:1",
+            "edges": [_edge("A", "T", 0.99), _edge("B", "T", 0.3)],
+            "ref_ids": ["A", "B"],
+            "target_ids": ["T"],
+            "n_edges": 2,
+            "n_corridors": 1,
+            "n_assignment_components": 1,
+            "largest_biconnected_block": 1,
+            "oversized_group": False,
+        }
+    ]
+    gp = tmp_path / f"{dataset_id}_groups.json"
+    gp.write_text(json.dumps({"groups": groups}))
+    lp = tmp_path / f"{dataset_id}_labels.csv"
+    _labels([_label_row("hg1", [(keep_ref, "T")])]).to_csv(lp, index=False)
+    return (dataset_id, gp, lp)
+
+
+def test_build_combined_table_preserves_multi_dataset_audit(tmp_path):
+    """The combined training frame must carry each dataset's build_audit through
+    concat, keyed by dataset id (pd.concat would otherwise drop df.attrs)."""
+    from crosswalk.resolver.extract import COMBINED_AUDIT_ATTR, summarize_build_audit
+    from crosswalk.resolver.train import _build_combined_table
+
+    specs = [
+        _write_dataset(tmp_path, "ds_a", "A"),
+        _write_dataset(tmp_path, "ds_b", "A"),
+    ]
+    df, per_ds_stats, _ = _build_combined_table(specs)
+    audit_by_ds = df.attrs[COMBINED_AUDIT_ATTR]
+    assert set(audit_by_ds) == {"ds_a", "ds_b"}
+    assert audit_by_ds["ds_a"]["dataset_id"] == "ds_a"
+
+    summary = summarize_build_audit(df)
+    assert summary["dataset_ids"] == ["ds_a", "ds_b"]
+    assert summary["source_dataset_ids"] == ["ds_a", "ds_b"]
+    assert summary["per_dataset"]["ds_a"]["schema_version"] == 1
+
+
+def test_save_load_model_round_trips_training_data_audit(tmp_path):
+    """train/save -> load -> the compact training-data audit is visible on the
+    payload (informational; load_model does not gate on it)."""
+    from crosswalk.resolver.extract import summarize_build_audit
+    from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
+    from crosswalk.resolver.train import _build_combined_table, load_model, save_model, train_model
+
+    specs = [
+        _write_dataset(tmp_path, "ds_a", "A"),
+        _write_dataset(tmp_path, "ds_b", "A"),
+    ]
+    df, _, _ = _build_combined_table(specs)
+    audit = summarize_build_audit(df)  # capture before featurize reshapes the frame
+    feat = featurize(df)
+    model = train_model(feat, FEATURE_COLUMNS, seed=0)
+
+    out = tmp_path / "resolver_model.joblib"
+    save_model(
+        model,
+        FEATURE_COLUMNS,
+        out,
+        training_stats={"n_rows_hard": len(feat)},
+        training_audit=audit,
+    )
+
+    payload = load_model(out)
+    stored = payload["training_data_audit"]
+    assert stored["dataset_ids"] == ["ds_a", "ds_b"]
+    assert stored["per_dataset"]["ds_b"]["schema_version"] == 1
+    assert stored["per_dataset"]["ds_a"]["source_rows"] == 2
+    assert stored["per_dataset"]["ds_a"]["hard_rows"] == 2
+
+
+def test_save_model_training_audit_defaults_empty(tmp_path):
+    """Omitting training_audit yields an empty (but present) provenance block."""
+    import joblib
+
+    from crosswalk.resolver.train import save_model
+
+    model, feat_cols, df = _train_tiny_model()
+    out = tmp_path / "resolver_model.joblib"
+    save_model(model, feat_cols, out, training_stats={"n": len(df)})
+    payload = joblib.load(str(out))
+    assert payload["training_data_audit"] == {}

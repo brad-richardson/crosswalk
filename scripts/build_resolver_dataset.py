@@ -22,7 +22,13 @@ from pathlib import Path
 import pandas as pd
 
 from crosswalk.resolver.evaluate import feature_importances, run_cv, slice_report
-from crosswalk.resolver.extract import build_multi_dataset_table, load_sidecar_groups
+from crosswalk.resolver.extract import (
+    COMBINED_AUDIT_ATTR,
+    COMBINED_STATS_ATTR,
+    build_multi_dataset_table,
+    load_sidecar_groups,
+    write_edge_table_parquet,
+)
 from crosswalk.resolver.features import featurize
 from crosswalk.resolver.votes import (
     default_votes_paths,
@@ -122,6 +128,11 @@ def main() -> None:
         print("No labeled edges recovered — check paths.")
         return
     feat = featurize(df)
+    # featurize returns a reshaped frame that need not carry df.attrs; re-attach
+    # the per-dataset build audit that concat preserved on the combined table so
+    # write_edge_table_parquet can embed it (pandas to_parquet drops attrs).
+    feat.attrs[COMBINED_AUDIT_ATTR] = df.attrs.get(COMBINED_AUDIT_ATTR, {})
+    feat.attrs[COMBINED_STATS_ATTR] = df.attrs.get(COMBINED_STATS_ATTR, {})
 
     print("\n=== per-edge dataset ===")
     print(
@@ -131,7 +142,7 @@ def main() -> None:
     print(feat.groupby(["dataset_id", "provenance"]).size().to_string())
 
     if args.out:
-        feat.to_parquet(args.out, index=False)
+        write_edge_table_parquet(feat, args.out, index=False)
         print(f"wrote {args.out}")
 
     soft_extra = None

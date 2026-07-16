@@ -1004,6 +1004,11 @@ def build_edge_table(
 
     build_audit = {
         "schema_version": 1,
+        # The dataset this audit describes. Stamped so the per-dataset audit stays
+        # self-identifying after a multi-dataset ``pd.concat`` (which drops
+        # ``df.attrs``) — see :func:`concat_edge_tables`. An empty edge table has no
+        # ``dataset_id`` column, so the audit is the only surviving identity carrier.
+        "dataset_id": str(dataset_id),
         # Table-level version + a content hash of the emitted column set. The
         # hash travels with the audit and shifts whenever columns are added or
         # dropped (e.g. a new candidate-parquet column silently joining), giving
@@ -1143,4 +1148,183 @@ def build_multi_dataset_table(
 
     if not frames:
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+    return concat_edge_tables(frames)
+
+
+# Combined-frame attrs keys. ``pd.concat`` drops per-frame ``df.attrs``, so
+# :func:`concat_edge_tables` reattaches the per-dataset audit / stats under these
+# keys (mapping dataset_id -> the single-dataset ``build_audit`` / ``build_stats``
+# dict that :func:`build_edge_table` produced). Nothing downstream may rely on
+# pandas propagating the single-dataset attrs implicitly through a concat.
+COMBINED_AUDIT_ATTR = "build_audit_by_dataset"
+COMBINED_STATS_ATTR = "build_stats_by_dataset"
+
+# Parquet schema-metadata key under which the combined audit/stats mapping is
+# embedded by :func:`write_edge_table_parquet` (pandas does not persist
+# ``df.attrs`` to parquet). Namespaced to avoid colliding with pandas' own
+# ``b"pandas"`` schema metadata, which is preserved untouched.
+PARQUET_AUDIT_METADATA_KEY = b"crosswalk.resolver.build_audit"
+
+
+def _frame_dataset_id(frame: pd.DataFrame) -> str | None:
+    """Best-effort dataset id for one per-dataset edge frame.
+
+    Prefers the id stamped into ``build_audit`` (survives even an empty frame),
+    then the ``dataset_id`` column, else None.
+    """
+    audit = frame.attrs.get("build_audit")
+    if isinstance(audit, dict) and audit.get("dataset_id"):
+        return str(audit["dataset_id"])
+    if "dataset_id" in frame.columns and len(frame):
+        return str(frame["dataset_id"].iloc[0])
+    return None
+
+
+def concat_edge_tables(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    """Concatenate per-dataset edge tables, explicitly preserving audit attrs.
+
+    ``pd.concat`` silently discards every frame's ``df.attrs``, so the
+    per-dataset ``build_audit`` / ``build_stats`` that :func:`build_edge_table`
+    attaches would vanish from the combined training frame. This helper captures
+    them first and reattaches them on the combined frame as dataset-keyed dicts
+    under :data:`COMBINED_AUDIT_ATTR` / :data:`COMBINED_STATS_ATTR`. The
+    preservation is made at the combination site rather than relying on any
+    implicit pandas propagation.
+    """
+    audit_by_ds: dict[str, dict] = {}
+    stats_by_ds: dict[str, dict] = {}
+    seen_datasets: set[str] = set()
+    for frame in frames:
+        ds = _frame_dataset_id(frame)
+        if ds is None:
+            continue
+        if ds in seen_datasets:
+            raise ValueError(f"duplicate dataset_id in edge-table concat: {ds}")
+        seen_datasets.add(ds)
+        audit = frame.attrs.get("build_audit")
+        stats = frame.attrs.get("build_stats")
+        if audit is not None:
+            audit_by_ds[ds] = audit
+        if stats is not None:
+            stats_by_ds[ds] = stats
+
+    if not frames:
+        combined = pd.DataFrame()
+    else:
+        combined = pd.concat(frames, ignore_index=True)
+    combined.attrs[COMBINED_AUDIT_ATTR] = audit_by_ds
+    combined.attrs[COMBINED_STATS_ATTR] = stats_by_ds
+    return combined
+
+
+def _effective_training_counts(df: pd.DataFrame | None) -> dict[str, dict[str, int | None]]:
+    """Return compact per-dataset counts for a frame actually passed to training."""
+    if df is None or df.empty or "dataset_id" not in df.columns:
+        return {}
+    out: dict[str, dict[str, int | None]] = {}
+    for dataset_id, part in df.groupby("dataset_id", dropna=False):
+        labels = pd.to_numeric(part["keep"], errors="coerce") if "keep" in part else None
+        out[str(dataset_id)] = {
+            "rows": int(len(part)),
+            "positives": int((labels >= 0.5).sum()) if labels is not None else None,
+            "negatives": int((labels < 0.5).sum()) if labels is not None else None,
+            "groups": int(part["group_id"].astype(str).nunique()) if "group_id" in part else None,
+        }
+    return out
+
+
+def summarize_build_audit(df: pd.DataFrame, *, soft_extra: pd.DataFrame | None = None) -> dict:
+    """Summarize source-build audit and effective training rows for an artifact.
+
+    Reduces the (potentially large) per-dataset ``build_audit`` / ``build_stats``
+    mapping carried on ``df.attrs`` (see :func:`concat_edge_tables`) while keeping
+    its SOURCE extraction counts distinct from the hard/soft rows that actually
+    reach training after featurization and filters such as ``--clean-only``.
+    ``dataset_ids`` means effective training datasets; ``source_dataset_ids``
+    identifies the preserved extraction audits. This prevents provenance from
+    claiming that the model trained on rows removed later in the CLI pipeline.
+    """
+    audit_by_ds = df.attrs.get(COMBINED_AUDIT_ATTR, {}) or {}
+    stats_by_ds = df.attrs.get(COMBINED_STATS_ATTR, {}) or {}
+    hard_by_ds = _effective_training_counts(df)
+    soft_by_ds = _effective_training_counts(soft_extra)
+    source_dataset_ids = sorted({*audit_by_ds.keys(), *stats_by_ds.keys()})
+    dataset_ids = sorted({*hard_by_ds.keys(), *soft_by_ds.keys()})
+    all_dataset_ids = sorted({*source_dataset_ids, *dataset_ids})
+    per_dataset: dict[str, dict] = {}
+    for ds in all_dataset_ids:
+        audit = audit_by_ds.get(ds, {}) or {}
+        stats = stats_by_ds.get(ds, {}) or {}
+        hard = hard_by_ds.get(ds, {})
+        soft = soft_by_ds.get(ds, {})
+        per_dataset[ds] = {
+            "schema_version": audit.get("schema_version"),
+            "table_schema_version": audit.get("table_schema_version"),
+            "table_columns_sha256": audit.get("table_columns_sha256"),
+            "n_quarantined_groups": len(audit.get("quarantined_groups", []) or []),
+            "n_legacy_known_omissions": len(audit.get("legacy_known_omissions", []) or []),
+            "source_rows": stats.get("rows"),
+            "source_positives": stats.get("positives"),
+            "source_negatives": stats.get("negatives"),
+            "hard_rows": hard.get("rows", 0),
+            "hard_positives": hard.get("positives", 0),
+            "hard_negatives": hard.get("negatives", 0),
+            "hard_groups": hard.get("groups", 0),
+            "soft_rows": soft.get("rows", 0),
+            "soft_positives": soft.get("positives", 0),
+            "soft_negatives": soft.get("negatives", 0),
+            "soft_groups": soft.get("groups", 0),
+        }
+    return {
+        "schema_version": 1,
+        "dataset_ids": dataset_ids,
+        "source_dataset_ids": source_dataset_ids,
+        "per_dataset": per_dataset,
+    }
+
+
+def write_edge_table_parquet(df: pd.DataFrame, path: str | Path, index: bool = False) -> None:
+    """Write an edge table to parquet, embedding the combined build audit.
+
+    pandas' ``to_parquet`` does not persist ``df.attrs``, so the per-dataset audit
+    preserved by :func:`concat_edge_tables` would be lost on write. This embeds the
+    ``{COMBINED_AUDIT_ATTR, COMBINED_STATS_ATTR}`` mapping as pyarrow schema
+    metadata under :data:`PARQUET_AUDIT_METADATA_KEY`, leaving pandas' own schema
+    metadata intact. Read it back with :func:`read_edge_table_parquet`.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    table = pa.Table.from_pandas(df, preserve_index=index)
+    payload = {
+        COMBINED_AUDIT_ATTR: df.attrs.get(COMBINED_AUDIT_ATTR, {}),
+        COMBINED_STATS_ATTR: df.attrs.get(COMBINED_STATS_ATTR, {}),
+    }
+    existing = dict(table.schema.metadata or {})
+    existing[PARQUET_AUDIT_METADATA_KEY] = json.dumps(payload).encode("utf-8")
+    table = table.replace_schema_metadata(existing)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, str(path))
+
+
+def read_edge_table_parquet(path: str | Path) -> pd.DataFrame:
+    """Read an edge table parquet, restoring the embedded build audit onto attrs.
+
+    Inverse of :func:`write_edge_table_parquet`: restores the dataset-keyed
+    ``build_audit`` / ``build_stats`` mapping onto ``df.attrs`` under
+    :data:`COMBINED_AUDIT_ATTR` / :data:`COMBINED_STATS_ATTR`. Frames written by
+    plain ``to_parquet`` simply come back with empty audit attrs.
+    """
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(str(path))
+    df = table.to_pandas()
+    raw = (table.schema.metadata or {}).get(PARQUET_AUDIT_METADATA_KEY)
+    if raw:
+        payload = json.loads(raw.decode("utf-8"))
+        df.attrs[COMBINED_AUDIT_ATTR] = payload.get(COMBINED_AUDIT_ATTR, {})
+        df.attrs[COMBINED_STATS_ATTR] = payload.get(COMBINED_STATS_ATTR, {})
+    else:
+        df.attrs[COMBINED_AUDIT_ATTR] = {}
+        df.attrs[COMBINED_STATS_ATTR] = {}
+    return df

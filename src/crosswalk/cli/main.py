@@ -2324,6 +2324,7 @@ def register_commands(app: typer.Typer) -> None:
         resolver_train = importlib.import_module("crosswalk.resolver.train")
         resolver_features = importlib.import_module("crosswalk.resolver.features")
         resolver_round2 = importlib.import_module("crosswalk.resolver.round2")
+        resolver_extract = importlib.import_module("crosswalk.resolver.extract")
 
         BASE_FEAT_COLS = resolver_features.FEATURE_COLUMNS
         EXT_FEAT_COLS = resolver_round2.EXTENDED_FEATURE_COLUMNS
@@ -2359,6 +2360,18 @@ def register_commands(app: typer.Typer) -> None:
                 console.print(f"  {s}")
             raise typer.Exit(1)
 
+        # Preserve the per-dataset SOURCE build audit explicitly while
+        # featurization and training filters reshape the frame. The effective
+        # hard/soft counts are summarized only after those transformations.
+        source_audit_attrs = {
+            resolver_extract.COMBINED_AUDIT_ATTR: df.attrs.get(
+                resolver_extract.COMBINED_AUDIT_ATTR, {}
+            ),
+            resolver_extract.COMBINED_STATS_ATTR: df.attrs.get(
+                resolver_extract.COMBINED_STATS_ATTR, {}
+            ),
+        }
+
         featurize_base = resolver_features.featurize
         featurize_ext = resolver_round2.featurize_extended
 
@@ -2366,6 +2379,7 @@ def register_commands(app: typer.Typer) -> None:
             df = featurize_ext(df)
         else:
             df = featurize_base(df)
+        df.attrs.update(source_audit_attrs)
 
         existing_gids = set(zip(df["dataset_id"].astype(str), df["group_id"].astype(str)))
         soft_df_raw = None
@@ -2410,6 +2424,12 @@ def register_commands(app: typer.Typer) -> None:
             if df.empty:
                 console.print("[red]clean-only filter emptied dataset[/red]")
                 raise typer.Exit(1)
+            df.attrs.update(source_audit_attrs)
+
+        # Bind provenance to the ACTUAL training inputs, after clean-only and
+        # soft-extra preparation. Source extraction counts remain separately
+        # named inside the summary rather than masquerading as trained rows.
+        training_data_audit = resolver_extract.summarize_build_audit(df, soft_extra=soft_extra)
 
         if verbose:
             console.print("[blue]Per-dataset build stats[/blue]")
@@ -2483,6 +2503,7 @@ def register_commands(app: typer.Typer) -> None:
             training_stats=training_stats,
             cv_summary=cv_summary,
             selector=selector,
+            training_audit=training_data_audit,
         )
         console.print(f"[green]Saved resolver model to {output}[/green]")
 
