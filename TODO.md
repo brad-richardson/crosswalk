@@ -174,9 +174,12 @@ than sequential — the wave halts safely and resumes. To pause: send ONE
 SIGINT/SIGTERM to the runner (`pkill -INT -f run_physical_stitch_wave` is
 fine — a duplicate signal within 2s is debounced); it finishes in-flight
 packs, flushes, prints a pause message, and exits 130. A deliberate second
-signal after 2s force-aborts and can orphan in-flight provider subprocesses —
-`pkill -f 'opencode run|codex exec|claude -p|codex-linux'` afterwards or they
-keep spending quota on discarded ballots (observed 2026-07-16).
+signal after 2s force-aborts, but the process still waits for in-flight
+provider invocations (worker threads blocked in `subprocess.run`, up to
+`--timeout`, default 600s) before exiting — do NOT escalate to SIGKILL while
+it waits: that reparents the provider subprocesses and they keep spending
+quota on discarded ballots (observed 2026-07-16). If you do SIGKILL, clean up
+with `pkill -f 'opencode run|codex exec|claude -p|codex-linux'`.
 
 After the 65-pack counterbalanced schedule completes, analyze the five 2x2
 physical/coincidence repeats and agent feedback, then build a deduplicated

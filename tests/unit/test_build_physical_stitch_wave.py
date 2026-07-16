@@ -627,7 +627,9 @@ def test_pause_drains_in_flight_pack_and_skips_consolidation(
     assert all(len(call) == 1 for call in calls)
 
 
-def test_pause_handler_debounces_duplicate_signals_then_aborts() -> None:
+def test_pause_handler_debounces_duplicate_signals_then_aborts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import threading
 
     pause = threading.Event()
@@ -637,26 +639,25 @@ def test_pause_handler_debounces_duplicate_signals_then_aborts() -> None:
     def fake_signal(signum, fn):
         handler[signum] = fn
 
-    original_signal, original_monotonic = wave_runner.signal.signal, wave_runner.time.monotonic
-    wave_runner.signal.signal = fake_signal
-    wave_runner.time.monotonic = lambda: monotonic["now"]
-    try:
-        wave_runner._install_pause_handler(pause)
-        sigint = handler[wave_runner.signal.SIGINT]
+    # wave_runner.signal / wave_runner.time ARE the shared stdlib modules, so
+    # patch via monkeypatch: its fixture teardown restores the real functions
+    # even if this test fails or is interrupted mid-body.
+    monkeypatch.setattr(wave_runner.signal, "signal", fake_signal)
+    monkeypatch.setattr(wave_runner.time, "monotonic", lambda: monotonic["now"])
 
+    wave_runner._install_pause_handler(pause)
+    sigint = handler[wave_runner.signal.SIGINT]
+
+    sigint(wave_runner.signal.SIGINT, None)
+    assert pause.is_set()
+    # uv run forwards the same Ctrl-C to the child: a duplicate inside the
+    # debounce window must NOT abort the drain.
+    monotonic["now"] = 100.5
+    sigint(wave_runner.signal.SIGINT, None)
+    # A deliberate second signal after the window force-aborts.
+    monotonic["now"] = 103.0
+    with pytest.raises(KeyboardInterrupt):
         sigint(wave_runner.signal.SIGINT, None)
-        assert pause.is_set()
-        # uv run forwards the same Ctrl-C to the child: a duplicate inside the
-        # debounce window must NOT abort the drain.
-        monotonic["now"] = 100.5
-        sigint(wave_runner.signal.SIGINT, None)
-        # A deliberate second signal after the window force-aborts.
-        monotonic["now"] = 103.0
-        with pytest.raises(KeyboardInterrupt):
-            sigint(wave_runner.signal.SIGINT, None)
-    finally:
-        wave_runner.signal.signal = original_signal
-        wave_runner.time.monotonic = original_monotonic
 
 
 def test_parallel_schedule_applies_wave_timeout_breaker(

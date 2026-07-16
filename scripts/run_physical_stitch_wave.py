@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import sys
 import threading
@@ -355,7 +356,16 @@ def _install_pause_handler(pause: threading.Event) -> None:
     otherwise lands twice and the second would abort the drain (observed on the
     2026-07-16 wave: the abort orphaned in-flight provider subprocesses, whose
     retry loops kept spending quota). A deliberate second signal after the
-    debounce window force-aborts via KeyboardInterrupt.
+    debounce window force-aborts via KeyboardInterrupt — note the process still
+    waits for in-flight provider invocations (worker threads blocked in
+    ``subprocess.run``, up to ``--timeout``) before it can exit; escalating to
+    SIGKILL instead reparents those subprocesses, and they keep spending quota
+    on ballots nobody will read.
+
+    The handler writes its notice with ``os.write`` (async-signal-safe enough
+    for CPython): ``print`` can raise "reentrant call inside BufferedWriter"
+    when the signal lands while the main thread is itself mid-print, which
+    would crash the wave instead of pausing it.
     """
     state = {"first_signal_monotonic": None}
 
@@ -367,10 +377,11 @@ def _install_pause_handler(pause: threading.Event) -> None:
         if first is None:
             state["first_signal_monotonic"] = now
             pause.set()
-            print(
-                "pause requested: finishing in-flight packs, then stopping "
-                "(send the signal again after 2s to abort immediately)",
-                flush=True,
+            os.write(
+                1,
+                b"pause requested: finishing in-flight packs, then stopping "
+                b"(a second signal after 2s force-aborts, but in-flight provider "
+                b"invocations still run out their timeout first)\n",
             )
 
     signal.signal(signal.SIGINT, _handle)
