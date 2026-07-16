@@ -11,6 +11,9 @@ import pandas as pd
 import pytest
 import yaml
 
+from crosswalk.agent_labeling.stitch_runner import get_panel, panel_descriptor
+from crosswalk.agent_labeling.wave_manifest import WaveManifest
+
 SCRIPT = Path(__file__).parents[2] / "scripts" / "build_physical_stitch_wave.py"
 SPEC = importlib.util.spec_from_file_location("build_physical_stitch_wave", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -297,33 +300,33 @@ def test_schedule_runner_validates_exact_panel_and_pack_roster(tmp_path: Path) -
     group_dir.mkdir(parents=True)
     (batch_dir / "batch.json").write_text("{}")
     (group_dir / "evidence.json").write_text("{}")
+    expected_panel = panel_descriptor(get_panel("v7-candidate"))
     manifest_path = tmp_path / "manifest.json"
-    manifest_path.write_text(
-        json.dumps(
+    content = {
+        "panel": "v7-candidate",
+        "required_panel": expected_panel,
+        "total_pack_count": 1,
+        "run_schedule": [
             {
-                "panel": "v7-candidate",
-                "required_panel": list(wave.REQUIRED_PANEL),
-                "total_pack_count": 1,
-                "run_schedule": [
-                    {
-                        "run_index": 1,
-                        "batch_dir": str(batch_dir),
-                        "group_id": "group-1",
-                        "dataset_id": "dataset",
-                        "variant": "enriched",
-                    }
-                ],
+                "run_index": 1,
+                "batch_dir": str(batch_dir),
+                "group_id": "group-1",
+                "dataset_id": "dataset",
+                "variant": "enriched",
             }
-        )
-    )
+        ],
+    }
+    WaveManifest(content).write(manifest_path)
 
     manifest, panel = wave_runner.load_and_validate_manifest(manifest_path)
 
     assert manifest["total_pack_count"] == 1
-    assert wave_runner._panel_descriptor(panel) == list(wave.REQUIRED_PANEL)
+    assert panel_descriptor(panel) == expected_panel
 
-    manifest["required_panel"][1]["model"] = "gpt-5.6-terra"
-    manifest_path.write_text(json.dumps(manifest))
+    # Tamper the panel and re-stamp the digest so the drift check (not the
+    # integrity digest) is what fails.
+    content["required_panel"][1]["model"] = "gpt-5.6-terra"
+    WaveManifest(content).write(manifest_path)
     with pytest.raises(ValueError, match="Panel drift"):
         wave_runner.load_and_validate_manifest(manifest_path)
 
@@ -356,7 +359,7 @@ def test_schedule_retry_drops_timeout_partials_and_reinvokes_group(
 ) -> None:
     batch_dir = tmp_path / "batch"
     batch_dir.mkdir()
-    panel = wave_runner.get_panel("v7-candidate")
+    panel = get_panel("v7-candidate")
     vote_rows = []
     for group_id in ("timed-out", "successful"):
         for spec in panel:

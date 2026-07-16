@@ -33,6 +33,20 @@ from shapely.geometry import shape as shape_from_geojson
 
 from crosswalk.agent_labeling.stitch_evidence import generate_stitch_evidence
 from crosswalk.agent_labeling.stitch_provenance import artifact_descriptor
+from crosswalk.agent_labeling.stitch_runner import get_panel, panel_descriptor
+from crosswalk.agent_labeling.wave_manifest import (
+    FIELD_BATCH_DIRS,
+    FIELD_PANEL,
+    FIELD_REQUIRED_PANEL,
+    FIELD_RUN_SCHEDULE,
+    FIELD_TOTAL_PACK_COUNT,
+    ROW_BATCH_DIR,
+    ROW_DATASET_ID,
+    ROW_GROUP_ID,
+    ROW_RUN_INDEX,
+    ROW_VARIANT,
+    WaveManifest,
+)
 from crosswalk.cli.data import _fill_spatial_context
 from crosswalk.config import settings
 from crosswalk.datasets.schema import get_dataset_config
@@ -73,11 +87,11 @@ VARIANTS = {
     "no_coincidence": {"physical": True, "coincidence": False},
     "minimal": {"physical": False, "coincidence": False},
 }
-REQUIRED_PANEL = (
-    {"provider": "claude", "model": "claude-opus-4-8", "effort": "high"},
-    {"provider": "codex", "model": "gpt-5.6-sol", "effort": "high"},
-    {"provider": "muse", "model": "meta/muse-spark-1.1", "effort": "high"},
-)
+# The voting panel this wave is built for. The manifest's required_panel block
+# is derived from get_panel(WAVE_PANEL) via panel_descriptor so a roster change
+# in stitch_runner cannot silently drift from the manifest — the two are the
+# same source at build time, not merely cross-checked at run time.
+WAVE_PANEL = "v7-candidate"
 
 
 @dataclass(order=True)
@@ -774,10 +788,10 @@ def main() -> None:
     factorial_ids = {(dataset_id, ranked.group_id) for dataset_id, ranked in factorial_rows}
     ordinary = [
         {
-            "dataset_id": dataset_id,
-            "group_id": ranked.group_id,
-            "variant": "enriched",
-            "batch_dir": str(batch_dirs[(dataset_id, "enriched")]),
+            ROW_DATASET_ID: dataset_id,
+            ROW_GROUP_ID: ranked.group_id,
+            ROW_VARIANT: "enriched",
+            ROW_BATCH_DIR: str(batch_dirs[(dataset_id, "enriched")]),
         }
         for dataset_id, groups in selections.items()
         for ranked in groups
@@ -795,16 +809,16 @@ def main() -> None:
             variant = condition_order[(round_index + slot) % len(condition_order)]
             schedule.append(
                 {
-                    "dataset_id": dataset_id,
-                    "group_id": ranked.group_id,
-                    "variant": variant,
-                    "batch_dir": str(batch_dirs[(dataset_id, variant)]),
+                    ROW_DATASET_ID: dataset_id,
+                    ROW_GROUP_ID: ranked.group_id,
+                    ROW_VARIANT: variant,
+                    ROW_BATCH_DIR: str(batch_dirs[(dataset_id, variant)]),
                     "counterbalance_slot": slot,
                     "counterbalance_round": round_index,
                 }
             )
     for index, row in enumerate(schedule, start=1):
-        row["run_index"] = index
+        row[ROW_RUN_INDEX] = index
 
     # Factorial conditions must expose the exact same assignment menu. Only the
     # physical/coincidence evidence and associated guidance may differ.
@@ -819,17 +833,16 @@ def main() -> None:
                 f"{dataset_id}/{ranked.group_id}: factorial option menus differ: {menu_hashes}"
             )
 
-    manifest = {
-        "schema_version": 1,
+    manifest_content = {
         "wave": args.wave_name,
-        "panel": "v7-candidate",
-        "required_panel": list(REQUIRED_PANEL),
+        FIELD_PANEL: WAVE_PANEL,
+        FIELD_REQUIRED_PANEL: panel_descriptor(get_panel(WAVE_PANEL)),
         "unique_group_count": sum(map(len, selections.values())),
         "factorial_group_count": sum(map(len, factorial.values())),
         "paired_control_count": 3 * sum(map(len, factorial.values())),
-        "total_pack_count": len(schedule),
-        "batch_dirs": [str(path) for path in batch_dirs.values()],
-        "run_schedule": schedule,
+        FIELD_TOTAL_PACK_COUNT: len(schedule),
+        FIELD_BATCH_DIRS: [str(path) for path in batch_dirs.values()],
+        FIELD_RUN_SCHEDULE: schedule,
         "selections": {
             dataset_id: [{"group_id": ranked.group_id, **ranked.audit} for ranked in groups]
             for dataset_id, groups in selections.items()
@@ -839,10 +852,10 @@ def main() -> None:
             for dataset_id, groups in factorial.items()
         },
     }
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    WaveManifest(manifest_content).write(manifest_path)
     print(
-        f"Wrote {manifest['unique_group_count']} enriched packs + "
-        f"{manifest['paired_control_count']} factorial variants -> {manifest_path}"
+        f"Wrote {manifest_content['unique_group_count']} enriched packs + "
+        f"{manifest_content['paired_control_count']} factorial variants -> {manifest_path}"
     )
 
 
