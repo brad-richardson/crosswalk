@@ -80,6 +80,7 @@ from loguru import logger
 
 from crosswalk.agent_labeling.stitch_eval import recover_labeled_groups
 from crosswalk.config import FEATURE_COLUMNS as PAIRWISE_FEATURE_COLUMNS
+from crosswalk.pipeline.runner import CANDIDATE_SIDECAR_BASE_COLUMNS
 
 EDGE_LABEL_COL = "keep"
 
@@ -134,24 +135,17 @@ STRUCTURAL_OVERLAP_TO_ENRICH = {
 PARQUET_JOIN_KEYS = ("group_id", "ref_id", "target_id")
 
 # Candidate-parquet columns we KNOW about and expect to see joined onto the
-# training table (design §3.2): the 78 typed pairwise features + signed lateral
-# offset + class/length/optimizer-decision context, plus the structural overlap
-# fields. This is NOT a hard allowlist — any parquet column outside this set is
-# still joined (the exclusion-list mechanism in CANDIDATE_EXCLUDE_FROM_JOIN is
-# preserved). It is a KNOWN set used only to emit a loud warning when a new,
-# unrecognized column silently enters the table, so accretion becomes visible.
-EXPECTED_CANDIDATE_JOIN_COLUMNS = (
-    set(PAIRWISE_FEATURE_COLUMNS)
-    | set(STRUCTURAL_OVERLAP_TO_ENRICH)
-    | {
-        "lateral_offset_signed_m",
-        "ref_class",
-        "target_class",
-        "ref_length_m",
-        "target_length_m",
-        "optimizer_decision",
-        "optimizer_reason",
-    }
+# training table (design §3.2). Derived from the sidecar writer's own declared
+# column list — single source of truth ``pipeline/runner.py::
+# CANDIDATE_SIDECAR_BASE_COLUMNS`` (kept in lockstep with the writer's row dict
+# by a unit test that runs the real writer) — plus the 83 typed pairwise
+# ``config.FEATURE_COLUMNS`` the writer appends per row. This is NOT a hard
+# allowlist: any parquet column outside this set is still joined (the
+# exclusion-list mechanism in CANDIDATE_EXCLUDE_FROM_JOIN is preserved). It is a
+# KNOWN set used only to emit a loud warning when a new, unrecognized column
+# silently enters the table, so accretion becomes visible.
+EXPECTED_CANDIDATE_JOIN_COLUMNS = set(CANDIDATE_SIDECAR_BASE_COLUMNS) | set(
+    PAIRWISE_FEATURE_COLUMNS
 )
 
 

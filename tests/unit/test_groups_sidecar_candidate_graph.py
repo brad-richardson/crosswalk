@@ -549,3 +549,94 @@ def test_build_stitch_options_unaffected(tmp_path):
     g_no_cand = {k: v for k, v in g.items() if k not in ("candidate_edges", "n_candidate_edges")}
     ctx_no_cand = build_stitch_options(g_no_cand)
     assert ctx == ctx_no_cand
+
+
+def test_candidate_parquet_columns_match_declared_constant(tmp_path):
+    """CANDIDATE_SIDECAR_BASE_COLUMNS must stay in lockstep with the writer.
+
+    Runs the REAL writer (`_export_candidates_sidecar`, via
+    `_export_groups_sidecar`) and compares the emitted parquet column set with
+    the declared constant + FEATURE_COLUMNS. The resolver training table derives
+    its expected-join set from this constant
+    (resolver/extract.py::EXPECTED_CANDIDATE_JOIN_COLUMNS), so drift here would
+    either hide silent accretion or cause false accretion warnings.
+    """
+    from crosswalk.pipeline.runner import CANDIDATE_SIDECAR_BASE_COLUMNS
+
+    ref, tgt, results, selected = _scenario()
+    out = tmp_path / "bridge.parquet"
+    _export_groups_sidecar(
+        results=results,
+        optimized=selected,
+        output_path=out,
+        reference=ref,
+        target=tgt,
+        min_confidence=0.1,
+        ref_id_column="id",
+        target_id_column="id",
+        reference_proj=ref,
+        target_proj=tgt,
+        dataset_id="toy",
+    )
+    frame = pd.read_parquet(candidates_sidecar_path(out))
+
+    assert set(frame.columns) == set(CANDIDATE_SIDECAR_BASE_COLUMNS) | set(FEATURE_COLUMNS)
+
+
+def test_real_candidate_parquet_join_emits_no_unexpected_column_warning(tmp_path):
+    """No-false-positive guarantee: joining a REAL writer-produced candidates
+    parquet into the resolver training table must not trigger the
+    unexpected-column accretion warning on a clean run."""
+    from loguru import logger
+
+    from crosswalk.resolver.extract import build_edge_table
+
+    ref, tgt, results, selected = _scenario()
+    out = tmp_path / "bridge.parquet"
+    sidecar = _export_groups_sidecar(
+        results=results,
+        optimized=selected,
+        output_path=out,
+        reference=ref,
+        target=tgt,
+        min_confidence=0.1,
+        ref_id_column="id",
+        target_id_column="id",
+        reference_proj=ref,
+        target_proj=tgt,
+        dataset_id="toy",
+    )
+    groups = _load(sidecar)
+    frame = pd.read_parquet(candidates_sidecar_path(out))
+
+    human_df = pd.DataFrame(
+        [
+            {
+                "group_id": groups[0]["group_id"],
+                "dataset_id": "toy",
+                "selected_edges": json.dumps(
+                    [
+                        {"ref_id": "R1", "target_id": "T1"},
+                        {"ref_id": "R2", "target_id": "T1"},
+                    ]
+                ),
+                "match_type": "N:1",
+                "num_refs": 2,
+                "num_targets": 1,
+                "labeler": "brad",
+                "labeled_at": "2026-01-01",
+                "session_id": "x",
+            }
+        ]
+    )
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        df = build_edge_table(groups, human_df, "toy", candidates_df=frame)
+    finally:
+        logger.remove(sink_id)
+
+    assert len(df) > 0
+    assert df.attrs["build_stats"]["candidate_parquet_unexpected_columns"] == []
+    assert not any("unrecognized candidate-parquet" in m for m in messages)
