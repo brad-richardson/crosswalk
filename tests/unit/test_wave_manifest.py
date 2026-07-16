@@ -276,3 +276,68 @@ def test_legacy_batch_missing_identity_fields_warns_but_validates(tmp_path: Path
     with pytest.warns(UserWarning, match="treating as a legacy pre-schema-v2 batch"):
         loaded = WaveManifest.load_validated(manifest_path)
     assert loaded.total_pack_count == 1
+
+
+@pytest.mark.parametrize(
+    "batch_json, message",
+    [
+        (
+            {
+                "dataset_id": None,
+                "experiment": {"variant": "enriched"},
+                "groups": [{"group_id": "group-1"}],
+            },
+            "invalid dataset_id",
+        ),
+        (
+            {
+                "dataset_id": "dataset",
+                "experiment": {"variant": None},
+                "groups": [{"group_id": "group-1"}],
+            },
+            "invalid experiment.variant",
+        ),
+        (
+            {
+                "dataset_id": "dataset",
+                "experiment": {"variant": "enriched"},
+                "groups": None,
+            },
+            "invalid groups roster",
+        ),
+    ],
+)
+def test_present_but_null_batch_identity_is_fatal(
+    tmp_path: Path, batch_json: dict, message: str
+) -> None:
+    """JSON null is malformed identity, not a legacy-absent field."""
+    batch_dir = tmp_path / "batch"
+    _make_batch(batch_dir, batch_json=batch_json)
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(_content(batch_dir)).write(manifest_path)
+
+    with pytest.raises(ValueError, match=message):
+        WaveManifest.load_validated(manifest_path)
+
+
+def test_present_but_null_row_identity_is_fatal(tmp_path: Path) -> None:
+    batch_dir = tmp_path / "batch"
+    _make_batch(batch_dir)
+    content = _content(batch_dir)
+    content["run_schedule"][0]["variant"] = None
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(content).write(manifest_path)
+
+    with pytest.raises(ValueError, match="invalid variant"):
+        WaveManifest.load_validated(manifest_path)
+
+
+def test_batch_json_root_must_be_an_object(tmp_path: Path) -> None:
+    batch_dir = tmp_path / "batch"
+    _make_batch(batch_dir)
+    (batch_dir / "batch.json").write_text("[]")
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(_content(batch_dir)).write(manifest_path)
+
+    with pytest.raises(ValueError, match="must contain a JSON object"):
+        WaveManifest.load_validated(manifest_path)

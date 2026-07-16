@@ -67,6 +67,7 @@ BATCH_FIELD_DATASET_ID = "dataset_id"
 BATCH_FIELD_EXPERIMENT = "experiment"
 BATCH_FIELD_VARIANT = "variant"
 BATCH_FIELD_GROUPS = "groups"
+_MISSING = object()
 
 
 def compute_digest(content: dict[str, Any]) -> str:
@@ -272,6 +273,8 @@ def _validate_row_identity(
     batch = batch_cache.get(dir_key)
     if batch is None:
         batch = json.loads((batch_dir / "batch.json").read_text())
+        if not isinstance(batch, dict):
+            raise ValueError(f"{path}: batch.json in {batch_dir} must contain a JSON object")
         batch_cache[dir_key] = batch
 
     run_index = row.get(ROW_RUN_INDEX)
@@ -279,14 +282,23 @@ def _validate_row_identity(
     # Row-side identity fields may be absent on a hand-rolled legacy manifest;
     # a mismatch is only checkable (and only fatal) when BOTH sides carry the
     # field, so a missing row-side value simply skips that comparison.
-    dataset_id = row.get(ROW_DATASET_ID)
-    variant = row.get(ROW_VARIANT)
+    dataset_id = row.get(ROW_DATASET_ID, _MISSING)
+    variant = row.get(ROW_VARIANT, _MISSING)
+    for identity_field, value in ((ROW_DATASET_ID, dataset_id), (ROW_VARIANT, variant)):
+        if value is not _MISSING and (value is None or not str(value).strip()):
+            raise ValueError(
+                f"{path}: schedule row run_index {run_index} has invalid {identity_field} {value!r}"
+            )
 
     # (b) dataset identity: row.dataset_id vs batch.dataset_id
-    batch_dataset = batch.get(BATCH_FIELD_DATASET_ID)
-    if batch_dataset is None:
+    batch_dataset = batch.get(BATCH_FIELD_DATASET_ID, _MISSING)
+    if batch_dataset is _MISSING:
         _warn_legacy_batch(warned, batch_dir, BATCH_FIELD_DATASET_ID, path)
-    elif dataset_id is not None and str(batch_dataset) != str(dataset_id):
+    elif batch_dataset is None or not str(batch_dataset).strip():
+        raise ValueError(
+            f"{path}: batch.json in {batch_dir} has invalid dataset_id {batch_dataset!r}"
+        )
+    elif dataset_id is not _MISSING and str(batch_dataset) != str(dataset_id):
         raise ValueError(
             f"{path}: schedule row run_index {run_index} declares dataset_id "
             f"{str(dataset_id)!r} but batch.json in {batch_dir} has dataset_id "
@@ -294,25 +306,43 @@ def _validate_row_identity(
         )
 
     # (c) variant: row.variant vs batch.experiment.variant
-    experiment = batch.get(BATCH_FIELD_EXPERIMENT)
-    batch_variant = experiment.get(BATCH_FIELD_VARIANT) if isinstance(experiment, dict) else None
-    if batch_variant is None:
+    experiment = batch.get(BATCH_FIELD_EXPERIMENT, _MISSING)
+    if experiment is _MISSING:
         _warn_legacy_batch(
             warned, batch_dir, f"{BATCH_FIELD_EXPERIMENT}.{BATCH_FIELD_VARIANT}", path
         )
-    elif variant is not None and str(batch_variant) != str(variant):
-        raise ValueError(
-            f"{path}: schedule row run_index {run_index} declares variant "
-            f"{str(variant)!r} but batch.json in {batch_dir} has "
-            f"experiment.variant {str(batch_variant)!r}"
-        )
+    elif not isinstance(experiment, dict):
+        raise ValueError(f"{path}: batch.json in {batch_dir} has invalid experiment {experiment!r}")
+    else:
+        batch_variant = experiment.get(BATCH_FIELD_VARIANT, _MISSING)
+        if batch_variant is _MISSING:
+            _warn_legacy_batch(
+                warned, batch_dir, f"{BATCH_FIELD_EXPERIMENT}.{BATCH_FIELD_VARIANT}", path
+            )
+        elif batch_variant is None or not str(batch_variant).strip():
+            raise ValueError(
+                f"{path}: batch.json in {batch_dir} has invalid "
+                f"experiment.variant {batch_variant!r}"
+            )
+        elif variant is not _MISSING and str(batch_variant) != str(variant):
+            raise ValueError(
+                f"{path}: schedule row run_index {run_index} declares variant "
+                f"{str(variant)!r} but batch.json in {batch_dir} has "
+                f"experiment.variant {str(batch_variant)!r}"
+            )
 
     # (a) roster: row.group_id must be in the batch's group roster
     if BATCH_FIELD_GROUPS not in batch:
         _warn_legacy_batch(warned, batch_dir, BATCH_FIELD_GROUPS, path)
-    elif group_id not in batch_group_map(batch):
-        raise ValueError(
-            f"{path}: schedule row run_index {run_index} references group_id "
-            f"{group_id!r} that is absent from the roster of batch.json in "
-            f"{batch_dir}"
-        )
+    else:
+        if not isinstance(batch[BATCH_FIELD_GROUPS], list):
+            raise ValueError(
+                f"{path}: batch.json in {batch_dir} has invalid groups roster "
+                f"{batch[BATCH_FIELD_GROUPS]!r}"
+            )
+        if group_id not in batch_group_map(batch):
+            raise ValueError(
+                f"{path}: schedule row run_index {run_index} references group_id "
+                f"{group_id!r} that is absent from the roster of batch.json in "
+                f"{batch_dir}"
+            )
