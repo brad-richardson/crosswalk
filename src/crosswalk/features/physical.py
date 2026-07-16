@@ -31,7 +31,7 @@ from typing import Any
 
 import numpy as np
 
-from ..utils.physical import clip_lr_rules
+from ..utils.physical import clip_lr_rules, interval_union_length
 
 PHYSICAL_FLAG_FEATURES = (
     "bridge_fraction_delta",
@@ -56,7 +56,9 @@ PHYSICAL_EXPERIMENT_FEATURES = (
 
 
 def _known_duration(rules: list[dict[str, Any]]) -> float:
-    return sum(float(rule["between"][1]) - float(rule["between"][0]) for rule in rules)
+    # Union length, so overlapping rules do not inflate the known-coverage
+    # denominator past the actually-covered fraction.
+    return interval_union_length(rule["between"] for rule in rules)
 
 
 def _flag_fraction(
@@ -69,11 +71,7 @@ def _flag_fraction(
     known = _known_duration(clipped)
     if known <= 0:
         return float("nan")
-    positive = sum(
-        float(rule["between"][1]) - float(rule["between"][0])
-        for rule in clipped
-        if flag in rule["value"]
-    )
+    positive = interval_union_length(rule["between"] for rule in clipped if flag in rule["value"])
     return min(max(positive / known, 0.0), 1.0)
 
 

@@ -135,6 +135,27 @@ def test_vertical_features_compare_sign_not_exact_level_number() -> None:
     assert ground_conflict["physical_structure_conflict"] == 1.0
 
 
+def test_overlapping_flag_rules_use_union_coverage() -> None:
+    # Two differently-valued overlapping rules ([0,0.6]=bridge, [0.4,1.0]=tunnel)
+    # cannot merge, so the known-coverage denominator must be their union (1.0),
+    # not the raw sum (1.2). is_bridge covers [0,0.6] -> fraction 0.6, so the
+    # delta against a fully-bridged target is 0.4 (raw-sum arithmetic gives 0.5).
+    features = compute_physical_pair_features(
+        ref_level_lr=None,
+        target_level_lr=None,
+        ref_road_flags_lr=[
+            {"between": [0.0, 0.6], "value": ["is_bridge"]},
+            {"between": [0.4, 1.0], "value": ["is_tunnel"]},
+        ],
+        target_road_flags_lr=_lr(["is_bridge"]),
+        target_flag_domains={"is_bridge", "is_tunnel"},
+    )
+
+    assert features["bridge_fraction_delta"] == pytest.approx(0.4)
+    # Target has no tunnel; ref tunnel covers [0.4,1.0]/union 1.0 -> 0.6.
+    assert features["tunnel_fraction_delta"] == pytest.approx(0.6)
+
+
 def test_missing_levels_are_unknown_not_ground() -> None:
     features = compute_physical_pair_features(
         ref_level_lr=_lr(0),

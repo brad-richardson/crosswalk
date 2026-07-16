@@ -6,14 +6,134 @@ import geopandas as gpd
 import pandas as pd
 from shapely import LineString
 
+from crosswalk.agent_labeling.stitch_evidence import build_prompt
 from crosswalk.matching.types import MatchDecision, MatchResult
 from crosswalk.pipeline.runner import _export_groups_sidecar
 from crosswalk.utils.physical import (
     clip_physical_attributes,
+    interval_union_length,
+    normalize_lr_rules,
     physical_attributes,
     physical_is_informative,
     summarize_physical,
 )
+
+_PHYSICAL_GUIDANCE_MARKER = "'R physical' / 'T physical' reports bridge"
+
+
+def _prompt_metadata(*, edge_physical: dict, segment_physical: dict) -> dict:
+    """Minimal build_prompt metadata with configurable physical evidence."""
+    return {
+        "group_id": "g1",
+        "match_type": "1:1",
+        "n_ref_segments": 1,
+        "n_target_segments": 1,
+        "optimizer_letter": "A",
+        "structure": {},
+        "same_side_coincidence": {},
+        "segments": {
+            "reference": [
+                {"label": "R1", "id": "r1", "name": "", "class": "", "physical": segment_physical}
+            ],
+            "target": [{"label": "T1", "id": "t1", "name": "", "class": "", "physical": {}}],
+        },
+        "options": [
+            {
+                "letter": "A",
+                "is_optimizer": True,
+                "edge_count": 1,
+                "total_confidence": 0.9,
+                "mean_confidence": 0.9,
+                "edges": [{"edge": "R1->T1", "confidence": 0.9, **edge_physical}],
+            }
+        ],
+    }
+
+
+def test_prompt_physical_guidance_fires_on_edge_physical_with_empty_segment_map(tmp_path) -> None:
+    # Bug 1: edges carry ref_physical/target_physical (never a "structural" key),
+    # so an edge-only physical pack must still print the interpretive guidance.
+    metadata = _prompt_metadata(
+        edge_physical={
+            "ref_physical": {
+                "aligned_range": [0.0, 1.0],
+                "road_flags_lr": [{"between": [0.0, 1.0], "value": ["is_bridge"]}],
+            },
+            "target_physical": {},
+        },
+        segment_physical={},
+    )
+    prompt = build_prompt(tmp_path, metadata, {"options": [{"letter": "A"}]})
+    assert _PHYSICAL_GUIDANCE_MARKER in prompt
+    # The legend still surfaces the R physical line, which the guidance explains.
+    assert "R physical: bridge" in prompt
+
+
+def test_prompt_physical_guidance_absent_without_any_physical(tmp_path) -> None:
+    metadata = _prompt_metadata(edge_physical={}, segment_physical={})
+    prompt = build_prompt(tmp_path, metadata, {"options": [{"letter": "A"}]})
+    assert _PHYSICAL_GUIDANCE_MARKER not in prompt
+
+
+def test_interval_union_length_dedupes_overlaps() -> None:
+    assert interval_union_length([[0.0, 0.6], [0.4, 0.9]]) == 0.9
+    assert interval_union_length([[0.0, 0.5], [0.5, 1.0]]) == 1.0
+    assert interval_union_length([[0.0, 0.4], [0.6, 1.0]]) == 0.8
+    assert interval_union_length([]) == 0.0
+
+
+def test_normalize_lr_rules_merges_overlapping_same_value() -> None:
+    # Unsorted, overlapping, equal-valued rules collapse to one union range.
+    merged = normalize_lr_rules(
+        [
+            {"between": [0.4, 0.9], "value": 1},
+            {"between": [0.0, 0.6], "value": 1},
+        ]
+    )
+    assert merged == [{"between": [0.0, 0.9], "value": 1}]
+
+
+def test_normalize_lr_rules_keeps_overlapping_different_values() -> None:
+    merged = normalize_lr_rules(
+        [
+            {"between": [0.0, 0.6], "value": 0},
+            {"between": [0.4, 1.0], "value": 1},
+        ]
+    )
+    assert merged == [
+        {"between": [0.0, 0.6], "value": 0},
+        {"between": [0.4, 1.0], "value": 1},
+    ]
+
+
+def test_summarize_physical_union_coverage_suppresses_false_partial() -> None:
+    # Two overlapping same-flag rules cover the full segment as a union; a raw
+    # sum would exceed 1.0, but union coverage == total, so NOT "(partial)".
+    physical = {
+        "road_flags_lr": [
+            {"between": [0.0, 0.6], "value": ["is_bridge"]},
+            {"between": [0.4, 1.0], "value": ["is_bridge"]},
+        ]
+    }
+    assert summarize_physical(physical) == "bridge"
+
+
+def test_summarize_physical_union_coverage_keeps_true_partial() -> None:
+    physical = {
+        "road_flags_lr": [
+            {"between": [0.0, 0.3], "value": ["is_bridge"]},
+            {"between": [0.2, 0.5], "value": ["is_bridge"]},
+        ]
+    }
+    # Union = [0.0, 0.5] = 0.5 of the full segment -> still partial.
+    assert summarize_physical(physical) == "bridge (partial)"
+
+
+def test_summarize_physical_mid_segment_flag_is_partial() -> None:
+    # Bug 3: a single [0.4, 0.6] flag with no aligned_range must read as partial
+    # (denominator is the full segment 1.0, not the rule span).
+    physical = {"road_flags_lr": [{"between": [0.4, 0.6], "value": ["is_tunnel"]}]}
+    assert summarize_physical(physical) == "tunnel (partial)"
 
 
 def test_physical_rules_clip_to_the_aligned_interval() -> None:
