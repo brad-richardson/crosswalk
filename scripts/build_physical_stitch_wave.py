@@ -153,14 +153,11 @@ def iter_sidecar_groups(path: Path, *, chunk_size: int = 1024 * 1024) -> Iterato
 def _target_capabilities(dataset_id: str) -> TargetPhysicalCapabilities:
     config = get_dataset_config(dataset_id)
     fetch = config.fetch if config is not None else None
-    domains: set[str] = set()
-    if fetch is not None and fetch.bridge_column:
-        domains.add("is_bridge")
-    if fetch is not None and fetch.tunnel_column:
-        domains.add("is_tunnel")
+    if fetch is None:
+        return TargetPhysicalCapabilities(has_level=False, flag_domains=frozenset())
     return TargetPhysicalCapabilities(
-        has_level=bool(fetch is not None and fetch.level_column),
-        flag_domains=frozenset(domains),
+        has_level=bool(fetch.level_column),
+        flag_domains=fetch.physical_flag_domains(),
     )
 
 

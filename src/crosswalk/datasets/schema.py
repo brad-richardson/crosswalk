@@ -71,6 +71,26 @@ class FetchConfig(BaseModel):
     # Polygon-to-centerline conversion
     polygon_to_centerline: bool = False  # Convert polygon geometries to centerline LineStrings
 
+    def physical_flag_domains(self) -> frozenset[str]:
+        """Physical flag domains (``is_bridge``/``is_tunnel``) this source surveys.
+
+        Derived from fetch provenance (the configured bridge/tunnel columns), NOT
+        inferred from observed positive flags: a source that configures only a
+        tunnel column has not surveyed bridges, so its bridge domain stays
+        unknown rather than false. This is the single source of truth for the
+        ``target_flag_domains`` provenance that
+        ``features.physical.compute_physical_pair_features`` requires (see that
+        function's docstring and research/physical_feature_experiment_2026-07-15.md).
+        Level provenance is separate (see ``level_column``); this returns only the
+        flag domains, so a level-only source yields an empty set.
+        """
+        domains: set[str] = set()
+        if self.bridge_column:
+            domains.add("is_bridge")
+        if self.tunnel_column:
+            domains.add("is_tunnel")
+        return frozenset(domains)
+
 
 class MatchingConfig(BaseModel):
     """Configuration for matching behavior."""

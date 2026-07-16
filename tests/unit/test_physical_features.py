@@ -4,11 +4,59 @@ import math
 
 import pytest
 
-from crosswalk.features.physical import compute_physical_pair_features
+from crosswalk.config import FEATURE_COLUMNS
+from crosswalk.datasets.schema import FetchConfig
+from crosswalk.features.physical import (
+    PHYSICAL_EXPERIMENT_FEATURES,
+    compute_physical_pair_features,
+)
 
 
 def _lr(value):
     return [{"between": [0.0, 1.0], "value": value}]
+
+
+def test_experimental_features_are_disjoint_from_production_contract() -> None:
+    """The experimental physical features must never leak into the production
+    ML contract.
+
+    ``PHYSICAL_EXPERIMENT_FEATURES`` is the canonical experiment-only feature
+    list; ``config.FEATURE_COLUMNS`` is the production contract. They are kept
+    disjoint deliberately per the go/no-go criteria in
+    ``research/physical_feature_experiment_2026-07-15.md``.
+
+    Graduating any of these features into ``FEATURE_COLUMNS`` requires ALL of the
+    research note's preconditions, not just this test being edited:
+
+    - each flag domain has enough active reviewed examples across at least three
+      target providers (bridge/tunnel still short today);
+    - the informative slice improves without leaning on the
+      ``physical_comparable_count`` dataset-availability proxy;
+    - the metrics are re-derived through the shared ``features/compute.py`` +
+      ``crosswalk backfill`` path (the ablation harness numbers do not validate
+      production wiring — see the module docstring in ``features/physical.py``);
+    - the linear-referenced rule iteration is vectorized/pre-normalized before it
+      runs on every candidate pair during inference.
+    """
+    overlap = set(PHYSICAL_EXPERIMENT_FEATURES) & set(FEATURE_COLUMNS)
+    assert overlap == set(), (
+        "Experimental physical features leaked into the production FEATURE_COLUMNS "
+        f"contract without meeting graduation preconditions: {sorted(overlap)}"
+    )
+
+
+def test_physical_flag_domains_reports_bridge_and_tunnel() -> None:
+    fetch = FetchConfig(bridge_column="BRIDGE", tunnel_column="TUNNEL")
+    assert fetch.physical_flag_domains() == frozenset({"is_bridge", "is_tunnel"})
+
+
+def test_physical_flag_domains_excludes_level_only_provenance() -> None:
+    fetch = FetchConfig(level_column="LAYER")
+    assert fetch.physical_flag_domains() == frozenset()
+
+
+def test_physical_flag_domains_empty_when_no_physical_columns() -> None:
+    assert FetchConfig().physical_flag_domains() == frozenset()
 
 
 def test_tunnel_conflict_requires_target_domain_provenance() -> None:
