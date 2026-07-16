@@ -62,7 +62,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from crosswalk.agent_labeling.stitch_eval import recover_labeled_groups
+from crosswalk.agent_labeling.stitch_eval import (
+    parse_selected_edge_set,
+    recover_labeled_groups,
+)
 from crosswalk.labeling.stitching_store import StitchingLabelStore
 
 REKEY_LOG_FILENAME = "rekey_log.csv"
@@ -75,19 +78,6 @@ REKEY_LOG_COLUMNS = [
     "labeled_at",
     "sidecar",
 ]
-
-
-def _edge_set(selected_edges_raw) -> frozenset[tuple[str, str]]:
-    """Parse a label's ``selected_edges`` JSON into an edge frozenset.
-
-    Local copy of the tiny parser (same choice as ``resolver/extract.py``)
-    rather than importing the private ``stitch_eval._human_edge_set``.
-    """
-    try:
-        edges = json.loads(selected_edges_raw)
-    except (ValueError, TypeError):
-        return frozenset()
-    return frozenset((str(e["ref_id"]), str(e["target_id"])) for e in edges)
 
 
 def _id_list(raw) -> frozenset[str]:
@@ -201,7 +191,7 @@ def _label_scope(row: pd.Series) -> frozenset[str]:
     a safe reconciliation.
     """
     scope: set[str] = set()
-    for r, t in _edge_set(row.get("selected_edges")):
+    for r, t in parse_selected_edge_set(row.get("selected_edges")):
         scope.add(r)
         scope.add(t)
     scope |= _id_list(row.get("ref_ids"))
@@ -277,7 +267,10 @@ def build_rekey_plan(groups: list[dict], labels_df: pd.DataFrame, dataset_id: st
             union_edges = tuple(
                 sorted(
                     set().union(
-                        *(_edge_set(rows_by_gid[h].get("selected_edges")) for h in old_gids)
+                        *(
+                            parse_selected_edge_set(rows_by_gid[h].get("selected_edges"))
+                            for h in old_gids
+                        )
                     )
                 )
             )

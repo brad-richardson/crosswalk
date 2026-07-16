@@ -67,24 +67,13 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from crosswalk.agent_labeling.stitch_eval import recover_labeled_groups
+from crosswalk.agent_labeling.stitch_eval import (
+    parse_selected_edge_set,
+    recover_labeled_groups,
+)
 
 # Key under which delta metadata is attached to queued batch-JSON group entries.
 PRIOR_LABEL_KEY = "prior_label"
-
-
-def _edge_set(selected_edges_raw) -> frozenset[tuple[str, str]]:
-    """Parse a label's ``selected_edges`` JSON into an edge frozenset.
-
-    Local copy of the tiny parser (same choice as ``stitch_rekey`` /
-    ``resolver/extract.py``) rather than importing the private
-    ``stitch_eval._human_edge_set``.
-    """
-    try:
-        edges = json.loads(selected_edges_raw)
-    except (ValueError, TypeError):
-        return frozenset()
-    return frozenset((str(e["ref_id"]), str(e["target_id"])) for e in edges)
 
 
 def _id_list(raw) -> frozenset[str]:
@@ -105,7 +94,7 @@ def _kept_membership(row) -> tuple[frozenset[str], frozenset[str]]:
     membership is the union of their edge endpoints plus ``ref_ids``/``target_ids``
     when present. Empty on both sides for a reject-all pair label.
     """
-    edges = _edge_set(row.get("selected_edges"))
+    edges = parse_selected_edge_set(row.get("selected_edges"))
     kept_refs = frozenset(r for r, _ in edges) | _id_list(row.get("ref_ids"))
     kept_targets = frozenset(t for _, t in edges) | _id_list(row.get("target_ids"))
     return kept_refs, kept_targets
