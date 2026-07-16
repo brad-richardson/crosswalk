@@ -494,6 +494,14 @@ class Vote:
     # addressable to this invocation and the CLI delivery mechanism. This is a
     # delivery assertion, never a claim that the remote model consumed them.
     evidence_delivery: str = ""
+    # Which panel round produced this seat's recorded ballot (its ballot of
+    # record; see :func:`run_batch`). ``1`` is the initial panel run; a value
+    # ``>1`` means the seat was FILLED during a later seat-level retry/resume.
+    # The FIRST fully-valid recorded draw per (group, seat) is the ballot of
+    # record and is never overwritten — a retry only ever mints a NEW ballot for
+    # a seat that had no valid one — so this counter lets an audit tell a
+    # first-draw ballot from a retry-filled one.
+    attempt: int = 1
 
 
 @dataclass
@@ -2137,6 +2145,10 @@ VOTES_COLUMNS = [
     "option_menu_sha256",
     "chosen_option_id",
     "panel_invocation_sha256",
+    # Panel round that drew this seat's ballot of record (1 = initial panel run;
+    # >1 = filled during a seat-level retry). Appended last so historical
+    # votes.csv readers that key by column NAME are unaffected.
+    "attempt",
 ]
 CONSENSUS_COLUMNS = [
     "group_id",
@@ -2185,6 +2197,7 @@ def _vote_row(v: Vote) -> dict:
         "option_menu_sha256": v.option_menu_sha256,
         "chosen_option_id": v.chosen_option_id,
         "panel_invocation_sha256": v.panel_invocation_sha256,
+        "attempt": v.attempt,
     }
 
 
@@ -2298,6 +2311,17 @@ def run_batch(
     done_ids: set[str] = set()
     vote_rows: list[dict] = []
     consensus_out: list[dict] = []
+    # Seat-level resume salvage: for a group that is NOT fully done, keep any
+    # seats whose recorded ballot is a fully-valid ballot of record (compatible
+    # provenance) and re-invoke ONLY the missing/incompatible seats. Keyed by
+    # group_id -> (ordered Vote objects, byte-identical source rows). The FIRST
+    # fully-valid recorded draw per (group, seat) is never overwritten; a resume
+    # can only fill a seat that has no valid recorded ballot. When NO seat is
+    # salvageable (e.g. every row is from a different panel-era — a roster/model
+    # change re-mints panel_invocation_sha256 on every seat) the group's kept set
+    # is empty and the whole group re-runs, exactly as before this change.
+    kept_seat_votes: dict[str, list[Vote]] = {}
+    kept_seat_rows: dict[str, list[dict]] = {}
     # Rows for previously-done groups OUTSIDE the current selection: excluded
     # from the final output but preserved in the partials, so a filtered resume
     # never destroys another group's crash-recovery data.
@@ -2306,7 +2330,11 @@ def run_batch(
     if resume and votes_partial.exists() and consensus_partial.exists():
         prev_votes = pd.read_csv(votes_partial, dtype={"group_id": str})
         prev_cons = pd.read_csv(consensus_partial, dtype={"group_id": str})
-        recorded = set(prev_votes["group_id"].astype(str)) & set(prev_cons["group_id"].astype(str))
+        # Recorded on the BALLOT partial alone: a group with ballots but no
+        # consensus row (e.g. --retry-timeouts dropped a timed-out seat and the
+        # group's now-stale consensus row) is still a seat-fill candidate. The
+        # fully-done fast path separately requires exactly one consensus row.
+        recorded = set(prev_votes["group_id"].astype(str))
         expected_voters = {(p.name, p.model) for p in panel}
         for gid in sorted(recorded & selected_ids):
             vote_group = prev_votes[prev_votes["group_id"].astype(str) == gid]
@@ -2507,10 +2535,91 @@ def run_batch(
                 )
             if compatible:
                 done_ids.add(gid)
+                continue
+
+            # Not fully done: salvage the seats whose recorded ballot IS a valid
+            # ballot of record (same evidence/menu/delivery/invocation provenance)
+            # and re-invoke ONLY the rest. A seat is kept iff it has exactly one
+            # recorded row for the CURRENT (provider, model) whose provenance
+            # hashes all match this run. Because panel_invocation_sha256 binds the
+            # whole roster, any panel-era change (added/removed seat, model/effort/
+            # knob change) mismatches EVERY seat's hash -> nothing salvaged -> the
+            # whole group re-runs, preserving the historical all-or-nothing outer
+            # gate for a different panel-era.
+            def _attempt_of(row: dict) -> int:
+                value = row.get("attempt")
+                if value is None or pd.isna(value):
+                    return 1
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return 1
+
+            kept_votes: list[Vote] = []
+            kept_rows: list[dict] = []
+            for spec in panel:
+                seat_rows = vote_group[vote_group["provider"].astype(str) == spec.name]
+                if len(seat_rows) != 1:
+                    continue  # missing seat, or a duplicate we will not trust
+                row = seat_rows.iloc[0].to_dict()
+                if _text(row.get("model")) != spec.model:
+                    continue
+                seat_ok = all(
+                    (
+                        _all_equal(seat_rows, "evidence_id", evidence["evidence_id"]),
+                        _all_equal(
+                            seat_rows, "evidence_pack_sha256", manifest["evidence_pack_sha256"]
+                        ),
+                        _all_equal(seat_rows, "panel_invocation_sha256", panel_invocation_sha),
+                        _all_equal(
+                            seat_rows,
+                            "displayed_candidate_universe_sha256",
+                            evidence["displayed_candidate_universe_sha256"],
+                        ),
+                        _all_equal(seat_rows, "option_menu_sha256", evidence["option_menu_sha256"]),
+                        _rows_match_menu(seat_rows),
+                        _rows_match_delivery(seat_rows),
+                    )
+                )
+                if seat_ok and spec.name == "gemini":
+                    recorded_route = _text(row.get("invocation_route"))
+                    seat_ok = bool(spec.routes) and recorded_route in set(spec.routes)
+                if not seat_ok:
+                    continue
+                kept_votes.append(
+                    Vote(
+                        group_id=gid,
+                        provider=str(row["provider"]),
+                        model=str(row["model"]),
+                        choice=_text(row["choice"]),
+                        confidence=float(row["confidence"]),
+                        reasoning=_text(row.get("reasoning")),
+                        edge_set=option_edges[_text(row["choice"])],
+                        abstain_reason=(
+                            AbstainReason(_text(row.get("abstain_reason")))
+                            if _text(row.get("abstain_reason"))
+                            in {reason.value for reason in AbstainReason}
+                            else AbstainReason.UNSET
+                        ),
+                        invocation_route=_text(row.get("invocation_route")),
+                        attempt=_attempt_of(row),
+                    )
+                )
+                kept_rows.append(row)
+            if kept_votes:
+                kept_seat_votes[gid] = kept_votes
+                kept_seat_rows[gid] = kept_rows
+                filled = sorted(
+                    p.name for p in panel if p.name not in {v.provider for v in kept_votes}
+                )
+                logger.warning(
+                    f"resume: group {gid} keeping {len(kept_votes)} valid seat ballot(s) "
+                    f"({', '.join(v.provider for v in kept_votes)}); filling only {filled}"
+                )
             else:
                 logger.warning(
-                    f"resume: group {gid} has incomplete or stale panel/evidence/policy "
-                    f"provenance; re-running it"
+                    f"resume: group {gid} has no salvageable seat (incomplete or stale "
+                    f"panel/evidence/policy provenance); re-running the full panel"
                 )
 
         vote_rows = prev_votes[prev_votes["group_id"].astype(str).isin(done_ids)].to_dict("records")
@@ -2559,24 +2668,56 @@ def run_batch(
     route_state = ProviderRouteState()
     for i, gdir in enumerate(pending):
         gid = gdir.name
-        logger.info(f"[{i + 1}/{len(pending)}] panel on group {gid}")
-        votes = run_panel_on_group(
-            gid,
-            gdir,
-            panel,
-            timeout,
-            collect_feedback=collect_feedback,
-            invocation_budget_s=invocation_budget_s,
-            route_state=route_state,
-            evidence_manifest=evidence_by_id[gid],
-        )
         manifest = evidence_by_id[gid]
         evidence = manifest["evidence"]
         option_ids = {
             str(option["letter"]): str(option["option_id"]) for option in evidence["option_menu"]
         }
         option_ids.update({"NONE": "NONE", "ABSTAIN": "ABSTAIN"})
-        for vote in votes:
+
+        # Seat-level retry: keep any ballots of record salvaged during resume and
+        # invoke ONLY the seats that lack one. A fully fresh group (no salvaged
+        # seat) runs the whole panel exactly as before.
+        kept_votes = kept_seat_votes.get(gid, [])
+        kept_rows = kept_seat_rows.get(gid, [])
+        kept_by_name = {v.provider: v for v in kept_votes}
+        kept_row_by_name = {str(r["provider"]): r for r in kept_rows}
+        seats_to_run = [p for p in panel if p.name not in kept_by_name]
+        if kept_votes:
+            # A filled seat's ballot is drawn a round LATER than the group's
+            # existing ballots of record, so it carries the next attempt number.
+            fill_attempt = max(v.attempt for v in kept_votes) + 1
+            logger.info(
+                f"[{i + 1}/{len(pending)}] seat-fill on group {gid}: "
+                f"filling {[p.name for p in seats_to_run]} "
+                f"(kept {sorted(kept_by_name)}, attempt {fill_attempt})"
+            )
+        else:
+            fill_attempt = 1
+            logger.info(f"[{i + 1}/{len(pending)}] panel on group {gid}")
+
+        # Preserve the salvaged ballots of record in the partial up front so a
+        # mid-fill provider-down halt can never drop them (they are already valid
+        # and must survive to the next resume). New seats are appended only after
+        # the breaker check, mirroring the historical "incomplete group leaves no
+        # rows" behavior for the seats being (re)invoked now.
+        vote_rows.extend(kept_row_by_name[p.name] for p in panel if p.name in kept_by_name)
+
+        new_votes = (
+            run_panel_on_group(
+                gid,
+                gdir,
+                seats_to_run,
+                timeout,
+                collect_feedback=collect_feedback,
+                invocation_budget_s=invocation_budget_s,
+                route_state=route_state,
+                evidence_manifest=manifest,
+            )
+            if seats_to_run
+            else []
+        )
+        for vote in new_votes:
             vote.evidence_id = evidence["evidence_id"]
             vote.evidence_pack_sha256 = manifest["evidence_pack_sha256"]
             vote.displayed_candidate_universe_sha256 = evidence[
@@ -2585,11 +2726,14 @@ def run_batch(
             vote.option_menu_sha256 = evidence["option_menu_sha256"]
             vote.chosen_option_id = option_ids[vote.choice]
             vote.panel_invocation_sha256 = panel_invocation_sha
-        for v in votes:
+            vote.attempt = fill_attempt
+        # The breaker counts only the seats INVOKED this round; a salvaged ballot
+        # of record is a historical success, not a fresh invocation.
+        for v in new_votes:
             if v.choice == "ABSTAIN" and v.abstain_reason == AbstainReason.TIMEOUT:
                 consecutive_timeouts[v.provider] = consecutive_timeouts.get(v.provider, 0) + 1
                 if consecutive_timeouts[v.provider] >= _TIMEOUT_BREAKER_N:
-                    _flush()  # keep completed groups resumable past the halt
+                    _flush()  # keep completed groups (and salvaged seats) resumable
                     raise ProviderInvocationError(
                         f"{v.provider}: timed out on {_TIMEOUT_BREAKER_N} consecutive "
                         f"groups (last: {gid}) — treating as provider-down and halting "
@@ -2598,7 +2742,15 @@ def run_batch(
                     )
             else:
                 consecutive_timeouts[v.provider] = 0
-        vote_rows.extend(_vote_row(v) for v in votes)
+        vote_rows.extend(_vote_row(v) for v in new_votes)
+        # Consensus is recomputed from the FULL ballot set (salvaged + filled) in
+        # panel order, exactly as if the whole panel had been drawn together; the
+        # consensus provenance columns therefore reflect the actual mixed-attempt
+        # rows (all share one panel_invocation_sha256, since the roster is fixed).
+        new_by_name = {v.provider: v for v in new_votes}
+        votes = [
+            kept_by_name[p.name] if p.name in kept_by_name else new_by_name[p.name] for p in panel
+        ]
         # Derive the chosen edge set's classes so the class-consistency gate can
         # demote cross-mode auto-accepts. compute_consensus is pure, so a first
         # (gate-less) call gives the chosen edge_set to look up classes for.
