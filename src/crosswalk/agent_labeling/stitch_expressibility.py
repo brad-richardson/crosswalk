@@ -39,7 +39,6 @@ This module reads sidecars and labels READ ONLY.
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -47,18 +46,13 @@ import pandas as pd
 
 from ..matching.alternatives import generate_top_k_alternatives
 from ..matching.stitch_options import build_stitch_options
-from .stitch_eval import _is_set_label, _parse_id_list, set_label_metrics
-
-
-def _label_edge_set(raw: str) -> frozenset[tuple[str, str]]:
-    """Parse a label's ``selected_edges`` JSON into a frozenset of (ref, tgt)."""
-    if not isinstance(raw, str) or not raw:
-        return frozenset()
-    try:
-        edges = json.loads(raw)
-    except (ValueError, TypeError):
-        return frozenset()
-    return frozenset((str(e["ref_id"]), str(e["target_id"])) for e in edges)
+from .stitch_eval import (
+    _is_set_label,
+    _parse_id_list,
+    best_overlap_group,
+    parse_selected_edge_set,
+    set_label_metrics,
+)
 
 
 def settled_labels(labels_df: pd.DataFrame) -> pd.DataFrame:
@@ -71,7 +65,7 @@ def settled_labels(labels_df: pd.DataFrame) -> pd.DataFrame:
     df = labels_df
     if "label_semantics" in df.columns:
         df = df[df["label_semantics"].fillna("pair") != "set"]
-    mask = df["selected_edges"].map(lambda x: bool(_label_edge_set(x)))
+    mask = df["selected_edges"].map(lambda x: bool(parse_selected_edge_set(x)))
     return df[mask].reset_index(drop=True)
 
 
@@ -118,54 +112,24 @@ def _option_edge_sets(group: dict, k: int) -> list[frozenset[tuple[str, str]]]:
 
 
 def _recover_group(
-    edge_index: dict[tuple[str, str], list[str]],
+    index: dict[tuple[str, str], list[str]] | dict[str, list[str]],
     groups_by_id: dict[str, dict],
-    label_es: frozenset,
+    keys: frozenset,
 ) -> tuple[dict | None, int, int]:
-    """Find the sidecar group holding the most of a label's edges.
+    """Resolve a label's ``keys`` (edges or members) to its best sidecar group.
 
-    Returns (group, n_matched, n_total). ``group`` is None when no edge of the
-    label survives in any current group. The label is "clean-recoverable" iff
-    ``n_matched == n_total`` (its whole edge set lives in that one group).
+    Thin adapter over the shared :func:`stitch_eval.best_overlap_group` overlap
+    core (edge-index for pair labels, segment-index for set labels): it returns
+    ``(group, n_matched, n_total)`` where ``group`` is ``None`` when no key
+    survives in any current group. A label is "clean-recoverable" iff
+    ``n_matched == n_total`` (its whole edge/membership set lives in one group).
+    Sharing the core keeps the #354/#367 deterministic tie-break identical to
+    the eval-side / rekey / resolver drift mapping.
     """
-    counts: dict[str, int] = defaultdict(int)
-    for e in label_es:
-        for gid in edge_index.get(e, ()):
-            counts[gid] += 1
-    if not counts:
-        return None, 0, len(label_es)
-    # #367: label_es is a frozenset, so its iteration order (hence insertion
-    # order into counts) is hash-seed dependent; sort before max() so a count
-    # tie resolves deterministically to the smallest group_id.
-    best = max(sorted(counts), key=counts.get)
-    return groups_by_id[best], counts[best], len(label_es)
-
-
-def _recover_group_by_members(
-    seg_index: dict[str, list[str]],
-    groups_by_id: dict[str, dict],
-    members: frozenset[str],
-) -> tuple[dict | None, int, int]:
-    """Find the sidecar group holding the most of a SET label's members.
-
-    Mirrors ``_recover_group``, but a SET label carries no edges (only a
-    ``ref_ids`` / ``target_ids`` membership assertion), so recovery keys on
-    segment ids — both endpoints of every group edge — rather than edge pairs.
-
-    Returns (group, n_matched, n_total). The label is "clean-recoverable" iff
-    ``n_matched == n_total`` (its whole membership lives in one current group).
-    """
-    counts: dict[str, int] = defaultdict(int)
-    for m in members:
-        for gid in seg_index.get(m, ()):
-            counts[gid] += 1
-    if not counts:
-        return None, 0, len(members)
-    # Same deterministic tie-break as _recover_group (#367): sort before max()
-    # so a count tie resolves to the smallest group_id, not hash-seed-dependent
-    # iteration order.
-    best = max(sorted(counts), key=counts.get)
-    return groups_by_id[best], counts[best], len(members)
+    best, matched = best_overlap_group(index, keys)
+    if best is None:
+        return None, 0, len(keys)
+    return groups_by_id[best], matched, len(keys)
 
 
 def _best_set_option_metrics(
@@ -353,7 +317,7 @@ def measure_expressibility(
     n_recoverable = 0
     n_covered = 0
     for _, row in df.iterrows():
-        label_es = _label_edge_set(row["selected_edges"])
+        label_es = parse_selected_edge_set(row["selected_edges"])
         group, matched, total = _recover_group(edge_index, groups_by_id, label_es)
         recoverable = group is not None and matched == total
         covered = False
@@ -389,7 +353,7 @@ def measure_expressibility(
         ref_members = _parse_id_list(row.get("ref_ids"))
         target_members = _parse_id_list(row.get("target_ids"))
         members = ref_members | target_members
-        group, matched, total = _recover_group_by_members(seg_index, groups_by_id, members)
+        group, matched, total = _recover_group(seg_index, groups_by_id, members)
         recoverable = group is not None and matched == total
         covered = False
         best_boundary = 0.0

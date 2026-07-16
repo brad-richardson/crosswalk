@@ -10,6 +10,8 @@ option can express).
 from __future__ import annotations
 
 import json
+from collections import defaultdict
+from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,9 +37,36 @@ def _parse_edge_set(raw: str) -> frozenset:
     return frozenset((str(a), str(b)) for a, b in data)
 
 
-def _human_edge_set(selected_edges_raw: str) -> frozenset:
+def parse_selected_edge_set(raw) -> frozenset[tuple[str, str]]:
+    """Parse a stitching label's ``selected_edges`` JSON into an edge frozenset.
+
+    ``selected_edges`` is stored as a JSON array of ``{"ref_id", "target_id"}``
+    objects (``"[]"`` == reject-all). This is the ONE lenient crosswalk parser,
+    shared by ``stitch_eval`` / ``stitch_coverage`` / ``stitch_rekey`` /
+    ``resolver.extract`` / ``stitch_expressibility`` (each previously kept a
+    byte-identical private copy): input that does not DECODE — non-string
+    (NaN, ``None``), blank, or non-JSON — yields an EMPTY frozenset rather than
+    raising, so a single unparseable label row never aborts a whole
+    drift-mapping / coverage / expressibility pass.
+
+    Leniency is intentionally limited to the ``json.loads`` step: structurally
+    invalid but *decodable* JSON (a non-list, or an item missing ``ref_id`` /
+    ``target_id``) still propagates its ``TypeError`` / ``KeyError`` — this
+    preserves the exact behavior of every historical copy this replaces. Blank
+    ids are passed through unchanged (not rejected).
+
+    Deliberately NOT unified with two intentionally-different siblings:
+
+    * ``mbench.eval.stitch_metrics._curated_edge_set`` is the STRICT benchmark
+      parser — it RAISES on malformed/null/blank input, because a corrupt
+      curation label must fail a benchmark run rather than be silently read as
+      reject-all. Kept honest by ``tests/unit/test_mbench_drift_parity.py``.
+    * ``crosswalk.agent_labeling.xprod.parse_selected_edges`` uses
+      ``ast.literal_eval`` (py-literal CSV cells) and does NOT str-cast ids;
+      it serves cross-product artifact detection, a different contract.
+    """
     try:
-        edges = json.loads(selected_edges_raw)
+        edges = json.loads(raw)
     except (ValueError, TypeError):
         return frozenset()
     return frozenset((str(e["ref_id"]), str(e["target_id"])) for e in edges)
@@ -186,7 +215,7 @@ def map_human_labels_to_groups(
     """
     human_records = []
     for _, row in human_df.iterrows():
-        es = _human_edge_set(row["selected_edges"])
+        es = parse_selected_edge_set(row["selected_edges"])
         human_records.append((str(row["group_id"]), es))
 
     group_candidate_edges = group_candidate_edges or {}
@@ -260,6 +289,35 @@ def _load_batch_sliver_edges(batch_dir: Path) -> dict[str, frozenset]:
     return out
 
 
+def best_overlap_group(
+    index: Mapping[Hashable, Iterable[str]], keys: Iterable[Hashable]
+) -> tuple[str | None, int]:
+    """The group_id sharing the most of ``keys``, with a deterministic tie-break.
+
+    ``index`` maps each key — an edge ``(ref_id, target_id)`` pair for pair
+    labels, or a segment id for set/membership labels — to the group_ids that
+    contain it; ``keys`` is a label's selected edges or its membership ids.
+    Returns ``(best_group_id, n_matched)`` where ``n_matched`` is how many of
+    ``keys`` land in ``best_group_id``; ``best_group_id`` is ``None`` when no key
+    hits any group.
+
+    Count ties break on the lexicographically smallest group_id (#354 / #367):
+    ``keys`` is typically a frozenset whose iteration order is hash-seed
+    dependent, so ``sorted`` before ``max`` pins the winner (this was the source
+    of the ±15-row/process wobble the #354 fix removed). This is THE shared
+    overlap-scoring core behind :func:`recover_labeled_groups` and
+    ``stitch_expressibility``'s recovery — keep them on this one implementation.
+    """
+    counts: dict[str, int] = defaultdict(int)
+    for key in keys:
+        for gid in index.get(key, ()):
+            counts[gid] += 1
+    if not counts:
+        return None, 0
+    best = max(sorted(counts), key=counts.get)
+    return best, counts[best]
+
+
 def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
     """Map old human-labeled group_ids to current sidecar groups by edge overlap.
 
@@ -282,8 +340,6 @@ def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
     - set:   [(human_gid, sidecar_gid)] set labels recovered by membership overlap
     - set_lost: [human_gid] set labels whose members appear in no current group
     """
-    from collections import defaultdict
-
     edge_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
     seg_groups: dict[str, set[str]] = defaultdict(set)
     for g in groups:
@@ -312,40 +368,27 @@ def recover_labeled_groups(groups: list[dict], human_df: pd.DataFrame) -> dict:
         # would both miscount them as NONE and exclude their groups from the
         # eval batch. Recover them by MEMBERSHIP overlap instead.
         if _is_set_label(row):
+            # Membership overlap (both endpoints), deterministic #354 tie-break.
             members = _parse_id_list(row.get("ref_ids")) | _parse_id_list(row.get("target_ids"))
-            cnt_s: dict[str, int] = defaultdict(int)
-            for s in members:
-                for gid in seg_groups.get(s, ()):
-                    cnt_s[gid] += 1
-            if cnt_s:
-                # #354: sort candidates before max() so a count tie breaks on
-                # the lexicographically smallest group_id, not dict/set
-                # iteration order (hash-seed-dependent for str keys — the
-                # source of the ±15 row/process wobble without
-                # PYTHONHASHSEED=0 pinned).
-                set_recovered.append((hgid, max(sorted(cnt_s), key=cnt_s.get)))
+            best_gid, _ = best_overlap_group(seg_groups, members)
+            if best_gid is not None:
+                set_recovered.append((hgid, best_gid))
             else:
                 set_lost.append(hgid)
             continue
-        hes = _human_edge_set(row["selected_edges"])
+        hes = parse_selected_edge_set(row["selected_edges"])
         if not hes:
             empty.append(hgid)
             continue
-        cnt: dict[str, int] = defaultdict(int)
-        for e in hes:
-            for gid in edge_groups.get(e, ()):
-                cnt[gid] += 1
-        if not cnt:
+        # Edge overlap, deterministic #354 tie-break (smallest group_id on a tie).
+        best_gid, matched = best_overlap_group(edge_groups, hes)
+        if best_gid is None:
             lost.append(hgid)
             continue
-        # #354: sort before max() for a deterministic tie-break (smallest
-        # group_id wins on a count tie) instead of hash-order-dependent dict
-        # iteration.
-        best_gid = max(sorted(cnt), key=cnt.get)
-        if cnt[best_gid] == len(hes):
+        if matched == len(hes):
             clean.append((hgid, best_gid))
         else:
-            split.append((hgid, best_gid, cnt[best_gid], len(hes)))
+            split.append((hgid, best_gid, matched, len(hes)))
 
     targets = sorted(
         {bg for _, bg in clean} | {bg for _, bg, _, _ in split} | {bg for _, bg in set_recovered}
@@ -381,7 +424,7 @@ def recover_empty_reject_all(groups: list[dict], human_df: pd.DataFrame) -> dict
     for _, row in human_df.iterrows():
         if _is_set_label(row):
             continue  # SET label: a MATCH membership assertion, not a reject-all
-        if _human_edge_set(row["selected_edges"]):
+        if parse_selected_edge_set(row["selected_edges"]):
             continue  # has edges -> not a reject-all label
         hgid = str(row["group_id"])
         (recovered if hgid in gids else unrecoverable).append(hgid)
@@ -512,7 +555,7 @@ def evaluate_batch(batch_dir: Path, human_df: pd.DataFrame) -> list[GroupEval]:
             continue
         hgid = mapping[gid]
         hrow = human_by_gid[hgid]
-        human_es = _human_edge_set(hrow["selected_edges"])
+        human_es = parse_selected_edge_set(hrow["selected_edges"])
         meta = group_metas[gid]
         opt_sets = _option_edge_sets(meta)
 
@@ -595,7 +638,7 @@ def _recomposed_group_evals(
         panel_es = frozenset((str(r), str(t)) for r, t in rec.union_edges)
 
         hgid = mapping[pgid]
-        human_es = _human_edge_set(human_by_gid[hgid]["selected_edges"])
+        human_es = parse_selected_edge_set(human_by_gid[hgid]["selected_edges"])
         exact = panel_es == human_es
         _, _, f1 = edge_prf(panel_es, human_es)
 
@@ -733,9 +776,12 @@ def _map_set_labels_to_groups(
     Mirrors :func:`mbench.eval.stitch_metrics.map_set_labels_to_groups`. Set rows
     carry no edges, so they map by ref_ids ∪ target_ids segment overlap, with a
     verbatim group_id preferred when it still shares a segment.
-    """
-    from collections import defaultdict
 
+    NOTE: unlike :func:`recover_labeled_groups`' set branch (pure max-overlap,
+    no verbatim preference), this mapper — like mbench's counterpart — prefers a
+    still-overlapping verbatim group_id. The divergence is intentional and
+    locked in by ``tests/unit/test_mbench_drift_parity.py``.
+    """
     seg_groups: dict[str, set[str]] = defaultdict(set)
     for gid, members in group_members.items():
         for s in members:
