@@ -36,7 +36,6 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
 
@@ -54,6 +53,7 @@ from crosswalk.resolver.round2 import (
 from crosswalk.resolver.train import (
     _build_combined_table,
     _discover_specs,
+    load_model,
     predict_keep_probability,
 )
 
@@ -221,7 +221,10 @@ def _model_payload(model_path: Path):
     if not model_path.exists():
         return None
     try:
-        payload = joblib.load(str(model_path))
+        # Route through the version-enforcing loader: a saved artifact whose
+        # RESOLVER_FEATURE_VERSION stamp is stale raises here and the benchmark
+        # skips its rows instead of scoring against a drifted feature contract.
+        payload = load_model(model_path)
     except Exception as e:
         print(f"[warn] failed to load model {model_path}: {e}")
         return None

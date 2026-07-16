@@ -21,6 +21,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 
 from crosswalk.config import FEATURE_VERSION
 from crosswalk.resolver.extract import (
@@ -30,7 +31,7 @@ from crosswalk.resolver.extract import (
     load_sidecar_groups,
     load_stitching_labels,
 )
-from crosswalk.resolver.features import featurize, group_keys
+from crosswalk.resolver.features import RESOLVER_FEATURE_VERSION, featurize, group_keys
 from crosswalk.resolver.round2 import (
     TRAIN_LABEL_COLUMN,
     featurize_extended,
@@ -632,7 +633,11 @@ def build_report_text(
     lines.append("## Inventory")
     lines.append("")
     lines.append(f"- data_root: `{data_root}`")
-    lines.append(f"- feature_version: {FEATURE_VERSION}")
+    # The resolver's own feature contract is what the saved model is stamped
+    # with; the pairwise FEATURE_VERSION only describes the joined candidate
+    # parquet columns, so report both, distinctly labeled.
+    lines.append(f"- resolver_feature_version: {RESOLVER_FEATURE_VERSION}")
+    lines.append(f"- pairwise_feature_version (joined candidates): {FEATURE_VERSION}")
     feat_label = f"extended ({len(feature_cols)})" if extended else f"base ({len(feature_cols)})"
     lines.append(f"- feature set: {feat_label} cols: {', '.join(feature_cols[:8])}…")
     lines.append(f"- selector: {selector}")
@@ -759,9 +764,74 @@ def save_model(
     payload = {
         "model": model,
         "feature_columns": list(feature_cols),
-        "feature_version": FEATURE_VERSION,
+        # Stamp the RESOLVER feature contract, not the pairwise-matcher
+        # FEATURE_VERSION. The resolver does not use the 78 pairwise features, so
+        # stamping FEATURE_VERSION could never catch resolver feature drift. The
+        # payload key stays ``feature_version`` for continuity; ``load_model``
+        # enforces it against RESOLVER_FEATURE_VERSION.
+        "feature_version": RESOLVER_FEATURE_VERSION,
         "training_stats": training_stats,
         "cv_summary": cv_summary or {},
         "selector": selector,
     }
     joblib.dump(payload, str(output_path))
+
+
+def load_model(path: str | Path, allow_version_mismatch: bool = False) -> dict[str, Any]:
+    """Load a saved resolver model payload, enforcing the feature-version stamp.
+
+    Symmetric with :func:`save_model`: refuses to hand back a model whose stored
+    ``feature_version`` differs from the current code's
+    :data:`RESOLVER_FEATURE_VERSION`, because such a model would score against a
+    stale or unknown resolver feature contract and silently degrade.
+
+    Backward compatibility is deliberately **fail-loud**. Resolver models saved
+    before this versioning change stamped the *pairwise* ``config.FEATURE_VERSION``
+    (e.g. ``"2026-07-07.2"``) under the same ``feature_version`` key — a value
+    that never described the resolver's features. Those stamps will not equal
+    RESOLVER_FEATURE_VERSION, so this raises rather than silently trusting a
+    meaningless-for-resolver stamp. Retrain with ``crosswalk train-resolver`` (or
+    pass ``allow_version_mismatch=True`` / set
+    ``MATCHER_ALLOW_MODEL_VERSION_MISMATCH=1`` to downgrade to a warning).
+
+    Args:
+        path: Path to the saved joblib payload.
+        allow_version_mismatch: Downgrade a stamp mismatch from an error to a
+            warning instead of raising.
+
+    Returns:
+        The loaded payload dict.
+    """
+    import os
+
+    import joblib
+
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Resolver model not found: {path}")
+
+    payload = joblib.load(str(path))
+    stamped = payload.get("feature_version")
+    allow_mismatch = allow_version_mismatch or os.environ.get(
+        "MATCHER_ALLOW_MODEL_VERSION_MISMATCH", ""
+    ).strip().lower() in ("1", "true", "yes")
+    if stamped != RESOLVER_FEATURE_VERSION:
+        described = (
+            f"feature_version={stamped!r}"
+            if stamped is not None
+            else "no feature_version (pre-versioning model)"
+        )
+        msg = (
+            f"Resolver model {path} has {described}, which does not match current "
+            f"code RESOLVER_FEATURE_VERSION={RESOLVER_FEATURE_VERSION!r}. Models "
+            "saved before resolver feature versioning stamped the unrelated "
+            "pairwise config.FEATURE_VERSION and cannot be trusted. Retrain with "
+            "'crosswalk train-resolver'. To load anyway, pass "
+            "allow_version_mismatch=True or set "
+            "MATCHER_ALLOW_MODEL_VERSION_MISMATCH=1."
+        )
+        if allow_mismatch:
+            logger.warning(msg)
+        else:
+            raise ValueError(msg)
+    return payload

@@ -14,6 +14,25 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+# Version string for the resolver's feature contract. This is INDEPENDENT of
+# ``crosswalk.config.FEATURE_VERSION`` (which versions the 78 pairwise matcher
+# features the resolver does not use). Bump whenever a resolver feature's NAME
+# SET *or* SEMANTICS change — i.e. any edit to ``FEATURE_COLUMNS`` below, to the
+# ``featurize`` derivations, or to how ``resolver/extract.py`` populates a raw
+# column a feature reads from. A saved resolver model stamps this value and
+# ``resolver/train.load_model`` refuses to load a model whose stamp differs, so
+# a stale feature contract can never silently score.
+#
+# Format mirrors ``config.FEATURE_VERSION`` (``YYYY-MM-DD.minor``).
+#
+# Start at ``2026-07-15.1`` (not an initial ``1``/undated value) to acknowledge
+# a semantics change that already shipped UNVERSIONED: commit 55caab4
+# (2026-07-15) changed ``is_bridge`` in ``resolver/extract.py::_edge_row`` to
+# prefer the ``candidate_graph_bridge`` field over the legacy ``is_bridge`` when
+# both are present. Any resolver model trained before that commit carries a
+# different ``is_bridge`` contract, so this version deliberately starts past it.
+RESOLVER_FEATURE_VERSION = "2026-07-15.1"
+
 # Per-edge features used by the prototype classifier. Kept small and
 # interpretable given the tiny label scale (~40-60 labeled groups).
 FEATURE_COLUMNS: list[str] = [

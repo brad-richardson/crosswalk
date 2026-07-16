@@ -666,6 +666,61 @@ def _active_model_hash(model_path: str | Path | None = None) -> str:
     return digest.hexdigest()
 
 
+# Non-feature columns of the typed candidates sidecar parquet, in row order.
+# The full parquet column set is this tuple + config.FEATURE_COLUMNS. This MUST
+# stay in lockstep with the ``row`` dict built in ``_export_candidates_sidecar``
+# below — enforced by a unit test that runs the real writer and compares emitted
+# columns (tests/unit/test_groups_sidecar_candidate_graph.py::
+# test_candidate_parquet_columns_match_declared_constant). The resolver training
+# table derives its known/expected join set from this constant
+# (resolver/extract.py::EXPECTED_CANDIDATE_JOIN_COLUMNS), so a column added to
+# the writer without updating this tuple fails the lockstep test rather than
+# silently accreting into (or falsely warning on) the resolver table.
+CANDIDATE_SIDECAR_BASE_COLUMNS: tuple[str, ...] = (
+    "dataset_id",
+    "group_id",
+    "ref_id",
+    "target_id",
+    "ref_idx",
+    "target_idx",
+    "selected",
+    "selected_elsewhere",
+    "pruned",
+    "is_sliver",
+    "decision",
+    "optimizer_decision",
+    "decision_reason",
+    "confidence",
+    "gers_start_frac",
+    "gers_end_frac",
+    "local_start_frac",
+    "local_end_frac",
+    "degree_ref",
+    "degree_tgt",
+    "candidate_graph_bridge",
+    "is_bridge",
+    "biconnected_block",
+    "corridor_ref",
+    "corridor_tgt",
+    "match_type",
+    "n_edges",
+    "n_candidate_edges",
+    "n_corridors",
+    "n_assignment_components",
+    "largest_biconnected_block",
+    "oversized_group",
+    "ref_class",
+    "target_class",
+    "ref_length_m",
+    "target_length_m",
+    "lateral_offset_signed_m",
+    "feature_version",
+    "model_hash",
+    "calibration_active",
+    "schema_version",
+)
+
+
 def _export_candidates_sidecar(
     *,
     groups: list[dict],

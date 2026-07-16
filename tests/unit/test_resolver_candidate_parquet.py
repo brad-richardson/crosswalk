@@ -295,3 +295,137 @@ def test_build_multi_dataset_table_auto_discovers(tmp_path: Path):
     )
     assert "hausdorff_distance_m" in df.columns
     assert df.attrs if hasattr(df, "attrs") else True
+
+
+def test_build_edge_table_stamps_table_schema_version_and_columns_hash():
+    from crosswalk.resolver.extract import RESOLVER_TABLE_SCHEMA_VERSION
+
+    grp = _group_cg(
+        "g1",
+        [_cand("A", "T", 0.99, True), _cand("B", "T", 0.4, False)],
+        ref_ids=["A", "B"],
+        target_ids=["T"],
+    )
+    df = build_edge_table([grp], _label_df(), "ds")
+
+    # Version travels with the artifact via attrs and the audit dict.
+    assert df.attrs["table_schema_version"] == RESOLVER_TABLE_SCHEMA_VERSION
+    audit = df.attrs["build_audit"]
+    assert audit["table_schema_version"] == RESOLVER_TABLE_SCHEMA_VERSION
+    # Column-set hash is present, deterministic, and matches the emitted columns.
+    assert audit["table_columns"] == sorted(map(str, df.columns))
+    import hashlib
+
+    expected = hashlib.sha256("\x1f".join(audit["table_columns"]).encode("utf-8")).hexdigest()
+    assert audit["table_columns_sha256"] == expected
+
+
+def test_column_hash_shifts_when_parquet_adds_a_column():
+    grp = _group_cg(
+        "g1",
+        [_cand("A", "T", 0.99, True), _cand("B", "T", 0.4, False)],
+        ref_ids=["A", "B"],
+        target_ids=["T"],
+    )
+    base = build_edge_table([grp], _label_df(), "ds")
+    cand = pd.DataFrame(
+        [
+            {"group_id": "g1", "ref_id": "A", "target_id": "T", "hausdorff_distance_m": 1.0},
+            {"group_id": "g1", "ref_id": "B", "target_id": "T", "hausdorff_distance_m": 9.0},
+        ]
+    )
+    enriched = build_edge_table([grp], _label_df(), "ds", candidates_df=cand)
+
+    assert (
+        base.attrs["build_audit"]["table_columns_sha256"]
+        != enriched.attrs["build_audit"]["table_columns_sha256"]
+    )
+    assert "hausdorff_distance_m" in enriched.attrs["build_audit"]["table_columns"]
+
+
+def _capture_loguru_warnings():
+    """Context-manager-like helper: returns (messages list, remove fn).
+
+    loguru does not route to pytest's caplog, so capture via a temporary sink.
+    """
+    from loguru import logger
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    return messages, lambda: logger.remove(sink_id)
+
+
+def test_expected_candidate_columns_do_not_warn():
+    grp = _group_cg(
+        "g1",
+        [_cand("A", "T", 0.99, True), _cand("B", "T", 0.4, False)],
+        ref_ids=["A", "B"],
+        target_ids=["T"],
+    )
+    # All joined columns are in EXPECTED_CANDIDATE_JOIN_COLUMNS.
+    cand = pd.DataFrame(
+        [
+            {
+                "group_id": "g1",
+                "ref_id": "A",
+                "target_id": "T",
+                "hausdorff_distance_m": 1.0,
+                "lateral_offset_signed_m": 2.5,
+                "ref_class": "residential",
+            },
+            {
+                "group_id": "g1",
+                "ref_id": "B",
+                "target_id": "T",
+                "hausdorff_distance_m": 9.0,
+                "lateral_offset_signed_m": -1.0,
+                "ref_class": "primary",
+            },
+        ]
+    )
+    messages, remove = _capture_loguru_warnings()
+    try:
+        df = build_edge_table([grp], _label_df(), "ds", candidates_df=cand)
+    finally:
+        remove()
+
+    assert df.attrs["build_stats"]["candidate_parquet_unexpected_columns"] == []
+    assert not any("unrecognized candidate-parquet" in m for m in messages)
+
+
+def test_unexpected_candidate_column_warns_and_is_recorded():
+    grp = _group_cg(
+        "g1",
+        [_cand("A", "T", 0.99, True), _cand("B", "T", 0.4, False)],
+        ref_ids=["A", "B"],
+        target_ids=["T"],
+    )
+    cand = pd.DataFrame(
+        [
+            {
+                "group_id": "g1",
+                "ref_id": "A",
+                "target_id": "T",
+                "hausdorff_distance_m": 1.0,
+                "some_new_mystery_column": 7,
+            },
+            {
+                "group_id": "g1",
+                "ref_id": "B",
+                "target_id": "T",
+                "hausdorff_distance_m": 9.0,
+                "some_new_mystery_column": 8,
+            },
+        ]
+    )
+    messages, remove = _capture_loguru_warnings()
+    try:
+        df = build_edge_table([grp], _label_df(), "ds", candidates_df=cand)
+    finally:
+        remove()
+
+    unexpected = df.attrs["build_stats"]["candidate_parquet_unexpected_columns"]
+    assert unexpected == ["some_new_mystery_column"]
+    # Column still joined (exclusion-list mechanism preserved, not a hard allowlist).
+    assert "some_new_mystery_column" in df.columns
+    assert any("unrecognized candidate-parquet" in m for m in messages)

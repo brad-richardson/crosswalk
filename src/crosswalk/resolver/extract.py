@@ -71,6 +71,7 @@ intercepting private helpers or reconstructing discarded intermediate frames.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -81,8 +82,20 @@ from crosswalk.agent_labeling.stitch_eval import (
     parse_selected_edge_set,
     recover_labeled_groups,
 )
+from crosswalk.config import FEATURE_COLUMNS as PAIRWISE_FEATURE_COLUMNS
+from crosswalk.pipeline.runner import CANDIDATE_SIDECAR_BASE_COLUMNS
 
 EDGE_LABEL_COL = "keep"
+
+# Schema version for the per-edge training TABLE produced by
+# :func:`build_edge_table` (its column set + how columns are populated). This is
+# distinct from the ``build_audit`` dict's own ``schema_version`` (that versions
+# the audit payload) and from the resolver FEATURE version (that versions the
+# model's feature contract). Bump when the emitted column set or a column's
+# meaning changes. A per-build column-set hash is recorded alongside it so silent
+# column accretion (e.g. via the candidate-parquet join, see
+# CANDIDATE_EXCLUDE_FROM_JOIN) is detectable in the audit even between bumps.
+RESOLVER_TABLE_SCHEMA_VERSION = 1
 
 # Row key = the design's stage-2 feature-parquet join key (§3.2). Kept stable so
 # FeatureStore columns can be merged later without introducing a competing
@@ -123,6 +136,20 @@ STRUCTURAL_OVERLAP_TO_ENRICH = {
 }
 
 PARQUET_JOIN_KEYS = ("group_id", "ref_id", "target_id")
+
+# Candidate-parquet columns we KNOW about and expect to see joined onto the
+# training table (design §3.2). Derived from the sidecar writer's own declared
+# column list — single source of truth ``pipeline/runner.py::
+# CANDIDATE_SIDECAR_BASE_COLUMNS`` (kept in lockstep with the writer's row dict
+# by a unit test that runs the real writer) — plus the 83 typed pairwise
+# ``config.FEATURE_COLUMNS`` the writer appends per row. This is NOT a hard
+# allowlist: any parquet column outside this set is still joined (the
+# exclusion-list mechanism in CANDIDATE_EXCLUDE_FROM_JOIN is preserved). It is a
+# KNOWN set used only to emit a loud warning when a new, unrecognized column
+# silently enters the table, so accretion becomes visible.
+EXPECTED_CANDIDATE_JOIN_COLUMNS = set(CANDIDATE_SIDECAR_BASE_COLUMNS) | set(
+    PAIRWISE_FEATURE_COLUMNS
+)
 
 
 def load_sidecar_groups(path: str | Path) -> list[dict]:
@@ -260,6 +287,7 @@ def _enrich_with_candidate_parquet(
         stats["candidate_parquet_rows"] = len(candidates_df) if candidates_df is not None else 0
         stats["candidate_parquet_enriched"] = 0
         stats["candidate_parquet_missing_keys"] = 0
+        stats["candidate_parquet_unexpected_columns"] = []
         df.attrs = input_attrs
         return df
 
@@ -277,6 +305,23 @@ def _enrich_with_candidate_parquet(
         for c in candidates_df.columns
         if c not in df.columns and c not in exclude_from_join and c not in PARQUET_JOIN_KEYS
     ]
+
+    # Make silent column accretion visible: the join adds ANY new parquet column
+    # (exclusion-list mechanism, not an allowlist), so a schema drift upstream
+    # can quietly widen the training table. Warn loudly + record the offenders in
+    # stats when a joined column is not in the known/expected set.
+    unexpected_cols = sorted(c for c in new_cols if c not in EXPECTED_CANDIDATE_JOIN_COLUMNS)
+    stats["candidate_parquet_unexpected_columns"] = unexpected_cols
+    if unexpected_cols:
+        logger.warning(
+            "_enrich_with_candidate_parquet: {} unrecognized candidate-parquet "
+            "column(s) joined into the training table (not in "
+            "EXPECTED_CANDIDATE_JOIN_COLUMNS): {}. If intended, add them to the "
+            "expected set (and bump RESOLVER_TABLE_SCHEMA_VERSION); otherwise this "
+            "is silent schema accretion.",
+            len(unexpected_cols),
+            unexpected_cols,
+        )
     overlapping_authoritative = [
         c
         for c in candidates_df.columns
@@ -959,6 +1004,13 @@ def build_edge_table(
 
     build_audit = {
         "schema_version": 1,
+        # Table-level version + a content hash of the emitted column set. The
+        # hash travels with the audit and shifts whenever columns are added or
+        # dropped (e.g. a new candidate-parquet column silently joining), giving
+        # a detectable fingerprint of the training table's shape between explicit
+        # RESOLVER_TABLE_SCHEMA_VERSION bumps. Populated after any parquet join
+        # below (see _finalize_table_schema_audit).
+        "table_schema_version": RESOLVER_TABLE_SCHEMA_VERSION,
         "quarantined_groups": collision_audit,
         "legacy_known_omissions": _build_legacy_known_omission_audit(
             legacy_known_omissions,
@@ -1015,9 +1067,19 @@ def build_edge_table(
             dataset_id,
             stats["empty_legacy_skipped"],
         )
+    # Record the final column-set fingerprint (after any parquet join) so the
+    # audit captures the table's actual shape, including silently-accreted
+    # columns. Deterministic over the column NAMES (order-independent).
+    columns_sorted = sorted(map(str, df.columns))
+    build_audit["table_columns"] = columns_sorted
+    build_audit["table_columns_sha256"] = hashlib.sha256(
+        "\x1f".join(columns_sorted).encode("utf-8")
+    ).hexdigest()
+
     logger.info("build_edge_table[{}]: {}", dataset_id, stats)
     df.attrs["build_stats"] = stats
     df.attrs["build_audit"] = build_audit
+    df.attrs["table_schema_version"] = RESOLVER_TABLE_SCHEMA_VERSION
     return df
 
 
