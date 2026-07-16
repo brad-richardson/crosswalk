@@ -421,3 +421,266 @@ def test_schedule_retry_drops_timeout_partials_and_reinvokes_group(
     )
 
     assert calls == [["timed-out"], ["successful"], ["timed-out", "successful"]]
+
+
+def _schedule_row(index: int, batch_dir: Path, group_id: str) -> dict:
+    return {
+        "run_index": index,
+        "batch_dir": str(batch_dir),
+        "group_id": group_id,
+        "dataset_id": "dataset",
+        "variant": "enriched",
+    }
+
+
+def _panel_votes(panel, group_ids, choice: str = "A", abstain_reason: str = "") -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "provider": spec.name,
+                "model": spec.model,
+                "choice": choice,
+                "abstain_reason": abstain_reason,
+            }
+            for _group_id in group_ids
+            for spec in panel
+        ]
+    )
+
+
+def test_parallel_schedule_serializes_same_batch_dir_and_completes_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    import time
+
+    panel = get_panel("v7-candidate")
+    batch_a = tmp_path / "batch-a"
+    batch_b = tmp_path / "batch-b"
+    # Contiguous-per-dir order mirrors the real manifests: a dispatcher must
+    # skip ahead past a busy dir (a-2) to reach b-1 for any parallelism.
+    schedule = [
+        _schedule_row(1, batch_a, "a-1"),
+        _schedule_row(2, batch_a, "a-2"),
+        _schedule_row(3, batch_b, "b-1"),
+        _schedule_row(4, batch_b, "b-2"),
+    ]
+
+    state_lock = threading.Lock()
+    active: dict[Path, int] = {}
+    max_active_per_dir: dict[Path, int] = {}
+    max_active_total = 0
+    completed: set[str] = set()
+    spans: dict[str, tuple[float, float]] = {}
+
+    def fake_run_batch(batch_dir, *, group_ids, panel, **_kwargs):
+        nonlocal max_active_total
+        batch_dir = Path(batch_dir)
+        begin = time.monotonic()
+        with state_lock:
+            active[batch_dir] = active.get(batch_dir, 0) + 1
+            max_active_per_dir[batch_dir] = max(
+                max_active_per_dir.get(batch_dir, 0), active[batch_dir]
+            )
+            max_active_total = max(max_active_total, sum(active.values()))
+        time.sleep(0.05)
+        with state_lock:
+            active[batch_dir] -= 1
+            completed.update(group_ids)
+            if len(group_ids) == 1:
+                # Per-pack spans only: the final consolidation pass re-calls
+                # run_batch with each dir's full roster and must not overwrite
+                # the scheduled pack's timing.
+                spans[group_ids[0]] = (begin, time.monotonic())
+        votes = _panel_votes(panel, group_ids)
+        consensus = pd.DataFrame([{"group_id": group_id} for group_id in group_ids])
+        return votes, consensus
+
+    monkeypatch.setattr(wave_runner, "run_batch", fake_run_batch)
+    wave_runner.execute_schedule(
+        {"run_schedule": schedule},
+        panel,
+        timeout=600,
+        invocation_budget=600,
+        group_workers=3,
+    )
+
+    # The partial-CSV read-modify-write means a batch dir must never see two
+    # concurrent run_batch calls, while distinct batch dirs may overlap.
+    assert max(max_active_per_dir.values()) == 1
+    assert completed == {"a-1", "a-2", "b-1", "b-2"}
+    # Real parallelism happened: the dispatcher skipped past busy-dir a-2 and
+    # ran b-1 while a-1 was still in flight.
+    assert max_active_total >= 2
+    assert spans["b-1"][0] < spans["a-1"][1]
+    # Manifest order within a dir is preserved.
+    assert spans["a-2"][0] >= spans["a-1"][1]
+    assert spans["b-2"][0] >= spans["b-1"][1]
+
+
+def test_parallel_schedule_halts_all_lanes_after_first_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    panel = get_panel("v7-candidate")
+    # Lane 1 fails on its only pack; lane 2 has a pack in flight while the
+    # failure happens plus a follow-up pack; a third dir is still queued.
+    schedule = [
+        _schedule_row(1, tmp_path / "batch-fail", "fail-1"),
+        _schedule_row(2, tmp_path / "batch-slow", "slow-1"),
+        _schedule_row(3, tmp_path / "batch-slow", "slow-2"),
+        _schedule_row(4, tmp_path / "batch-queued", "queued-1"),
+    ]
+    slow_started = threading.Event()
+    failure_raised = threading.Event()
+    started: list[str] = []
+    started_lock = threading.Lock()
+
+    def fake_run_batch(_batch_dir, *, group_ids, panel, **_kwargs):
+        with started_lock:
+            started.extend(group_ids)
+        if group_ids == ["fail-1"]:
+            # Fail only once the other lane's pack is in flight, so the test
+            # exercises "in-flight pack finishes, its lane then stops".
+            assert slow_started.wait(timeout=10)
+            failure_raised.set()
+            raise wave_runner.ProviderInvocationError("claude: quota symptom")
+        if group_ids == ["slow-1"]:
+            slow_started.set()
+            # Hold this pack in flight until the other worker has failed, so
+            # the stop event is set before this worker considers slow-2. The
+            # short sleep gives the failing worker's `stop.set()` (which runs
+            # a few frames after failure_raised.set()) a wide margin over this
+            # worker's post-return bookkeeping.
+            assert failure_raised.wait(timeout=10)
+            import time
+
+            time.sleep(0.05)
+        votes = _panel_votes(panel, group_ids)
+        consensus = pd.DataFrame([{"group_id": group_id} for group_id in group_ids])
+        return votes, consensus
+
+    monkeypatch.setattr(wave_runner, "run_batch", fake_run_batch)
+    with pytest.raises(wave_runner.ProviderInvocationError, match="quota symptom"):
+        wave_runner.execute_schedule(
+            {"run_schedule": schedule},
+            panel,
+            timeout=600,
+            invocation_budget=600,
+            group_workers=2,
+        )
+
+    assert "fail-1" in started
+    # The in-flight pack finishes (its partial flushes for resume)...
+    assert "slow-1" in started
+    # ...but its lane stops before the next pack, and the never-started lane
+    # is cancelled or exits on the stop event without invoking the panel.
+    assert "slow-2" not in started
+    assert "queued-1" not in started
+
+
+@pytest.mark.parametrize("group_workers", [1, 2])
+def test_pause_drains_in_flight_pack_and_skips_consolidation(
+    group_workers: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    panel = get_panel("v7-candidate")
+    # Two packs in one dir plus a second dir: pausing during the very first
+    # pack must prevent every later pack AND the final consolidation pass
+    # (which would otherwise invoke the panel on not-yet-voted groups).
+    schedule = [
+        _schedule_row(1, tmp_path / "batch-a", "a-1"),
+        _schedule_row(2, tmp_path / "batch-a", "a-2"),
+        _schedule_row(3, tmp_path / "batch-b", "b-1"),
+    ]
+    pause = threading.Event()
+    calls: list[list[str]] = []
+    calls_lock = threading.Lock()
+
+    def fake_run_batch(_batch_dir, *, group_ids, panel, **_kwargs):
+        with calls_lock:
+            calls.append(list(group_ids))
+        if group_ids == ["a-1"]:
+            pause.set()
+        votes = _panel_votes(panel, group_ids)
+        consensus = pd.DataFrame([{"group_id": group_id} for group_id in group_ids])
+        return votes, consensus
+
+    monkeypatch.setattr(wave_runner, "run_batch", fake_run_batch)
+    paused = wave_runner.execute_schedule(
+        {"run_schedule": schedule},
+        panel,
+        timeout=600,
+        invocation_budget=600,
+        group_workers=group_workers,
+        pause=pause,
+    )
+
+    assert paused is True
+    # a-2 never starts; b-1 may only have started before the pause landed
+    # (parallel mode); no multi-group consolidation call ever happens.
+    flat = [group_id for call in calls for group_id in call]
+    assert "a-1" in flat
+    assert "a-2" not in flat
+    assert all(len(call) == 1 for call in calls)
+
+
+def test_pause_handler_debounces_duplicate_signals_then_aborts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    pause = threading.Event()
+    monotonic = {"now": 100.0}
+    handler = {}
+
+    def fake_signal(signum, fn):
+        handler[signum] = fn
+
+    # wave_runner.signal / wave_runner.time ARE the shared stdlib modules, so
+    # patch via monkeypatch: its fixture teardown restores the real functions
+    # even if this test fails or is interrupted mid-body.
+    monkeypatch.setattr(wave_runner.signal, "signal", fake_signal)
+    monkeypatch.setattr(wave_runner.time, "monotonic", lambda: monotonic["now"])
+
+    wave_runner._install_pause_handler(pause)
+    sigint = handler[wave_runner.signal.SIGINT]
+
+    sigint(wave_runner.signal.SIGINT, None)
+    assert pause.is_set()
+    # uv run forwards the same Ctrl-C to the child: a duplicate inside the
+    # debounce window must NOT abort the drain.
+    monotonic["now"] = 100.5
+    sigint(wave_runner.signal.SIGINT, None)
+    # A deliberate second signal after the window force-aborts.
+    monotonic["now"] = 103.0
+    with pytest.raises(KeyboardInterrupt):
+        sigint(wave_runner.signal.SIGINT, None)
+
+
+def test_parallel_schedule_applies_wave_timeout_breaker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    panel = get_panel("v7-candidate")
+    schedule = [_schedule_row(i, tmp_path / f"batch-{i}", f"group-{i}") for i in range(1, 5)]
+
+    def fake_run_batch(_batch_dir, *, group_ids, panel, **_kwargs):
+        votes = _panel_votes(panel, group_ids)
+        votes.loc[votes["provider"] == "codex", ["choice", "abstain_reason"]] = [
+            "ABSTAIN",
+            "timeout",
+        ]
+        consensus = pd.DataFrame([{"group_id": group_id} for group_id in group_ids])
+        return votes, consensus
+
+    monkeypatch.setattr(wave_runner, "run_batch", fake_run_batch)
+    with pytest.raises(wave_runner.ProviderInvocationError, match="3 consecutive scheduled groups"):
+        wave_runner.execute_schedule(
+            {"run_schedule": schedule},
+            panel,
+            timeout=600,
+            invocation_budget=600,
+            group_workers=2,
+        )
