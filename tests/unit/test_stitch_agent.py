@@ -2760,6 +2760,93 @@ def test_gemini_route_order_changes_panel_invocation_signature():
     )
 
 
+def test_invocation_signature_binds_opencode_config_and_pack_feedback():
+    from crosswalk.agent_labeling.stitch_provenance import invocation_signature
+
+    panel = [sr.ProviderSpec("claude", "m", effort="high")]
+    base = {
+        "timeout": None,
+        "collect_feedback": True,
+        "invocation_budget_s": 300.0,
+        "effective_timeouts": [240],
+        "runtime_contract_sha256": "a" * 64,
+        "opencode_config_sha256": "b" * 64,
+        "pack_feedback_sha256": "c" * 64,
+        "provider_bindings": [{"effort_cli_translation": "claude:--effort=high"}],
+    }
+    ref = invocation_signature(panel, **base)
+    # Each newly-bound input moves the signature.
+    assert invocation_signature(panel, **{**base, "opencode_config_sha256": "d" * 64}) != ref
+    assert invocation_signature(panel, **{**base, "pack_feedback_sha256": "e" * 64}) != ref
+    assert (
+        invocation_signature(
+            panel,
+            **{**base, "provider_bindings": [{"effort_cli_translation": "claude:--effort=low"}]},
+        )
+        != ref
+    )
+
+
+def test_provider_invocation_binding_translates_effort_per_provider():
+    # Effort translation is provider-specific: a real CLI flag/param, or a
+    # documented non-translation.
+    assert (
+        sr._provider_invocation_binding(sr.ProviderSpec("claude", "m", effort="high"))[
+            "effort_cli_translation"
+        ]
+        == "claude:--effort=high"
+    )
+    # codex binds the default-low fallback explicitly.
+    assert (
+        sr._provider_invocation_binding(sr.ProviderSpec("codex", "m"))["effort_cli_translation"]
+        == "codex:model_reasoning_effort=low"
+    )
+    assert (
+        "opencode.json-pinned"
+        in sr._provider_invocation_binding(sr.MUSE_HIGH_EFFORT)["effort_cli_translation"]
+    )
+    # The Gemini flex route injects an OPENCODE_CONFIG_CONTENT -> bound by sha.
+    flex_binding = sr._provider_invocation_binding(sr.GEMINI)
+    assert flex_binding["injected_opencode_config_sha256"]
+    # A seat that injects no config binds an empty sha there.
+    assert (
+        sr._provider_invocation_binding(sr.ProviderSpec("claude", "m"))[
+            "injected_opencode_config_sha256"
+        ]
+        == ""
+    )
+
+
+def test_run_batch_binds_new_invocation_inputs(tmp_path, monkeypatch):
+    """run_batch's recorded panel_invocation_sha256 reflects the new bound inputs.
+
+    Changing the repo-root opencode.json content must change the recorded
+    signature, proving run_batch actually binds it.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    monkeypatch.setitem(sr._INVOKERS, "claude", fake_invoker)
+    panel = [sr.ProviderSpec("claude", "m")]
+
+    real = sr._repo_opencode_config_sha256
+    monkeypatch.setattr(sr, "_repo_opencode_config_sha256", lambda: "0" * 64)
+    votes_a, _ = sr.run_batch(batch_dir, panel=panel)
+    sha_a = str(votes_a.iloc[0]["panel_invocation_sha256"])
+
+    monkeypatch.setattr(sr, "_repo_opencode_config_sha256", lambda: "1" * 64)
+    votes_b, _ = sr.run_batch(batch_dir, panel=panel)
+    sha_b = str(votes_b.iloc[0]["panel_invocation_sha256"])
+
+    assert sha_a != sha_b
+    # Sanity: the real helper returns a 64-hex digest (opencode.json present).
+    assert len(real()) == 64
+
+
 def test_get_panel_unknown_name_is_a_hard_error():
     """Panel choice is era-load-bearing (it decides the export labeler
     generation), so a typo must error listing the valid names — never silently

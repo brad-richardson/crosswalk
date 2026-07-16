@@ -674,6 +674,18 @@ def load_evidence_manifest(group_dir: Path, *, allow_legacy: bool = True) -> dic
     return manifest
 
 
+# The invocation-provenance era this signature schema belongs to. Bumped when
+# the SET of invocation inputs the signature binds changes (not when a value
+# within it changes). ``2026-07-16.1`` extends the prior era to additionally
+# bind inputs that reach a provider invocation but were previously unhashed:
+# the repo-root ``opencode.json`` content, the pack-feedback prompt-augmentation
+# text, each provider's effort->CLI translation, and the OPENCODE_CONFIG_CONTENT
+# a route injects. Adding these keys re-mints panel_invocation_sha256 for EVERY
+# run going forward — deliberately, because ballots drawn under an unbound input
+# were not fully attributable to their recorded provenance.
+INVOCATION_PROVENANCE_ERA = "2026-07-16.1"
+
+
 def invocation_signature(
     panel: list[Any],
     *,
@@ -682,27 +694,57 @@ def invocation_signature(
     invocation_budget_s: float,
     effective_timeouts: list[int],
     runtime_contract_sha256: str,
+    opencode_config_sha256: str = "",
+    pack_feedback_sha256: str = "",
+    provider_bindings: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Hash every panel/invocation knob that can change a ballot."""
+    """Hash every panel/invocation knob that can change a ballot.
+
+    Era :data:`INVOCATION_PROVENANCE_ERA` (2026-07-16.1) additionally binds
+    inputs that reach a provider invocation but the earlier schema left unhashed:
+
+    * ``opencode_config_sha256`` — sha256 of the repo-root ``opencode.json``,
+      which pins Muse's ``reasoningEffort: high``, the tool-less ``vote`` agent
+      definition, and the custom Meta provider (baseURL). The file is HASHED, not
+      copied, so its secrets never enter the signature.
+    * ``pack_feedback_sha256`` — sha256 of the ``PACK_FEEDBACK_INSTRUCTION``
+      prompt augmentation (the text appended when ``collect_feedback`` is set;
+      the boolean alone did not bind the actual text).
+    * ``provider_bindings`` — one dict per panel seat (aligned with ``panel``),
+      merged into that seat's provider record. The caller (which knows the
+      invokers) supplies each seat's effort->CLI translation (or documented
+      non-translation) and the sha256 of any OPENCODE_CONFIG_CONTENT a route
+      injects, keeping this helper a pure serializer with no invoker knowledge.
+
+    The opencode agent NAME per seat was already bound via ``opencode_agent``;
+    this era additionally binds what that name RESOLVES to (the agent definition
+    inside ``opencode.json``).
+    """
+    bindings = provider_bindings if provider_bindings is not None else [{}] * len(panel)
+    providers: list[dict[str, Any]] = []
+    for provider, binding in zip(panel, bindings, strict=True):
+        record: dict[str, Any] = {
+            "name": provider.name,
+            "model": provider.model,
+            "effort": provider.effort,
+            "timeout": provider.timeout,
+            "opencode_agent": provider.opencode_agent,
+            "routes": list(provider.routes),
+        }
+        record.update(binding)
+        providers.append(record)
     return sha256_json(
         {
-            "providers": [
-                {
-                    "name": provider.name,
-                    "model": provider.model,
-                    "effort": provider.effort,
-                    "timeout": provider.timeout,
-                    "opencode_agent": provider.opencode_agent,
-                    "routes": list(provider.routes),
-                }
-                for provider in panel
-            ],
+            "invocation_provenance_era": INVOCATION_PROVENANCE_ERA,
+            "providers": providers,
             "timeout_override": timeout,
             "effective_timeouts": effective_timeouts,
             "collect_feedback": collect_feedback,
             "invocation_budget_s": invocation_budget_s,
             "evidence_delivery_schema_version": DELIVERY_SCHEMA_VERSION,
             "runtime_contract_sha256": runtime_contract_sha256,
+            "opencode_config_sha256": opencode_config_sha256,
+            "pack_feedback_instruction_sha256": pack_feedback_sha256,
         }
     )
 

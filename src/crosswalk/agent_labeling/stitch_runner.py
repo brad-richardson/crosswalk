@@ -25,6 +25,7 @@ panels, but is not a v6 or v7 production seat.
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import math
 import os
@@ -65,6 +66,7 @@ from .stitch_provenance import (
     load_evidence_manifest,
     managed_image_descriptors,
     sha256_file,
+    sha256_json,
     validate_evidence_delivery_record,
     validate_manifest_against_batch,
 )
@@ -2223,6 +2225,69 @@ def _consensus_row(c: Consensus) -> dict:
     }
 
 
+def _repo_opencode_config_sha256() -> str:
+    """sha256 of the repo-root ``opencode.json`` (empty when absent).
+
+    That file pins Muse's ``reasoningEffort: high``, the tool-less ``vote`` agent
+    the Kimi/Muse seats run under, and the custom Meta provider (baseURL). It is
+    HASHED, never copied, so its secrets never enter the invocation signature. It
+    lives at the repository root (``<pkg>/../../..``), which is opencode's project
+    config location for the wave-running cwd.
+    """
+    path = Path(__file__).resolve().parents[3] / "opencode.json"
+    return sha256_file(path) if path.is_file() else ""
+
+
+def _provider_invocation_binding(spec: ProviderSpec) -> dict[str, str]:
+    """Per-seat invocation inputs to fold into :func:`invocation_signature`.
+
+    ``effort_cli_translation`` records how a seat's generic ``effort`` field is
+    ACTUALLY translated per provider — a real CLI flag/param, or a documented
+    non-translation — so two panels that carry the same ``effort`` string but
+    apply it differently (or not at all) hash apart:
+
+    * claude -> ``--effort <effort>`` (omitted when blank);
+    * codex  -> ``model_reasoning_effort=<effort or 'low'>`` (the default-low
+      fallback is part of the invocation and is bound explicitly);
+    * agy    -> encoded in the model name, the ``effort`` argument is unused;
+    * opencode/kimi/muse -> untranslated; the reasoning policy is pinned in
+      ``opencode.json`` (already bound via ``opencode_config_sha256``);
+    * gemini -> untranslated; forwarded to the resolved physical route.
+
+    ``injected_opencode_config_sha256`` binds the OPENCODE_CONFIG_CONTENT the
+    runner injects for a route — currently only the Gemini OpenRouter-flex route,
+    whose isolated provider-policy + vote-agent config
+    (:func:`_gemini_flex_opencode_config`) fully determines routing. Blank when a
+    seat injects no config.
+    """
+    invoker = _INVOKERS.get(spec.name)
+    if invoker is invoke_claude:
+        effort_translation = (
+            f"claude:--effort={spec.effort}" if spec.effort else "claude:--effort:omitted"
+        )
+    elif invoker is invoke_codex:
+        effort_translation = f"codex:model_reasoning_effort={spec.effort or 'low'}"
+    elif invoker is invoke_agy:
+        effort_translation = "agy:effort-encoded-in-model-name"
+    elif invoker is invoke_opencode:
+        effort_translation = "opencode:effort-untranslated(opencode.json-pinned)"
+    elif invoker is invoke_gemini:
+        effort_translation = "gemini:effort-untranslated(route-forwarded)"
+    else:
+        effort_translation = f"unknown:{spec.effort}"
+
+    injected = ""
+    if invoker is invoke_gemini and GEMINI_ROUTE_OPENROUTER_FLEX in spec.routes:
+        openrouter_model = (
+            spec.model if spec.model.startswith("openrouter/") else f"openrouter/{spec.model}"
+        )
+        injected = sha256_json(_gemini_flex_opencode_config(openrouter_model))
+    return {
+        "effort_cli_translation": effort_translation,
+        "injected_opencode_config_sha256": injected,
+    }
+
+
 def run_batch(
     batch_dir: Path,
     panel: list[ProviderSpec] | None = None,
@@ -2297,6 +2362,9 @@ def run_batch(
         invocation_budget_s=invocation_budget_s,
         effective_timeouts=[resolve_timeout(provider, timeout) for provider in panel],
         runtime_contract_sha256=sha256_file(Path(__file__)),
+        opencode_config_sha256=_repo_opencode_config_sha256(),
+        pack_feedback_sha256=hashlib.sha256(PACK_FEEDBACK_INSTRUCTION.encode()).hexdigest(),
+        provider_bindings=[_provider_invocation_binding(provider) for provider in panel],
     )
     policy_sha = consensus_policy_signature(
         max_edges=settings.stitch_export_backstop_max_edges,
