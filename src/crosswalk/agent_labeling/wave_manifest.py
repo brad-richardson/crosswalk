@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .stitch_provenance import batch_group_map
 from .stitch_runner import ProviderSpec, get_panel, panel_descriptor
 
 # The manifest schema version. ``write`` stamps this; ``load_validated`` refuses
@@ -54,6 +55,18 @@ ROW_BATCH_DIR = "batch_dir"
 ROW_GROUP_ID = "group_id"
 ROW_DATASET_ID = "dataset_id"
 ROW_VARIANT = "variant"
+
+# batch.json field names cross-checked against each schedule row. The batch's
+# dataset identity is a top-level ``dataset_id``; its variant lives at
+# ``experiment.variant``; its group roster is the ``groups`` list (read through
+# ``batch_group_map`` so we honor the same path-safety/dedup rules vote time
+# uses). Any of these being ABSENT from a batch.json means it predates the
+# schema-v2 contract, so we warn rather than fail (mirrors the legacy-digest
+# path); a value that is PRESENT but disagrees with the row is fatal.
+BATCH_FIELD_DATASET_ID = "dataset_id"
+BATCH_FIELD_EXPERIMENT = "experiment"
+BATCH_FIELD_VARIANT = "variant"
+BATCH_FIELD_GROUPS = "groups"
 
 
 def compute_digest(content: dict[str, Any]) -> str:
@@ -146,10 +159,14 @@ class WaveManifest:
 
         Checks, in order: schema version, integrity digest (legacy-missing is a
         warning, mismatch is fatal), panel-roster drift, schedule/pack-count
-        agreement, contiguous run indices, no duplicate packs, and the presence
-        of every referenced ``batch.json`` and ``evidence.json``. ``batch_dir``
-        entries are resolved relative to the manifest file and rewritten in the
-        returned content so downstream code is cwd-independent.
+        agreement, contiguous run indices, no duplicate packs, the presence of
+        every referenced ``batch.json`` and ``evidence.json``, and — per row —
+        that the row's ``dataset_id``/``variant``/``group_id`` agree with the
+        resolved batch's ``dataset_id``/``experiment.variant``/group roster (a
+        batch that omits a field is warned as legacy; a present-but-mismatched
+        field is fatal). ``batch_dir`` entries are resolved relative to the
+        manifest file and rewritten in the returned content so downstream code
+        is cwd-independent.
         """
         path = Path(path)
         content = json.loads(path.read_text())
@@ -174,6 +191,8 @@ class WaveManifest:
             raise ValueError("run_schedule indices are not contiguous and ordered")
 
         seen: set[tuple[str, str]] = set()
+        batch_cache: dict[str, dict[str, Any]] = {}
+        warned: set[tuple[str, str]] = set()
         for row in schedule:
             batch_dir = resolve_batch_dir(str(row[ROW_BATCH_DIR]), path)
             row[ROW_BATCH_DIR] = str(batch_dir)
@@ -182,10 +201,12 @@ class WaveManifest:
             if key in seen:
                 raise ValueError(f"duplicate scheduled pack: {key}")
             seen.add(key)
-            if not (batch_dir / "batch.json").is_file():
-                raise FileNotFoundError(batch_dir / "batch.json")
+            batch_json = batch_dir / "batch.json"
+            if not batch_json.is_file():
+                raise FileNotFoundError(batch_json)
             if not (batch_dir / group_id / "evidence.json").is_file():
                 raise FileNotFoundError(batch_dir / group_id / "evidence.json")
+            _validate_row_identity(row, batch_dir, path, batch_cache, warned)
 
         return cls(content=content, source_path=path, panel=panel)
 
@@ -214,4 +235,84 @@ def _validate_digest(content: dict[str, Any], path: Path) -> None:
             f"{path}: manifest integrity digest mismatch "
             f"(stored {stored}, computed {actual}) — the manifest has been "
             "modified since it was written; refusing to run"
+        )
+
+
+def _warn_legacy_batch(
+    warned: set[tuple[str, str]], batch_dir: Path, field: str, path: Path
+) -> None:
+    """Warn once per (batch dir, field) that a legacy batch.json can't be checked."""
+    key = (str(batch_dir), field)
+    if key in warned:
+        return
+    warned.add(key)
+    warnings.warn(
+        f"{path}: batch.json in {batch_dir} has no {field!r}; skipping that "
+        "semantic cross-check (treating as a legacy pre-schema-v2 batch)",
+        stacklevel=2,
+    )
+
+
+def _validate_row_identity(
+    row: dict[str, Any],
+    batch_dir: Path,
+    path: Path,
+    batch_cache: dict[str, dict[str, Any]],
+    warned: set[tuple[str, str]],
+) -> None:
+    """Cross-check a schedule row's identity against its resolved ``batch.json``.
+
+    Guards against a row pointing at the wrong batch dir: the row's
+    ``dataset_id``/``variant``/``group_id`` must agree with the batch's top-level
+    ``dataset_id``, its ``experiment.variant``, and its group roster respectively.
+    A field the batch omits is warned (legacy batch, mirrors the digest path); a
+    field the batch carries that disagrees is fatal and names the row and dir.
+    """
+    dir_key = str(batch_dir)
+    batch = batch_cache.get(dir_key)
+    if batch is None:
+        batch = json.loads((batch_dir / "batch.json").read_text())
+        batch_cache[dir_key] = batch
+
+    run_index = row.get(ROW_RUN_INDEX)
+    group_id = str(row[ROW_GROUP_ID])
+    # Row-side identity fields may be absent on a hand-rolled legacy manifest;
+    # a mismatch is only checkable (and only fatal) when BOTH sides carry the
+    # field, so a missing row-side value simply skips that comparison.
+    dataset_id = row.get(ROW_DATASET_ID)
+    variant = row.get(ROW_VARIANT)
+
+    # (b) dataset identity: row.dataset_id vs batch.dataset_id
+    batch_dataset = batch.get(BATCH_FIELD_DATASET_ID)
+    if batch_dataset is None:
+        _warn_legacy_batch(warned, batch_dir, BATCH_FIELD_DATASET_ID, path)
+    elif dataset_id is not None and str(batch_dataset) != str(dataset_id):
+        raise ValueError(
+            f"{path}: schedule row run_index {run_index} declares dataset_id "
+            f"{str(dataset_id)!r} but batch.json in {batch_dir} has dataset_id "
+            f"{str(batch_dataset)!r}"
+        )
+
+    # (c) variant: row.variant vs batch.experiment.variant
+    experiment = batch.get(BATCH_FIELD_EXPERIMENT)
+    batch_variant = experiment.get(BATCH_FIELD_VARIANT) if isinstance(experiment, dict) else None
+    if batch_variant is None:
+        _warn_legacy_batch(
+            warned, batch_dir, f"{BATCH_FIELD_EXPERIMENT}.{BATCH_FIELD_VARIANT}", path
+        )
+    elif variant is not None and str(batch_variant) != str(variant):
+        raise ValueError(
+            f"{path}: schedule row run_index {run_index} declares variant "
+            f"{str(variant)!r} but batch.json in {batch_dir} has "
+            f"experiment.variant {str(batch_variant)!r}"
+        )
+
+    # (a) roster: row.group_id must be in the batch's group roster
+    if BATCH_FIELD_GROUPS not in batch:
+        _warn_legacy_batch(warned, batch_dir, BATCH_FIELD_GROUPS, path)
+    elif group_id not in batch_group_map(batch):
+        raise ValueError(
+            f"{path}: schedule row run_index {run_index} references group_id "
+            f"{group_id!r} that is absent from the roster of batch.json in "
+            f"{batch_dir}"
         )
