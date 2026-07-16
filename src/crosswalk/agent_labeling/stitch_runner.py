@@ -424,6 +424,17 @@ def get_panel(name: str | None) -> list[ProviderSpec]:
         ) from None
 
 
+def panel_descriptor(specs: list[ProviderSpec]) -> list[dict[str, str | None]]:
+    """Serialize panel seats to the ``required_panel`` manifest block.
+
+    This is the single source of truth for how a panel roster is stamped into a
+    wave manifest and how the runner re-derives it for drift checking. Keep the
+    field set (provider/model/effort) in lockstep with both sides so a roster
+    can never silently drift between build time and run time.
+    """
+    return [{"provider": spec.name, "model": spec.model, "effort": spec.effort} for spec in specs]
+
+
 class AbstainReason(StrEnum):
     """Why a provider produced an ABSTAIN vote — drives the run_batch circuit breaker.
 

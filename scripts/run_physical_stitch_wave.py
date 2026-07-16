@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -17,48 +16,23 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from crosswalk.agent_labeling.stitch_runner import (
     AbstainReason,
     ProviderInvocationError,
-    get_panel,
     run_batch,
 )
+from crosswalk.agent_labeling.wave_manifest import WaveManifest
 
 WAVE_TIMEOUT_BREAKER_N = 3
 
 
-def _panel_descriptor(panel: list[Any]) -> list[dict[str, str | None]]:
-    return [{"provider": spec.name, "model": spec.model, "effort": spec.effort} for spec in panel]
-
-
 def load_and_validate_manifest(path: Path) -> tuple[dict, list[Any]]:
-    manifest = json.loads(path.read_text())
-    panel_name = str(manifest.get("panel", ""))
-    panel = get_panel(panel_name)
-    actual_panel = _panel_descriptor(panel)
-    if actual_panel != manifest.get("required_panel"):
-        raise ValueError(
-            f"Panel drift for {panel_name}: expected {manifest.get('required_panel')}, "
-            f"got {actual_panel}"
-        )
+    """Load, integrity-check, and structurally validate the wave manifest.
 
-    schedule = manifest.get("run_schedule") or []
-    if len(schedule) != int(manifest.get("total_pack_count", -1)):
-        raise ValueError("run_schedule length does not match total_pack_count")
-    expected_indices = list(range(1, len(schedule) + 1))
-    if [row.get("run_index") for row in schedule] != expected_indices:
-        raise ValueError("run_schedule indices are not contiguous and ordered")
-
-    seen: set[tuple[str, str]] = set()
-    for row in schedule:
-        batch_dir = Path(row["batch_dir"])
-        group_id = str(row["group_id"])
-        key = (str(batch_dir), group_id)
-        if key in seen:
-            raise ValueError(f"duplicate scheduled pack: {key}")
-        seen.add(key)
-        if not (batch_dir / "batch.json").is_file():
-            raise FileNotFoundError(batch_dir / "batch.json")
-        if not (batch_dir / group_id / "evidence.json").is_file():
-            raise FileNotFoundError(batch_dir / group_id / "evidence.json")
-    return manifest, panel
+    Thin wrapper over :meth:`WaveManifest.load_validated`, which owns the
+    contract (field names, schema version, integrity digest, panel-drift check,
+    schedule invariants, and cwd-independent ``batch_dir`` resolution). The
+    returned schedule rows carry manifest-resolved ``batch_dir`` paths.
+    """
+    manifest = WaveManifest.load_validated(path)
+    return manifest.content, manifest.panel
 
 
 def _validate_group_votes(votes, panel: list[Any], group_id: str) -> None:
