@@ -200,6 +200,18 @@ def test_render_option_uses_aligned_span_midpoints():
     assert render_option(group, lower).tobytes() != render_option(group, upper).tobytes()
 
 
+def test_render_option_distinguishes_pairs_when_all_geometries_coincide():
+    """The textual pair key preserves exact structure when spatial ties collapse."""
+    group = _pair_group()
+    coincident = _line([[0.0, 0.0], [0.0, 1.0]])
+    group["ref_geometries"] = {"r1": coincident, "r2": coincident}
+    group["target_geometries"] = {"t1": coincident, "t2": coincident}
+    opt_x = _pair_option("X", [("r1", "t1"), ("r2", "t2")])
+    opt_y = _pair_option("Y", [("r1", "t2"), ("r2", "t1")])
+
+    assert render_option(group, opt_x).tobytes() != render_option(group, opt_y).tobytes()
+
+
 # ---------------------------------------------------------------------------
 # Option letter <-> edge-set mapping
 # ---------------------------------------------------------------------------

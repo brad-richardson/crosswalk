@@ -77,6 +77,8 @@ CONTEXT_WIDTH = 1
 TIE_COLOR = (46, 125, 50)
 TIE_LINE_WIDTH = 2
 TIE_ENDPOINT_RADIUS = 2
+PAIR_KEY_PADDING = 4
+PAIR_KEY_LINE_HEIGHT = 11
 
 # Stitch groups can span whole chains (1-2km) now that group geometry is never
 # clipped to a 500m box. The generic 512px render cap would squash a long chain
@@ -258,6 +260,75 @@ def _edge_tie_endpoints(
     return rp, tp
 
 
+def _pair_key_lines(
+    option: dict,
+    ref_labels: dict[str, str],
+    target_labels: dict[str, str],
+    image_width: int,
+) -> list[str]:
+    """Return compact, wrapped text lines describing an option's exact pairs.
+
+    Spatial ties can collapse to identical pixels when two or more segments are
+    geometrically coincident. The pair key is therefore the deterministic
+    fallback that keeps distinct edge sets visually distinguishable even in
+    that degenerate-but-valid case.
+    """
+    pairs = []
+    for edge in option.get("edges", []) or []:
+        ref_id = str(edge.get("ref_id", ""))
+        target_id = str(edge.get("target_id", ""))
+        ref_label = ref_labels.get(ref_id, ref_id or "?")
+        target_label = target_labels.get(target_id, target_id or "?")
+        pairs.append(f"{ref_label}-{target_label}")
+    if not pairs:
+        return []
+    pairs.sort()
+
+    # PIL's default bitmap font is about 6px per character. Greedy wrapping
+    # keeps the key within the image without adding a font dependency.
+    max_chars = max(20, (image_width - 2 * PAIR_KEY_PADDING) // 6)
+    lines: list[str] = []
+    current = "Pairs:"
+    for pair in pairs:
+        candidate = f"{current} {pair}" if current else pair
+        if len(candidate) <= max_chars or current == "Pairs:":
+            current = candidate
+        else:
+            lines.append(current)
+            current = pair
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _draw_pair_key(
+    draw: ImageDraw.ImageDraw,
+    option: dict,
+    ref_labels: dict[str, str],
+    target_labels: dict[str, str],
+    size: tuple[int, int],
+) -> None:
+    """Draw the option's textual pair key over an opaque map-safe box."""
+    lines = _pair_key_lines(option, ref_labels, target_labels, size[0])
+    if not lines:
+        return
+    text_width = max(draw.textbbox((0, 0), line)[2] for line in lines)
+    box_width = text_width + 2 * PAIR_KEY_PADDING
+    box_height = len(lines) * PAIR_KEY_LINE_HEIGHT + 2 * PAIR_KEY_PADDING
+    draw.rectangle(
+        [(0, 0), (box_width, box_height)],
+        fill=BACKGROUND_COLOR,
+        outline=TIE_COLOR,
+        width=1,
+    )
+    for index, line in enumerate(lines):
+        draw.text(
+            (PAIR_KEY_PADDING, PAIR_KEY_PADDING + index * PAIR_KEY_LINE_HEIGHT),
+            line,
+            fill=TIE_COLOR,
+        )
+
+
 def render_option(group: dict, option: dict, size: tuple[int, int] | None = None) -> Image.Image:
     """Render one option: its edges' segments highlighted, others de-emphasized.
 
@@ -341,6 +412,9 @@ def render_option(group: dict, option: dict, size: tuple[int, int] | None = None
                 fill=TIE_COLOR,
                 outline=TIE_COLOR,
             )
+    # A compact pair key is the exact-structure fallback for coincident geometry,
+    # where two different ties can otherwise collapse to the same pixels.
+    _draw_pair_key(draw, option, ref_labels, target_labels, size)
     return img
 
 
@@ -853,6 +927,8 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     )
     lines.append("  their aligned overlap, so the option's exact edges (which ref pairs with which")
     lines.append("  target) are visible even when two options include the same set of segments.")
+    lines.append("  The green pair key in the image corner lists those exact R#-T# edges; use it")
+    lines.append("  when overlapping geometry makes a spatial tie hard to see.")
     lines.append(
         "  Use these images to judge the exact edge set; do not choose the closest picture."
     )
