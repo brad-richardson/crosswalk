@@ -20,10 +20,23 @@ from crosswalk.agent_labeling.wave_manifest import (
 PANEL_NAME = "v7-candidate"
 
 
-def _make_batch(batch_dir: Path, group_id: str = "group-1") -> None:
+def _make_batch(
+    batch_dir: Path,
+    group_id: str = "group-1",
+    *,
+    batch_json: dict | None = None,
+) -> None:
     group_dir = batch_dir / group_id
     group_dir.mkdir(parents=True)
-    (batch_dir / "batch.json").write_text("{}")
+    if batch_json is None:
+        # A schema-v2 batch.json whose identity matches the ``_content`` row, so
+        # the happy path validates cleanly (no new semantic-check warnings).
+        batch_json = {
+            "dataset_id": "dataset",
+            "experiment": {"variant": "enriched"},
+            "groups": [{"group_id": group_id}],
+        }
+    (batch_dir / "batch.json").write_text(json.dumps(batch_json))
     (group_dir / "evidence.json").write_text("{}")
 
 
@@ -183,4 +196,148 @@ def test_missing_evidence_pack_is_rejected(tmp_path: Path) -> None:
     WaveManifest(_content(batch_dir)).write(manifest_path)
 
     with pytest.raises(FileNotFoundError, match="evidence.json"):
+        WaveManifest.load_validated(manifest_path)
+
+
+def test_happy_path_matching_batch_identity_has_no_warnings(
+    tmp_path: Path, recwarn: pytest.WarningsRecorder
+) -> None:
+    batch_dir = tmp_path / "batch"
+    _make_batch(batch_dir)  # full schema-v2 batch.json matching the row
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(_content(batch_dir)).write(manifest_path)
+
+    loaded = WaveManifest.load_validated(manifest_path)
+
+    assert loaded.total_pack_count == 1
+    # A digest-stamped manifest against a matching, full batch.json is silent.
+    assert [str(w.message) for w in recwarn.list] == []
+
+
+def test_group_roster_mismatch_is_fatal(tmp_path: Path) -> None:
+    batch_dir = tmp_path / "batch"
+    # Roster lists a different group than the schedule row's group_id.
+    _make_batch(
+        batch_dir,
+        batch_json={
+            "dataset_id": "dataset",
+            "experiment": {"variant": "enriched"},
+            "groups": [{"group_id": "some-other-group"}],
+        },
+    )
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(_content(batch_dir)).write(manifest_path)
+
+    with pytest.raises(ValueError, match="absent from the roster"):
+        WaveManifest.load_validated(manifest_path)
+
+
+def test_dataset_id_mismatch_is_fatal(tmp_path: Path) -> None:
+    batch_dir = tmp_path / "batch"
+    _make_batch(
+        batch_dir,
+        batch_json={
+            "dataset_id": "a_different_dataset",
+            "experiment": {"variant": "enriched"},
+            "groups": [{"group_id": "group-1"}],
+        },
+    )
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(_content(batch_dir)).write(manifest_path)
+
+    with pytest.raises(ValueError, match="declares dataset_id"):
+        WaveManifest.load_validated(manifest_path)
+
+
+def test_variant_mismatch_is_fatal(tmp_path: Path) -> None:
+    batch_dir = tmp_path / "batch"
+    _make_batch(
+        batch_dir,
+        batch_json={
+            "dataset_id": "dataset",
+            "experiment": {"variant": "no_coincidence"},
+            "groups": [{"group_id": "group-1"}],
+        },
+    )
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(_content(batch_dir)).write(manifest_path)
+
+    with pytest.raises(ValueError, match="declares variant"):
+        WaveManifest.load_validated(manifest_path)
+
+
+def test_legacy_batch_missing_identity_fields_warns_but_validates(tmp_path: Path) -> None:
+    batch_dir = tmp_path / "batch"
+    # A pre-schema-v2 batch.json with none of the cross-checked fields.
+    _make_batch(batch_dir, batch_json={})
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(_content(batch_dir)).write(manifest_path)
+
+    with pytest.warns(UserWarning, match="treating as a legacy pre-schema-v2 batch"):
+        loaded = WaveManifest.load_validated(manifest_path)
+    assert loaded.total_pack_count == 1
+
+
+@pytest.mark.parametrize(
+    "batch_json, message",
+    [
+        (
+            {
+                "dataset_id": None,
+                "experiment": {"variant": "enriched"},
+                "groups": [{"group_id": "group-1"}],
+            },
+            "invalid dataset_id",
+        ),
+        (
+            {
+                "dataset_id": "dataset",
+                "experiment": {"variant": None},
+                "groups": [{"group_id": "group-1"}],
+            },
+            "invalid experiment.variant",
+        ),
+        (
+            {
+                "dataset_id": "dataset",
+                "experiment": {"variant": "enriched"},
+                "groups": None,
+            },
+            "invalid groups roster",
+        ),
+    ],
+)
+def test_present_but_null_batch_identity_is_fatal(
+    tmp_path: Path, batch_json: dict, message: str
+) -> None:
+    """JSON null is malformed identity, not a legacy-absent field."""
+    batch_dir = tmp_path / "batch"
+    _make_batch(batch_dir, batch_json=batch_json)
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(_content(batch_dir)).write(manifest_path)
+
+    with pytest.raises(ValueError, match=message):
+        WaveManifest.load_validated(manifest_path)
+
+
+def test_present_but_null_row_identity_is_fatal(tmp_path: Path) -> None:
+    batch_dir = tmp_path / "batch"
+    _make_batch(batch_dir)
+    content = _content(batch_dir)
+    content["run_schedule"][0]["variant"] = None
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(content).write(manifest_path)
+
+    with pytest.raises(ValueError, match="invalid variant"):
+        WaveManifest.load_validated(manifest_path)
+
+
+def test_batch_json_root_must_be_an_object(tmp_path: Path) -> None:
+    batch_dir = tmp_path / "batch"
+    _make_batch(batch_dir)
+    (batch_dir / "batch.json").write_text("[]")
+    manifest_path = tmp_path / "manifest.json"
+    WaveManifest(_content(batch_dir)).write(manifest_path)
+
+    with pytest.raises(ValueError, match="must contain a JSON object"):
         WaveManifest.load_validated(manifest_path)
