@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +99,106 @@ def _drop_timeout_groups_from_partials(batch_dirs: set[Path]) -> set[tuple[Path,
     return dropped
 
 
+def _run_scheduled_pack(
+    position: int,
+    total: int,
+    row: dict,
+    panel: list[Any],
+    *,
+    timeout: int,
+    invocation_budget: float,
+) -> Any:
+    """Invoke the full panel on one scheduled pack and validate its ballots."""
+    batch_dir = Path(row["batch_dir"])
+    group_id = str(row["group_id"])
+    print(
+        f"[{position}/{total}] {row['dataset_id']} {group_id} variant={row['variant']}",
+        flush=True,
+    )
+    votes, consensus = run_batch(
+        batch_dir,
+        panel=panel,
+        group_ids=[group_id],
+        timeout=timeout,
+        collect_feedback=True,
+        resume=True,
+        invocation_budget_s=invocation_budget,
+    )
+    _validate_group_votes(votes, panel, group_id)
+    if len(consensus) != 1:
+        raise RuntimeError(f"{group_id}: expected one consensus row")
+    return votes
+
+
+def _execute_rows_parallel(
+    schedule: list[dict],
+    panel: list[Any],
+    *,
+    timeout: int,
+    invocation_budget: float,
+    group_workers: int,
+) -> None:
+    """Run scheduled packs on a bounded worker pool, one lane per batch dir.
+
+    Concurrency contract:
+
+    - ``run_batch`` rewrites a batch dir's ``votes.partial.csv`` /
+      ``consensus.partial.csv`` WHOLE on every per-group flush, so two
+      concurrent ``run_batch`` calls on the same batch dir would race the
+      read-modify-write and silently drop each other's rows. The unit of
+      parallelism is therefore the BATCH DIR: each pool task owns one dir
+      exclusively and runs that dir's scheduled packs in schedule order.
+      (Per-row tasks with per-dir locks would degrade to sequential execution:
+      the schedule lists each dir's packs contiguously, so a FIFO pool's
+      workers would all queue on the first dir's lock.)
+    - The wave timeout breaker counts consecutive timed-out packs per provider
+      in COMPLETION order (the sequential path counts in schedule order, which
+      is undefined under concurrency). Same threshold and halt semantics.
+    - On the first failure (provider-down, quota symptom, ballot validation),
+      a shared stop event makes every other lane halt before starting its next
+      pack, and batch dirs not yet started are cancelled. Only packs already
+      in flight run to completion (their partials flush for resume) before the
+      error re-raises as the wave-level stop.
+    """
+    rows_by_batch: dict[Path, list[tuple[int, dict]]] = defaultdict(list)
+    for position, row in enumerate(schedule, start=1):
+        rows_by_batch[Path(row["batch_dir"])].append((position, row))
+
+    streak_lock = threading.Lock()
+    consecutive_timeouts: dict[str, int] = {}
+    stop = threading.Event()
+
+    def _run_batch_lane(rows: list[tuple[int, dict]]) -> None:
+        for position, row in rows:
+            if stop.is_set():
+                return
+            try:
+                votes = _run_scheduled_pack(
+                    position,
+                    len(schedule),
+                    row,
+                    panel,
+                    timeout=timeout,
+                    invocation_budget=invocation_budget,
+                )
+                with streak_lock:
+                    _record_wave_timeout_streaks(votes, consecutive_timeouts, str(row["group_id"]))
+            except BaseException:
+                stop.set()
+                raise
+
+    with ThreadPoolExecutor(max_workers=group_workers) as ex:
+        futures = [ex.submit(_run_batch_lane, rows) for rows in rows_by_batch.values()]
+        try:
+            for future in as_completed(futures):
+                future.result()
+        except BaseException:
+            stop.set()
+            for future in futures:
+                future.cancel()
+            raise
+
+
 def execute_schedule(
     manifest: dict,
     panel: list[Any],
@@ -104,6 +206,7 @@ def execute_schedule(
     timeout: int,
     invocation_budget: float,
     retry_timeouts: bool = False,
+    group_workers: int = 1,
 ) -> None:
     schedule = manifest["run_schedule"]
     scheduled_by_batch: dict[Path, list[str]] = defaultdict(list)
@@ -117,27 +220,26 @@ def execute_schedule(
             flush=True,
         )
 
-    consecutive_timeouts: dict[str, int] = {}
-    for position, row in enumerate(schedule, start=1):
-        batch_dir = Path(row["batch_dir"])
-        group_id = str(row["group_id"])
-        print(
-            f"[{position}/{len(schedule)}] {row['dataset_id']} {group_id} variant={row['variant']}",
-            flush=True,
-        )
-        votes, consensus = run_batch(
-            batch_dir,
-            panel=panel,
-            group_ids=[group_id],
+    if group_workers > 1:
+        _execute_rows_parallel(
+            schedule,
+            panel,
             timeout=timeout,
-            collect_feedback=True,
-            resume=True,
-            invocation_budget_s=invocation_budget,
+            invocation_budget=invocation_budget,
+            group_workers=group_workers,
         )
-        _validate_group_votes(votes, panel, group_id)
-        _record_wave_timeout_streaks(votes, consecutive_timeouts, group_id)
-        if len(consensus) != 1:
-            raise RuntimeError(f"{group_id}: expected one consensus row")
+    else:
+        consecutive_timeouts: dict[str, int] = {}
+        for position, row in enumerate(schedule, start=1):
+            votes = _run_scheduled_pack(
+                position,
+                len(schedule),
+                row,
+                panel,
+                timeout=timeout,
+                invocation_budget=invocation_budget,
+            )
+            _record_wave_timeout_streaks(votes, consecutive_timeouts, str(row["group_id"]))
 
     # Row-wise runs intentionally use partial files for crash-safe accumulation.
     # Consolidate every multi-group batch once at the end so votes.csv and
@@ -175,7 +277,20 @@ def main() -> None:
         action="store_true",
         help="Validate packs, panel, and schedule without invoking voters.",
     )
+    parser.add_argument(
+        "--group-workers",
+        type=int,
+        default=1,
+        help=(
+            "Run up to N scheduled packs concurrently (each pack still fans its "
+            "panel seats out in parallel, so provider concurrency is N per seat). "
+            "Packs sharing a batch dir stay serialized to protect the partial-CSV "
+            "read-modify-write. Default 1 preserves the strict schedule order."
+        ),
+    )
     args = parser.parse_args()
+    if args.group_workers < 1:
+        parser.error("--group-workers must be >= 1")
 
     manifest, panel = load_and_validate_manifest(args.manifest)
     schedule = manifest["run_schedule"]
@@ -193,6 +308,7 @@ def main() -> None:
         timeout=args.timeout,
         invocation_budget=args.invocation_budget,
         retry_timeouts=args.retry_timeouts,
+        group_workers=args.group_workers,
     )
 
 

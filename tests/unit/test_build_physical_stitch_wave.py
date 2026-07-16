@@ -421,3 +421,164 @@ def test_schedule_retry_drops_timeout_partials_and_reinvokes_group(
     )
 
     assert calls == [["timed-out"], ["successful"], ["timed-out", "successful"]]
+
+
+def _schedule_row(index: int, batch_dir: Path, group_id: str) -> dict:
+    return {
+        "run_index": index,
+        "batch_dir": str(batch_dir),
+        "group_id": group_id,
+        "dataset_id": "dataset",
+        "variant": "enriched",
+    }
+
+
+def _panel_votes(panel, group_ids, choice: str = "A", abstain_reason: str = "") -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "provider": spec.name,
+                "model": spec.model,
+                "choice": choice,
+                "abstain_reason": abstain_reason,
+            }
+            for _group_id in group_ids
+            for spec in panel
+        ]
+    )
+
+
+def test_parallel_schedule_serializes_same_batch_dir_and_completes_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    import time
+
+    panel = get_panel("v7-candidate")
+    batch_a = tmp_path / "batch-a"
+    batch_b = tmp_path / "batch-b"
+    schedule = [
+        _schedule_row(1, batch_a, "a-1"),
+        _schedule_row(2, batch_b, "b-1"),
+        _schedule_row(3, batch_a, "a-2"),
+        _schedule_row(4, batch_b, "b-2"),
+    ]
+
+    state_lock = threading.Lock()
+    active: dict[Path, int] = {}
+    max_active_per_dir: dict[Path, int] = {}
+    max_active_total = 0
+    completed: set[str] = set()
+
+    def fake_run_batch(batch_dir, *, group_ids, panel, **_kwargs):
+        nonlocal max_active_total
+        batch_dir = Path(batch_dir)
+        with state_lock:
+            active[batch_dir] = active.get(batch_dir, 0) + 1
+            max_active_per_dir[batch_dir] = max(
+                max_active_per_dir.get(batch_dir, 0), active[batch_dir]
+            )
+            max_active_total = max(max_active_total, sum(active.values()))
+        time.sleep(0.02)
+        with state_lock:
+            active[batch_dir] -= 1
+            completed.update(group_ids)
+        votes = _panel_votes(panel, group_ids)
+        consensus = pd.DataFrame([{"group_id": group_id} for group_id in group_ids])
+        return votes, consensus
+
+    monkeypatch.setattr(wave_runner, "run_batch", fake_run_batch)
+    wave_runner.execute_schedule(
+        {"run_schedule": schedule},
+        panel,
+        timeout=600,
+        invocation_budget=600,
+        group_workers=3,
+    )
+
+    # The partial-CSV read-modify-write means a batch dir must never see two
+    # concurrent run_batch calls, while distinct batch dirs may overlap.
+    assert max(max_active_per_dir.values()) == 1
+    assert completed == {"a-1", "a-2", "b-1", "b-2"}
+
+
+def test_parallel_schedule_halts_all_lanes_after_first_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    panel = get_panel("v7-candidate")
+    # Lane 1 fails on its only pack; lane 2 has a pack in flight while the
+    # failure happens plus a follow-up pack; a third dir is still queued.
+    schedule = [
+        _schedule_row(1, tmp_path / "batch-fail", "fail-1"),
+        _schedule_row(2, tmp_path / "batch-slow", "slow-1"),
+        _schedule_row(3, tmp_path / "batch-slow", "slow-2"),
+        _schedule_row(4, tmp_path / "batch-queued", "queued-1"),
+    ]
+    slow_started = threading.Event()
+    failure_raised = threading.Event()
+    started: list[str] = []
+    started_lock = threading.Lock()
+
+    def fake_run_batch(_batch_dir, *, group_ids, panel, **_kwargs):
+        with started_lock:
+            started.extend(group_ids)
+        if group_ids == ["fail-1"]:
+            # Fail only once the other lane's pack is in flight, so the test
+            # exercises "in-flight pack finishes, its lane then stops".
+            assert slow_started.wait(timeout=10)
+            failure_raised.set()
+            raise wave_runner.ProviderInvocationError("claude: quota symptom")
+        if group_ids == ["slow-1"]:
+            slow_started.set()
+            # Hold this pack in flight until the other lane has failed, so the
+            # stop event is set before this lane considers slow-2.
+            assert failure_raised.wait(timeout=10)
+        votes = _panel_votes(panel, group_ids)
+        consensus = pd.DataFrame([{"group_id": group_id} for group_id in group_ids])
+        return votes, consensus
+
+    monkeypatch.setattr(wave_runner, "run_batch", fake_run_batch)
+    with pytest.raises(wave_runner.ProviderInvocationError, match="quota symptom"):
+        wave_runner.execute_schedule(
+            {"run_schedule": schedule},
+            panel,
+            timeout=600,
+            invocation_budget=600,
+            group_workers=2,
+        )
+
+    assert "fail-1" in started
+    # The in-flight pack finishes (its partial flushes for resume)...
+    assert "slow-1" in started
+    # ...but its lane stops before the next pack, and the never-started lane
+    # is cancelled or exits on the stop event without invoking the panel.
+    assert "slow-2" not in started
+    assert "queued-1" not in started
+
+
+def test_parallel_schedule_applies_wave_timeout_breaker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    panel = get_panel("v7-candidate")
+    schedule = [_schedule_row(i, tmp_path / f"batch-{i}", f"group-{i}") for i in range(1, 5)]
+
+    def fake_run_batch(_batch_dir, *, group_ids, panel, **_kwargs):
+        votes = _panel_votes(panel, group_ids)
+        votes.loc[votes["provider"] == "codex", ["choice", "abstain_reason"]] = [
+            "ABSTAIN",
+            "timeout",
+        ]
+        consensus = pd.DataFrame([{"group_id": group_id} for group_id in group_ids])
+        return votes, consensus
+
+    monkeypatch.setattr(wave_runner, "run_batch", fake_run_batch)
+    with pytest.raises(wave_runner.ProviderInvocationError, match="3 consecutive scheduled groups"):
+        wave_runner.execute_schedule(
+            {"run_schedule": schedule},
+            panel,
+            timeout=600,
+            invocation_budget=600,
+            group_workers=2,
+        )
