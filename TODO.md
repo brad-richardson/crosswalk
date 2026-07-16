@@ -160,6 +160,80 @@ v7-only 50-group manual-review pack. Full state, commands, manifest hash, and
 the post-vote analysis checklist are in
 [`research/physical_feature_experiment_2026-07-15.md`](research/physical_feature_experiment_2026-07-15.md#operational-handoff-targeted-v7-stitching-wave).
 
+Note (2026-07-16, #440): the manifest contract now lives in
+`agent_labeling/wave_manifest.py`. The resume commands are unchanged and the
+production manifest file is untouched; `--validate-only` now also warns that
+the legacy manifest predates the embedded integrity digest — that warning is
+expected. Verify the file against the recorded external SHA-256 manually if
+wanted. New manifests get an embedded `manifest_sha256` automatically.
+
+### NEXT: Panel and agent-instruction improvements (post-wave sequencing)
+
+Decisions locked 2026-07-16: keep the lean Claude/Codex/Muse trio (no Gemini
+or Kimi seat — revisit only when a materially better model generation ships);
+keep unanimous+gates as the only label-minting rule (v7 human eval: majority
+was exact on 3/12 vs unanimous 8/11, auto-accept 4/4).
+
+Sequencing, in order:
+
+1. Resume and complete the paused v7 physical wave (above) on the current
+   rubric — do NOT edit `MATCHING_RUBRIC_VERSION` content before it runs, or
+   the immutable packs become mixed-era.
+2. High-effort (fable) analysis pass over the wave's ballots + `pack_feedback`
+   + the 2x2 contrasts: physical-feature go/no-go, and draft rubric-v2 wording
+   (frontage/service-road identity and vertically-layered roads are the
+   dominant ambiguity themes MI-1..6 doesn't address explicitly). Rubric v2 =
+   new provenance era.
+3. Buildable now (rubric-independent, from
+   `research/v7_reasoning_analysis_2026-07-15.md` follow-ups): structured
+   `none_reason` enum (`all_edges_no_match` / `no_exact_option` /
+   `insufficient_evidence`) in the vote schema; "dense assignment minus small
+   bad subset" option generation (biggest expressibility lever — menus had
+   member coverage 1.000 but boundary precision 0.967); precomputed
+   coverage/interval-partition + topology table in evidence packs; optional
+   exact-pair adjudication mode after membership review in the UI.
+
+### FOLLOW-UPS: from the 2026-07-16 architecture review batch
+
+Merged that day: #434 (experiment-boundary guard + `physical_flag_domains`),
+#435 (backfill-skip warnings), #436 (LR coverage union + evidence-gate fixes),
+#437 (`fetch/physical_tags.py` consolidation), #438 (resolver
+feature/table versioning), #439 (drift-mapper + `selected_edges` parser
+dedup + crosswalk↔mbench divergence tests), #440 (`wave_manifest.py`).
+Remaining items, roughly in value order:
+
+- **Group lineage persistence** (the root fix for drift-mapping): emit
+  `predecessor_group_ids` in the groups sidecar at write time (diff current
+  membership against the prior sidecar for the same dataset), turning the
+  overlap-inference mappers into lookups with inference as legacy fallback.
+  #424's pruned-ownership snapshot proved the pattern. OPEN PRODUCT QUESTION:
+  where the pipeline finds the predecessor sidecar (previous `data/output`
+  artifact? explicit `--prior-sidecar`? store a lineage ledger next to
+  labels?). The crosswalk↔mbench semantic divergences are now pinned by
+  `tests/unit/test_mbench_drift_parity.py` in the meantime.
+- **`stitch_runner` schedule API**: add `forget_groups(batch_dir, group_ids)`
+  and a cross-batch schedule entry point so `run_physical_stitch_wave.py`
+  stops duplicating the timeout-breaker constant and doing surgery on
+  `votes.partial.csv`/`consensus.partial.csv` files the library owns.
+- **Module splits when next touched** (not standalone churn): `stitch_runner.py`
+  (~2.6k lines; transports vs orchestration), `stitch_export.py` (~2k; move
+  panel-era registries to a `panel_routing.py`), `stitch_evidence.py` (rendering
+  vs prompt authoring; `build_prompt` accretes a conditional block per evidence
+  type).
+- Smaller review findings: provider→(mode, transport) table encoded twice
+  (`stitch_runner._delivery_mode_transport` vs
+  `stitch_provenance.DELIVERY_TRANSPORTS_BY_MODE` — derive one from the other);
+  Overture raw `road_flags`-vs-legacy-`road`-struct branch triplicated inside
+  `fetch/overture.py` (one `_raw_road_flags()` accessor); first-row staleness
+  heuristics in `backfill_overture_physical_lr` → replace with a version stamp;
+  `backfill_physical_lr_from_source_tags` docstring overclaims ("unrelated LR
+  attributes untouched" — configured flags rebuild the whole column); name the
+  `is_bridge`/`is_tunnel`/`is_covered`/`is_indoor` flag vocabulary once;
+  shared groups-sidecar schema module (producer `pipeline/runner.py`, consumer
+  `resolver/extract.py`, validator `mbench/adapters/crosswalk.py` each encode
+  it independently); eventual retirement note for the legacy `is_bridge`
+  sidecar key.
+
 ### DONE: Stitch Ground Truth Store and Review Flow
 
 **Priority:** HIGH
