@@ -62,7 +62,7 @@ def extract_pair_attributes(
 
     Names are always resolved from linear-referenced (LR) data. All datasets
     are expected to have names_lr populated (Overture has native LR, target
-    datasets get trivial LR via _add_trivial_lr_columns).
+    datasets get trivial LR via add_trivial_lr_columns).
 
     Args:
         ref_data: Reference segment data (dict-like with .get())

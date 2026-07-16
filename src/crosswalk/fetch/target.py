@@ -42,13 +42,18 @@ from ..datasets.schema import FetchConfig, get_dataset_config, list_dataset_conf
 from ..filenames import target_filename
 from ..utils.geometry import convert_polygons_to_centerlines, flatten_to_linestring
 from ..utils.linear_ref import create_trivial_lr
-from .arcgis import _build_level_rules, _build_road_flags, fetch_arcgis_layer
+from .arcgis import fetch_arcgis_layer
 from .normalize import (
     default_class_for_type,
     map_column,
     normalize_oneway_value,
     normalize_speed_to_kph,
     resolve_column,
+)
+from .physical_tags import (
+    add_trivial_lr_columns,
+    build_level_rules,
+    build_road_flags,
 )
 
 # Default output directory
@@ -254,7 +259,7 @@ def _transform_download_data(
         "sources": gdf[id_col]
         .apply(lambda x: [{"dataset": source_name, "record_id": str(x)}])
         .values,
-        "road_flags": _build_road_flags(
+        "road_flags": build_road_flags(
             gdf,
             bridge_column,
             tunnel_column,
@@ -262,7 +267,7 @@ def _transform_download_data(
             tunnel_values=fetch_config.tunnel_values,
         ),
         "level_rules": (
-            gdf[level_column].apply(_build_level_rules).values
+            gdf[level_column].apply(build_level_rules).values
             if level_column and level_column in gdf.columns
             else [None for _ in range(len(gdf))]
         ),
@@ -330,7 +335,7 @@ def _transform_download_data(
             logger.info(f"{source_name}: {n_dropped} duplicate IDs removed (kept first occurrence)")
 
     # Add trivial linear-referenced columns
-    result = _add_trivial_lr_columns(result)
+    result = add_trivial_lr_columns(result)
 
     return result
 
@@ -394,7 +399,7 @@ def backfill_physical_lr_from_source_tags(
 
     result = gdf.copy()
     if level_found:
-        result["level_rules"] = level_values.apply(_build_level_rules)
+        result["level_rules"] = level_values.apply(build_level_rules)
         result["level_lr"] = result["level_rules"].apply(
             lambda rules: create_trivial_lr(rules[0]["value"] if rules else None).to_dict_list()
         )
@@ -405,7 +410,7 @@ def backfill_physical_lr_from_source_tags(
             physical_fields["__bridge"] = bridge_values
         if tunnel_found:
             physical_fields["__tunnel"] = tunnel_values
-        flags = _build_road_flags(
+        flags = build_road_flags(
             physical_fields,
             "__bridge" if bridge_found else None,
             "__tunnel" if tunnel_found else None,
@@ -419,84 +424,6 @@ def backfill_physical_lr_from_source_tags(
         ]
 
     return result
-
-
-def _add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Add trivial linear-referenced columns for target-side data.
-
-    Target-side data typically doesn't have linear-referenced attributes,
-    so we create trivial LR columns with a single range [0.0, 1.0, value]
-    for each attribute.
-
-    Args:
-        gdf: GeoDataFrame with flat attribute columns
-
-    Returns:
-        GeoDataFrame with added *_lr columns
-    """
-
-    # Get name from names struct or flat name column
-    def get_name(row):
-        names = row.get("names")
-        if isinstance(names, dict):
-            return names.get("primary")
-        return row.get("name")
-
-    # Names LR - extract primary from names struct
-    gdf["names_lr"] = gdf.apply(
-        lambda row: create_trivial_lr(get_name(row)).to_dict_list(),
-        axis=1,
-    )
-
-    # Subclass LR
-    if "subclass" in gdf.columns:
-        gdf["subclass_lr"] = gdf["subclass"].apply(lambda x: create_trivial_lr(x).to_dict_list())
-    else:
-        gdf["subclass_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
-
-    # Empty level rules mean unknown, not known ground level.
-    def get_level(row):
-        level_rules = row.get("level_rules")
-        if isinstance(level_rules, list) and len(level_rules) > 0:
-            first = level_rules[0]
-            if isinstance(first, dict):
-                return first.get("value")
-        return None
-
-    gdf["level_lr"] = gdf.apply(
-        lambda row: create_trivial_lr(get_level(row)).to_dict_list(),
-        axis=1,
-    )
-
-    # Road flags LR - extract from road_flags if present
-    def get_flags(row):
-        road_flags = row.get("road_flags")
-        if isinstance(road_flags, list):
-            return sorted(road_flags)
-        return None
-
-    gdf["road_flags_lr"] = gdf.apply(
-        lambda row: create_trivial_lr(get_flags(row)).to_dict_list(),
-        axis=1,
-    )
-
-    # One-way LR - extract from oneway flat column
-    if "oneway" in gdf.columns:
-        gdf["oneway_lr"] = gdf["oneway"].apply(lambda x: create_trivial_lr(x).to_dict_list())
-    else:
-        gdf["oneway_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
-
-    # Speed limit LR - extract from speed_limit_kph flat column
-    if "speed_limit_kph" in gdf.columns:
-        gdf["speed_limit_kph_lr"] = gdf["speed_limit_kph"].apply(
-            lambda x: create_trivial_lr(x).to_dict_list()
-        )
-    else:
-        gdf["speed_limit_kph_lr"] = [
-            [{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))
-        ]
-
-    return gdf
 
 
 def fetch_ogc_features(

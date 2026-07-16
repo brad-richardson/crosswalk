@@ -829,7 +829,7 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
         for side in metadata.get("segments", {}).values()
         for segment in side
     ) or any(
-        "physical" in str(edge.get("structural", ""))
+        edge.get("ref_physical") or edge.get("target_physical")
         for option in metadata.get("options", [])
         for edge in option.get("edges", [])
     )

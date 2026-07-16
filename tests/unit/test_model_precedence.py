@@ -90,7 +90,7 @@ def test_run_pipeline_threads_one_model_path_through_score_and_export(tmp_path, 
     projection = ProjectionResult(frame, frame, frame.crs, frame.crs, False)
     captured = {}
 
-    monkeypatch.setattr(runner, "load_and_filter_inputs", lambda *_: (frame, frame))
+    monkeypatch.setattr(runner, "load_and_filter_inputs", lambda *_, **__: (frame, frame))
 
     def _score(**kwargs):
         captured["score"] = kwargs["model_path"]
@@ -114,3 +114,38 @@ def test_run_pipeline_threads_one_model_path_through_score_and_export(tmp_path, 
 
     assert result is expected
     assert captured == {"score": local_model, "optimize": local_model}
+
+
+def test_run_pipeline_threads_dataset_identity_for_physical_backfill(tmp_path, monkeypatch):
+    """Behavior pin: dataset-name runs thread identity into input loading.
+
+    Pins pre-existing behavior (this held before the ``load_kwargs`` ternary was
+    made unconditional): whenever ``run_pipeline`` receives a dataset identity
+    via ``prune_dataset_key``, it reaches ``load_and_filter_inputs`` as
+    ``dataset_id`` so the target physical backfill can look up the dataset's
+    FetchConfig. This is a regression guard for that plumbing, not a fix guard.
+    """
+    frame = gpd.GeoDataFrame(
+        {"id": ["x"]},
+        geometry=[LineString([(0, 0), (1, 0)])],
+        crs="EPSG:3857",
+    )
+    projection = ProjectionResult(frame, frame, frame.crs, frame.crs, False)
+    captured = {}
+
+    def _load(reference_path, target_path, dataset_id=None):
+        captured["dataset_id"] = dataset_id
+        return frame, frame
+
+    monkeypatch.setattr(runner, "load_and_filter_inputs", _load)
+    monkeypatch.setattr(runner, "score_candidates_from_geodataframes", lambda **k: ([], projection))
+    monkeypatch.setattr(runner, "optimize_and_export", lambda **k: object())
+
+    runner.run_pipeline(
+        tmp_path / "reference.parquet",
+        tmp_path / "target.parquet",
+        tmp_path / "bridge.parquet",
+        prune_dataset_key="some_dataset",
+    )
+
+    assert captured["dataset_id"] == "some_dataset"

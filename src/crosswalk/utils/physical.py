@@ -46,12 +46,44 @@ def _missing_scalar(value: Any) -> bool:
     return isinstance(missing, bool) and missing
 
 
+def interval_union_length(intervals: Any) -> float:
+    """Length covered by the union of ``[start, end]`` intervals.
+
+    Overlapping intervals are counted once, so this is the correct measure of
+    covered fraction when source LR rules overlap. Malformed or degenerate
+    intervals are ignored.
+    """
+    spans: list[tuple[float, float]] = []
+    for item in intervals or []:
+        try:
+            start, end = float(item[0]), float(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if end > start:
+            spans.append((start, end))
+    if not spans:
+        return 0.0
+    spans.sort()
+    total = 0.0
+    cur_start, cur_end = spans[0]
+    for start, end in spans[1:]:
+        if start > cur_end:
+            total += cur_end - cur_start
+            cur_start, cur_end = start, end
+        else:
+            cur_end = max(cur_end, end)
+    total += cur_end - cur_start
+    return total
+
+
 def normalize_lr_rules(raw: Any, *, flags: bool = False) -> list[dict[str, Any]]:
     """Return sorted, valid, JSON-compatible LR rules.
 
     Malformed ranges are ignored rather than converted to segment-wide facts.
-    Adjacent equal-valued ranges are merged, but no boundary with a value change
-    is lost.
+    Rules are sorted first, then overlapping-or-adjacent equal-valued ranges are
+    merged, but no boundary with a value change is lost. Overlapping ranges with
+    different values are preserved as-is (coverage math must union them — see
+    ``interval_union_length`` — rather than sum their raw lengths).
     """
     if raw is None:
         return []
@@ -91,12 +123,22 @@ def normalize_lr_rules(raw: Any, *, flags: bool = False) -> list[dict[str, Any]]
                 continue
             value = sorted({str(v) for v in value if not _missing_scalar(v)})
 
-        rule = {"between": [round(start, 7), round(end, 7)], "value": value}
-        if rules and rules[-1]["value"] == value and rules[-1]["between"][1] == rule["between"][0]:
-            rules[-1]["between"][1] = rule["between"][1]
+        rules.append({"between": [round(start, 7), round(end, 7)], "value": value})
+
+    rules.sort(key=lambda r: (r["between"][0], r["between"][1]))
+    merged: list[dict[str, Any]] = []
+    for rule in rules:
+        # Merge overlapping-or-adjacent ranges only when the value is identical;
+        # a value change always starts a new range so no boundary is lost.
+        if (
+            merged
+            and merged[-1]["value"] == rule["value"]
+            and rule["between"][0] <= merged[-1]["between"][1]
+        ):
+            merged[-1]["between"][1] = max(merged[-1]["between"][1], rule["between"][1])
         else:
-            rules.append(rule)
-    return sorted(rules, key=lambda r: (r["between"][0], r["between"][1]))
+            merged.append(rule)
+    return merged
 
 
 def physical_attributes(level_lr: Any = None, road_flags_lr: Any = None) -> dict[str, Any]:
@@ -192,20 +234,18 @@ def summarize_physical(physical: dict[str, Any] | None) -> str:
             with suppress(TypeError, ValueError):
                 total = abs(float(aligned_range[1]) - float(aligned_range[0]))
         if total == 0.0:
-            total_start = min(float(r["between"][0]) for r in flag_rules)
-            total_end = max(float(r["between"][1]) for r in flag_rules)
-            total = max(total_end - total_start, 0.0)
+            # LR rule fractions are positions along the whole segment [0, 1], so
+            # without an aligned range the denominator is the full segment (1.0).
+            # Using the rule span instead would read a mid-segment flag as full
+            # coverage and wrongly drop the "(partial)" suffix.
+            total = 1.0
         for flag, label in (
             ("is_bridge", "bridge"),
             ("is_tunnel", "tunnel"),
             ("is_covered", "covered"),
             ("is_indoor", "indoor"),
         ):
-            coverage = sum(
-                float(r["between"][1]) - float(r["between"][0])
-                for r in flag_rules
-                if flag in r["value"]
-            )
+            coverage = interval_union_length(r["between"] for r in flag_rules if flag in r["value"])
             if coverage > 0:
                 suffix = " (partial)" if total and coverage < total - 1e-9 else ""
                 parts.append(label + suffix)

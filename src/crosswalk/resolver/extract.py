@@ -78,7 +78,10 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 
-from crosswalk.agent_labeling.stitch_eval import recover_labeled_groups
+from crosswalk.agent_labeling.stitch_eval import (
+    parse_selected_edge_set,
+    recover_labeled_groups,
+)
 from crosswalk.config import FEATURE_COLUMNS as PAIRWISE_FEATURE_COLUMNS
 from crosswalk.pipeline.runner import CANDIDATE_SIDECAR_BASE_COLUMNS
 
@@ -147,20 +150,6 @@ PARQUET_JOIN_KEYS = ("group_id", "ref_id", "target_id")
 EXPECTED_CANDIDATE_JOIN_COLUMNS = set(CANDIDATE_SIDECAR_BASE_COLUMNS) | set(
     PAIRWISE_FEATURE_COLUMNS
 )
-
-
-def _human_edge_set(selected_edges_raw) -> frozenset[tuple[str, str]]:
-    """Parse a stitching label's ``selected_edges`` JSON to an edge frozenset.
-
-    Local copy of the tiny parser (rather than importing the private
-    ``stitch_eval._human_edge_set``) so this research harness does not depend on
-    an internal API that may change without notice.
-    """
-    try:
-        edges = json.loads(selected_edges_raw)
-    except (ValueError, TypeError):
-        return frozenset()
-    return frozenset((str(e["ref_id"]), str(e["target_id"])) for e in edges)
 
 
 def load_sidecar_groups(path: str | Path) -> list[dict]:
@@ -573,7 +562,9 @@ def _complete_collision_audit(
             hrow = human_by[str(human_group_id)]
             selected_edges = [
                 {"ref_id": ref_id, "target_id": target_id}
-                for ref_id, target_id in sorted(_human_edge_set(hrow.get("selected_edges", "[]")))
+                for ref_id, target_id in sorted(
+                    parse_selected_edge_set(hrow.get("selected_edges", "[]"))
+                )
             ]
             labels.append(
                 {
@@ -953,7 +944,7 @@ def build_edge_table(
         if group is None:
             continue
         hrow = human_by[hgid]
-        human_es = _human_edge_set(hrow["selected_edges"])
+        human_es = parse_selected_edge_set(hrow["selected_edges"])
         if prefer_candidate_graph and _group_has_candidate_graph(group):
             stats["candidate_groups"] += 1
             new_rows = _rows_from_candidate_graph(
