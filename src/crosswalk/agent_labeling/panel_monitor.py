@@ -62,12 +62,11 @@ POSITION_ANCHOR = "POSITION_ANCHOR"
 CONSTANT_CONFIDENCE = "CONSTANT_CONFIDENCE"
 
 # The decisive reject-all verdict: a real ballot with real confidence, excluded
-# only from letter-POSITION statistics (it occupies no letter slot).
+# only from letter-POSITION statistics (it occupies no letter slot). Failure
+# rows (no verdict — blank, error, ABSTAIN) are anything that is neither a
+# single letter nor ``NONE``; they are excluded from every decided/confidence/
+# position/dissent statistic and counted only in ``n_abstain``.
 _NONE = "NONE"
-# Failure rows (no verdict): excluded from every decided/confidence/position/dissent
-# statistic, counted only in ``n_abstain``. Anything that is neither a letter nor
-# ``NONE`` (blank, error, ABSTAIN) lands here.
-_NON_BALLOTS = frozenset({"ABSTAIN"})
 
 # Columns used, in priority order, to join a vote to its group's consensus row.
 # Whichever of these are present in BOTH frames form the join key: the committed
