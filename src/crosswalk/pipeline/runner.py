@@ -2033,13 +2033,12 @@ def run_pipeline(
     logger.info("=" * 60)
 
     # Step 1: Load + filter inputs (shared with the factory reoptimize path).
-    # Physical target backfill keys on dataset IDENTITY, not on whether the
-    # resolver-prune allowlist is armed for this dataset — a dataset that is
-    # known but not pruned must still get its bridge/tunnel/level sidecar
-    # evidence (same drift class #350 warns about). ``prune_dataset_key`` carries
-    # genuine dataset identity here (None only for path-only -r/-t runs), so
-    # thread it straight through; ``load_and_filter_inputs`` warns loudly when
-    # identity is unavailable and the target backfill has to be skipped.
+    # ``prune_dataset_key`` carries genuine dataset identity (None only for
+    # path-only -r/-t runs; the prune-allowlist gate itself lives downstream in
+    # _effective_prune_threshold). Thread it through unconditionally so the
+    # target physical backfill reads as identity-driven, not prune-driven;
+    # ``load_and_filter_inputs`` warns loudly when identity is unavailable and
+    # the target backfill has to be skipped.
     reference, target = load_and_filter_inputs(
         reference_path, target_path, dataset_id=prune_dataset_key
     )

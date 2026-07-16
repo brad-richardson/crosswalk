@@ -572,11 +572,12 @@ def _target_with_physical_source_tags() -> gpd.GeoDataFrame:
 
 
 def test_load_backfills_target_physical_from_dataset_config(monkeypatch, tmp_path) -> None:
-    """Dataset identity (not prune enablement) drives the target physical backfill.
+    """Behavior pin: dataset-id loads apply the target physical backfill.
 
-    ``load_and_filter_inputs`` receives only ``dataset_id`` — no pruning is
-    involved here — yet the target's bridge/tunnel/level LR evidence must be
-    refreshed from ``source_tags`` via the dataset's FetchConfig.
+    Pins pre-existing behavior that previously had no unit coverage: when
+    ``load_and_filter_inputs`` is given a ``dataset_id`` whose config declares
+    bridge/tunnel/level source-tag columns, the target's physical LR evidence is
+    refreshed from ``source_tags`` via that FetchConfig.
     """
     reference_path = tmp_path / "reference.parquet"
     target_path = tmp_path / "target.parquet"

@@ -117,13 +117,13 @@ def test_run_pipeline_threads_one_model_path_through_score_and_export(tmp_path, 
 
 
 def test_run_pipeline_threads_dataset_identity_for_physical_backfill(tmp_path, monkeypatch):
-    """Dataset identity reaches input loading regardless of prune enablement.
+    """Behavior pin: dataset-name runs thread identity into input loading.
 
-    The target physical backfill lives in ``load_and_filter_inputs`` and needs
-    the dataset id. ``run_pipeline`` must forward its ``prune_dataset_key``
-    (which carries genuine dataset identity) even when the resolver-prune
-    allowlist is not armed for that dataset — otherwise a known dataset silently
-    loses its bridge/tunnel/level sidecar evidence.
+    Pins pre-existing behavior (this held before the ``load_kwargs`` ternary was
+    made unconditional): whenever ``run_pipeline`` receives a dataset identity
+    via ``prune_dataset_key``, it reaches ``load_and_filter_inputs`` as
+    ``dataset_id`` so the target physical backfill can look up the dataset's
+    FetchConfig. This is a regression guard for that plumbing, not a fix guard.
     """
     frame = gpd.GeoDataFrame(
         {"id": ["x"]},
@@ -140,14 +140,12 @@ def test_run_pipeline_threads_dataset_identity_for_physical_backfill(tmp_path, m
     monkeypatch.setattr(runner, "load_and_filter_inputs", _load)
     monkeypatch.setattr(runner, "score_candidates_from_geodataframes", lambda **k: ([], projection))
     monkeypatch.setattr(runner, "optimize_and_export", lambda **k: object())
-    # Prune allowlist explicitly disabled: identity must still be threaded.
-    monkeypatch.setattr(settings, "resolver_prune_enabled", False)
 
     runner.run_pipeline(
         tmp_path / "reference.parquet",
         tmp_path / "target.parquet",
         tmp_path / "bridge.parquet",
-        prune_dataset_key="unpruned_dataset",
+        prune_dataset_key="some_dataset",
     )
 
-    assert captured["dataset_id"] == "unpruned_dataset"
+    assert captured["dataset_id"] == "some_dataset"
