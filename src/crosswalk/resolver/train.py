@@ -779,10 +779,10 @@ def save_model(
         "training_stats": training_stats,
         "cv_summary": cv_summary or {},
         "selector": selector,
-        # Compact training-data provenance: dataset ids and per-dataset audit
-        # schema versions / counts, carried through concat by
-        # extract.summarize_build_audit. Informational only — load_model surfaces
-        # it but does not gate on it (unlike the feature_version stamp above).
+        # Compact training-data provenance: source-build audit plus the effective
+        # hard/soft rows that actually reached training, carried through concat
+        # by extract.summarize_build_audit. Informational only — load_model
+        # surfaces it but does not gate on it (unlike feature_version above).
         "training_data_audit": training_audit or {},
     }
     joblib.dump(payload, str(output_path))
@@ -849,9 +849,11 @@ def load_model(path: str | Path, allow_version_mismatch: bool = False) -> dict[s
     training_audit = payload.get("training_data_audit") or {}
     if training_audit.get("dataset_ids"):
         logger.info(
-            "Resolver model {} trained on datasets {} (per-dataset build audit: {})",
+            "Resolver model {} trained on datasets {} (source datasets: {}; "
+            "per-dataset build/training audit: {})",
             path,
             training_audit["dataset_ids"],
+            training_audit.get("source_dataset_ids", []),
             training_audit.get("per_dataset", {}),
         )
     return payload

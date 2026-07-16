@@ -1193,10 +1193,14 @@ def concat_edge_tables(frames: list[pd.DataFrame]) -> pd.DataFrame:
     """
     audit_by_ds: dict[str, dict] = {}
     stats_by_ds: dict[str, dict] = {}
+    seen_datasets: set[str] = set()
     for frame in frames:
         ds = _frame_dataset_id(frame)
         if ds is None:
             continue
+        if ds in seen_datasets:
+            raise ValueError(f"duplicate dataset_id in edge-table concat: {ds}")
+        seen_datasets.add(ds)
         audit = frame.attrs.get("build_audit")
         stats = frame.attrs.get("build_stats")
         if audit is not None:
@@ -1213,35 +1217,70 @@ def concat_edge_tables(frames: list[pd.DataFrame]) -> pd.DataFrame:
     return combined
 
 
-def summarize_build_audit(df: pd.DataFrame) -> dict:
-    """Summarize a combined frame's per-dataset audit for artifact persistence.
+def _effective_training_counts(df: pd.DataFrame | None) -> dict[str, dict[str, int | None]]:
+    """Return compact per-dataset counts for a frame actually passed to training."""
+    if df is None or df.empty or "dataset_id" not in df.columns:
+        return {}
+    out: dict[str, dict[str, int | None]] = {}
+    for dataset_id, part in df.groupby("dataset_id", dropna=False):
+        labels = pd.to_numeric(part["keep"], errors="coerce") if "keep" in part else None
+        out[str(dataset_id)] = {
+            "rows": int(len(part)),
+            "positives": int((labels >= 0.5).sum()) if labels is not None else None,
+            "negatives": int((labels < 0.5).sum()) if labels is not None else None,
+            "groups": int(part["group_id"].astype(str).nunique()) if "group_id" in part else None,
+        }
+    return out
+
+
+def summarize_build_audit(df: pd.DataFrame, *, soft_extra: pd.DataFrame | None = None) -> dict:
+    """Summarize source-build audit and effective training rows for an artifact.
 
     Reduces the (potentially large) per-dataset ``build_audit`` / ``build_stats``
-    mapping carried on ``df.attrs`` (see :func:`concat_edge_tables`) to a compact,
-    JSON-serializable summary: the dataset ids, and per dataset the audit
-    ``schema_version`` / ``table_schema_version`` / column fingerprint plus
-    quarantine, omission, and row/label counts. Suitable for stamping into a model
-    artifact alongside ``RESOLVER_FEATURE_VERSION``. Returns an empty-but-shaped
-    summary when the frame carries no preserved audit.
+    mapping carried on ``df.attrs`` (see :func:`concat_edge_tables`) while keeping
+    its SOURCE extraction counts distinct from the hard/soft rows that actually
+    reach training after featurization and filters such as ``--clean-only``.
+    ``dataset_ids`` means effective training datasets; ``source_dataset_ids``
+    identifies the preserved extraction audits. This prevents provenance from
+    claiming that the model trained on rows removed later in the CLI pipeline.
     """
     audit_by_ds = df.attrs.get(COMBINED_AUDIT_ATTR, {}) or {}
     stats_by_ds = df.attrs.get(COMBINED_STATS_ATTR, {}) or {}
-    dataset_ids = sorted({*audit_by_ds.keys(), *stats_by_ds.keys()})
+    hard_by_ds = _effective_training_counts(df)
+    soft_by_ds = _effective_training_counts(soft_extra)
+    source_dataset_ids = sorted({*audit_by_ds.keys(), *stats_by_ds.keys()})
+    dataset_ids = sorted({*hard_by_ds.keys(), *soft_by_ds.keys()})
+    all_dataset_ids = sorted({*source_dataset_ids, *dataset_ids})
     per_dataset: dict[str, dict] = {}
-    for ds in dataset_ids:
+    for ds in all_dataset_ids:
         audit = audit_by_ds.get(ds, {}) or {}
         stats = stats_by_ds.get(ds, {}) or {}
+        hard = hard_by_ds.get(ds, {})
+        soft = soft_by_ds.get(ds, {})
         per_dataset[ds] = {
             "schema_version": audit.get("schema_version"),
             "table_schema_version": audit.get("table_schema_version"),
             "table_columns_sha256": audit.get("table_columns_sha256"),
             "n_quarantined_groups": len(audit.get("quarantined_groups", []) or []),
             "n_legacy_known_omissions": len(audit.get("legacy_known_omissions", []) or []),
-            "rows": stats.get("rows"),
-            "positives": stats.get("positives"),
-            "negatives": stats.get("negatives"),
+            "source_rows": stats.get("rows"),
+            "source_positives": stats.get("positives"),
+            "source_negatives": stats.get("negatives"),
+            "hard_rows": hard.get("rows", 0),
+            "hard_positives": hard.get("positives", 0),
+            "hard_negatives": hard.get("negatives", 0),
+            "hard_groups": hard.get("groups", 0),
+            "soft_rows": soft.get("rows", 0),
+            "soft_positives": soft.get("positives", 0),
+            "soft_negatives": soft.get("negatives", 0),
+            "soft_groups": soft.get("groups", 0),
         }
-    return {"dataset_ids": dataset_ids, "per_dataset": per_dataset}
+    return {
+        "schema_version": 1,
+        "dataset_ids": dataset_ids,
+        "source_dataset_ids": source_dataset_ids,
+        "per_dataset": per_dataset,
+    }
 
 
 def write_edge_table_parquet(df: pd.DataFrame, path: str | Path, index: bool = False) -> None:

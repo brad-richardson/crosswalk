@@ -821,6 +821,7 @@ def test_build_combined_table_preserves_multi_dataset_audit(tmp_path):
 
     summary = summarize_build_audit(df)
     assert summary["dataset_ids"] == ["ds_a", "ds_b"]
+    assert summary["source_dataset_ids"] == ["ds_a", "ds_b"]
     assert summary["per_dataset"]["ds_a"]["schema_version"] == 1
 
 
@@ -853,7 +854,8 @@ def test_save_load_model_round_trips_training_data_audit(tmp_path):
     stored = payload["training_data_audit"]
     assert stored["dataset_ids"] == ["ds_a", "ds_b"]
     assert stored["per_dataset"]["ds_b"]["schema_version"] == 1
-    assert stored["per_dataset"]["ds_a"]["rows"] == 2
+    assert stored["per_dataset"]["ds_a"]["source_rows"] == 2
+    assert stored["per_dataset"]["ds_a"]["hard_rows"] == 2
 
 
 def test_save_model_training_audit_defaults_empty(tmp_path):

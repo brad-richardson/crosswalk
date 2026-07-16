@@ -2360,10 +2360,17 @@ def register_commands(app: typer.Typer) -> None:
                 console.print(f"  {s}")
             raise typer.Exit(1)
 
-        # Capture the per-dataset build audit that concat preserved onto df.attrs
-        # BEFORE featurize/filters reshape the frame (which need not carry attrs).
-        # Stamped into the saved model artifact via save_model(training_audit=...).
-        training_data_audit = resolver_extract.summarize_build_audit(df)
+        # Preserve the per-dataset SOURCE build audit explicitly while
+        # featurization and training filters reshape the frame. The effective
+        # hard/soft counts are summarized only after those transformations.
+        source_audit_attrs = {
+            resolver_extract.COMBINED_AUDIT_ATTR: df.attrs.get(
+                resolver_extract.COMBINED_AUDIT_ATTR, {}
+            ),
+            resolver_extract.COMBINED_STATS_ATTR: df.attrs.get(
+                resolver_extract.COMBINED_STATS_ATTR, {}
+            ),
+        }
 
         featurize_base = resolver_features.featurize
         featurize_ext = resolver_round2.featurize_extended
@@ -2372,6 +2379,7 @@ def register_commands(app: typer.Typer) -> None:
             df = featurize_ext(df)
         else:
             df = featurize_base(df)
+        df.attrs.update(source_audit_attrs)
 
         existing_gids = set(zip(df["dataset_id"].astype(str), df["group_id"].astype(str)))
         soft_df_raw = None
@@ -2416,6 +2424,12 @@ def register_commands(app: typer.Typer) -> None:
             if df.empty:
                 console.print("[red]clean-only filter emptied dataset[/red]")
                 raise typer.Exit(1)
+            df.attrs.update(source_audit_attrs)
+
+        # Bind provenance to the ACTUAL training inputs, after clean-only and
+        # soft-extra preparation. Source extraction counts remain separately
+        # named inside the summary rather than masquerading as trained rows.
+        training_data_audit = resolver_extract.summarize_build_audit(df, soft_extra=soft_extra)
 
         if verbose:
             console.print("[blue]Per-dataset build stats[/blue]")

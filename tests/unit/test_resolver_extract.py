@@ -958,28 +958,61 @@ def test_concat_edge_tables_preserves_per_dataset_audit():
     assert stats_by_ds["ds_b"] == frame_b.attrs["build_stats"]
 
 
+def test_concat_edge_tables_rejects_duplicate_dataset_ids():
+    with pytest.raises(ValueError, match="duplicate dataset_id"):
+        concat_edge_tables([_one_dataset_frame("ds_a"), _one_dataset_frame("ds_a")])
+
+
 def test_summarize_build_audit_is_compact_and_per_dataset():
     combined = concat_edge_tables([_one_dataset_frame("ds_a"), _one_dataset_frame("ds_b")])
     summary = summarize_build_audit(combined)
     assert summary["dataset_ids"] == ["ds_a", "ds_b"]
+    assert summary["source_dataset_ids"] == ["ds_a", "ds_b"]
     per_a = summary["per_dataset"]["ds_a"]
     assert per_a["schema_version"] == 1
     assert (
         per_a["table_schema_version"]
         == combined.attrs[COMBINED_AUDIT_ATTR]["ds_a"]["table_schema_version"]
     )
-    assert per_a["rows"] == 2
-    assert per_a["positives"] == 1
-    assert per_a["negatives"] == 1
+    assert per_a["source_rows"] == 2
+    assert per_a["source_positives"] == 1
+    assert per_a["source_negatives"] == 1
+    assert per_a["hard_rows"] == 2
+    assert per_a["hard_positives"] == 1
+    assert per_a["hard_negatives"] == 1
     assert per_a["n_quarantined_groups"] == 0
     # The compact summary must not embed the full per-edge audit payloads.
     assert "quarantined_groups" not in per_a
 
 
-def test_summarize_build_audit_on_unpreserved_frame_is_empty():
+def test_summarize_build_audit_on_unpreserved_frame_keeps_effective_counts():
     plain = pd.concat([_one_dataset_frame("ds_a")], ignore_index=True)
     summary = summarize_build_audit(plain)
-    assert summary == {"dataset_ids": [], "per_dataset": {}}
+    assert summary["source_dataset_ids"] == []
+    assert summary["dataset_ids"] == ["ds_a"]
+    assert summary["per_dataset"]["ds_a"]["hard_rows"] == 2
+
+
+def test_summarize_build_audit_separates_filtered_hard_and_soft_rows():
+    combined = concat_edge_tables([_one_dataset_frame("ds_a"), _one_dataset_frame("ds_b")])
+    # Simulate clean-only removing every hard row from ds_b while retaining its
+    # source-build audit. A new ds_b soft group is actually passed to training.
+    hard = combined[combined["dataset_id"] == "ds_a"].copy()
+    soft = pd.DataFrame(
+        {
+            "dataset_id": ["ds_b", "ds_b"],
+            "group_id": ["soft-g", "soft-g"],
+            "keep": [0.8, 0.2],
+        }
+    )
+
+    summary = summarize_build_audit(hard, soft_extra=soft)
+    assert summary["dataset_ids"] == ["ds_a", "ds_b"]
+    assert summary["source_dataset_ids"] == ["ds_a", "ds_b"]
+    assert summary["per_dataset"]["ds_b"]["source_rows"] == 2
+    assert summary["per_dataset"]["ds_b"]["hard_rows"] == 0
+    assert summary["per_dataset"]["ds_b"]["soft_rows"] == 2
+    assert summary["per_dataset"]["ds_b"]["soft_groups"] == 1
 
 
 def test_parquet_round_trip_preserves_per_dataset_audit(tmp_path):
