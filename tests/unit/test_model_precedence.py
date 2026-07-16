@@ -90,7 +90,7 @@ def test_run_pipeline_threads_one_model_path_through_score_and_export(tmp_path, 
     projection = ProjectionResult(frame, frame, frame.crs, frame.crs, False)
     captured = {}
 
-    monkeypatch.setattr(runner, "load_and_filter_inputs", lambda *_: (frame, frame))
+    monkeypatch.setattr(runner, "load_and_filter_inputs", lambda *_, **__: (frame, frame))
 
     def _score(**kwargs):
         captured["score"] = kwargs["model_path"]
@@ -114,3 +114,40 @@ def test_run_pipeline_threads_one_model_path_through_score_and_export(tmp_path, 
 
     assert result is expected
     assert captured == {"score": local_model, "optimize": local_model}
+
+
+def test_run_pipeline_threads_dataset_identity_for_physical_backfill(tmp_path, monkeypatch):
+    """Dataset identity reaches input loading regardless of prune enablement.
+
+    The target physical backfill lives in ``load_and_filter_inputs`` and needs
+    the dataset id. ``run_pipeline`` must forward its ``prune_dataset_key``
+    (which carries genuine dataset identity) even when the resolver-prune
+    allowlist is not armed for that dataset — otherwise a known dataset silently
+    loses its bridge/tunnel/level sidecar evidence.
+    """
+    frame = gpd.GeoDataFrame(
+        {"id": ["x"]},
+        geometry=[LineString([(0, 0), (1, 0)])],
+        crs="EPSG:3857",
+    )
+    projection = ProjectionResult(frame, frame, frame.crs, frame.crs, False)
+    captured = {}
+
+    def _load(reference_path, target_path, dataset_id=None):
+        captured["dataset_id"] = dataset_id
+        return frame, frame
+
+    monkeypatch.setattr(runner, "load_and_filter_inputs", _load)
+    monkeypatch.setattr(runner, "score_candidates_from_geodataframes", lambda **k: ([], projection))
+    monkeypatch.setattr(runner, "optimize_and_export", lambda **k: object())
+    # Prune allowlist explicitly disabled: identity must still be threaded.
+    monkeypatch.setattr(settings, "resolver_prune_enabled", False)
+
+    runner.run_pipeline(
+        tmp_path / "reference.parquet",
+        tmp_path / "target.parquet",
+        tmp_path / "bridge.parquet",
+        prune_dataset_key="unpruned_dataset",
+    )
+
+    assert captured["dataset_id"] == "unpruned_dataset"

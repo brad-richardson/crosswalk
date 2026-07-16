@@ -5,6 +5,7 @@ from pathlib import Path
 import geopandas as gpd
 from shapely import LineString
 
+from crosswalk.datasets.schema import DatasetConfig, FetchConfig
 from crosswalk.fetch.overture import (
     _extract_range_from_rule,
     _get_language_priority,
@@ -554,3 +555,88 @@ def test_pipeline_load_repairs_existing_overture_snapshot(monkeypatch, tmp_path)
         "is_tunnel",
     ]
     assert loaded_reference.iloc[0]["level_lr"][1]["value"] == -1
+
+
+def _target_with_physical_source_tags() -> gpd.GeoDataFrame:
+    """Target snapshot whose physical LR columns are stale until backfilled."""
+    return gpd.GeoDataFrame(
+        {
+            "id": ["target"],
+            "source_tags": [{"LEVEL": -1, "ONTYPE": 3}],
+            "level_lr": [[{"between": [0.0, 1.0], "value": 0}]],
+            "road_flags_lr": [[{"between": [0.0, 1.0], "value": []}]],
+        },
+        geometry=[LineString([(0, 0), (1, 0)])],
+        crs="EPSG:4326",
+    )
+
+
+def test_load_backfills_target_physical_from_dataset_config(monkeypatch, tmp_path) -> None:
+    """Dataset identity (not prune enablement) drives the target physical backfill.
+
+    ``load_and_filter_inputs`` receives only ``dataset_id`` — no pruning is
+    involved here — yet the target's bridge/tunnel/level LR evidence must be
+    refreshed from ``source_tags`` via the dataset's FetchConfig.
+    """
+    reference_path = tmp_path / "reference.parquet"
+    target_path = tmp_path / "target.parquet"
+    reference_path.touch()
+    target_path.touch()
+    reference = _top_level_physical_gdf()
+    target = _target_with_physical_source_tags()
+
+    monkeypatch.setattr(
+        "crosswalk.pipeline.runner.gpd.read_parquet",
+        lambda path: reference.copy() if path == reference_path else target.copy(),
+    )
+    fetch = FetchConfig(
+        level_column="level",  # case-insensitive source_tags lookup
+        bridge_column="ontype",
+        bridge_values=[2],
+        tunnel_column="ontype",
+        tunnel_values=[3],
+    )
+    monkeypatch.setattr(
+        "crosswalk.datasets.schema.get_dataset_config",
+        lambda name: DatasetConfig(name=name, fetch=fetch),
+    )
+
+    _loaded_reference, loaded_target = load_and_filter_inputs(
+        reference_path, target_path, dataset_id="some_dataset"
+    )
+
+    assert loaded_target.iloc[0]["level_lr"][0]["value"] == -1
+    assert loaded_target.iloc[0]["road_flags_lr"][0]["value"] == ["is_tunnel"]
+
+
+def test_load_without_dataset_identity_warns_and_skips_target_backfill(
+    monkeypatch, tmp_path
+) -> None:
+    """Path-only invocations cannot know the source-tag columns: warn, don't crash."""
+    import io
+
+    from loguru import logger
+
+    reference_path = tmp_path / "reference.parquet"
+    target_path = tmp_path / "target.parquet"
+    reference_path.touch()
+    target_path.touch()
+    reference = _top_level_physical_gdf()
+    target = _target_with_physical_source_tags()
+
+    monkeypatch.setattr(
+        "crosswalk.pipeline.runner.gpd.read_parquet",
+        lambda path: reference.copy() if path == reference_path else target.copy(),
+    )
+
+    sink = io.StringIO()
+    handler_id = logger.add(sink, format="{message}", level="WARNING")
+    try:
+        _loaded_reference, loaded_target = load_and_filter_inputs(reference_path, target_path)
+    finally:
+        logger.remove(handler_id)
+
+    # Stale physical LR is left untouched (no config to backfill from).
+    assert loaded_target.iloc[0]["level_lr"][0]["value"] == 0
+    assert loaded_target.iloc[0]["road_flags_lr"][0]["value"] == []
+    assert "Target physical backfill skipped" in sink.getvalue()

@@ -1712,6 +1712,20 @@ def load_and_filter_inputs(
         dataset_config = get_dataset_config(dataset_id)
         if dataset_config is not None and dataset_config.fetch is not None:
             target = backfill_physical_lr_from_source_tags(target, dataset_config.fetch)
+        else:
+            logger.warning(
+                f"Target physical backfill skipped for dataset_id={dataset_id!r}: "
+                "no dataset config with a fetch section was found, so the bridge/"
+                "tunnel/level source-tag columns are unknown. Physical LR sidecar "
+                "evidence may differ from a fully configured run."
+            )
+    else:
+        logger.warning(
+            "Target physical backfill skipped: no dataset identity available "
+            "(path-only -r/-t invocation). The bridge/tunnel/level source-tag "
+            "columns come from the dataset config, so physical LR sidecar evidence "
+            "will differ from a dataset-name invocation."
+        )
 
     if reference.geometry.isna().any():
         n_null = reference.geometry.isna().sum()
@@ -2019,8 +2033,16 @@ def run_pipeline(
     logger.info("=" * 60)
 
     # Step 1: Load + filter inputs (shared with the factory reoptimize path).
-    load_kwargs = {"dataset_id": prune_dataset_key} if prune_dataset_key else {}
-    reference, target = load_and_filter_inputs(reference_path, target_path, **load_kwargs)
+    # Physical target backfill keys on dataset IDENTITY, not on whether the
+    # resolver-prune allowlist is armed for this dataset — a dataset that is
+    # known but not pruned must still get its bridge/tunnel/level sidecar
+    # evidence (same drift class #350 warns about). ``prune_dataset_key`` carries
+    # genuine dataset identity here (None only for path-only -r/-t runs), so
+    # thread it straight through; ``load_and_filter_inputs`` warns loudly when
+    # identity is unavailable and the target backfill has to be skipped.
+    reference, target = load_and_filter_inputs(
+        reference_path, target_path, dataset_id=prune_dataset_key
+    )
 
     if progress_callback:
         progress_callback(10)
