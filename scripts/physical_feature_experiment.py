@@ -85,12 +85,7 @@ def _target_domains(dataset_id: str) -> tuple[set[str], bool, Any]:
     if config is None or config.fetch is None:
         return set(), False, None
     fetch = config.fetch
-    domains: set[str] = set()
-    if fetch.bridge_column:
-        domains.add("is_bridge")
-    if fetch.tunnel_column:
-        domains.add("is_tunnel")
-    return domains, bool(fetch.level_column), fetch
+    return set(fetch.physical_flag_domains()), bool(fetch.level_column), fetch
 
 
 def _physical_lookups(

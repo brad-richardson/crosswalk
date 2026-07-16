@@ -5,6 +5,22 @@ Missing target domains stay NaN; in particular, an empty flag list from a
 tunnel-only source is not evidence that the source surveyed bridges. Vertical
 comparison deliberately uses ground/non-ground fractions and sign rather than
 exact numeric levels, whose scale and semantics vary across providers.
+
+EXPERIMENT-ONLY: these features are deliberately excluded from the production ML
+contract (``config.FEATURE_COLUMNS``); see the go/no-go criteria in
+``research/physical_feature_experiment_2026-07-15.md``. The disjointness is
+enforced by ``tests/unit/test_physical_features.py``.
+
+Graduation skew — the ablation numbers do NOT validate production wiring. The
+ablation harness (``scripts/physical_feature_experiment.py``) trains on
+``[*FEATURE_COLUMNS, *physical_features]`` through its own alignment-fraction
+sourcing and its own per-dataset ``target_flag_domains`` derivation. Production
+inference would instead route through ``features/compute.py``'s worker path and
+``crosswalk backfill``, where the linear-referenced physical-rule dicts these
+features consume are not present in ``worker_data`` today. Graduating any of
+these features therefore requires re-deriving the reported metrics through that
+shared compute path (per the backfill-parity rule), not reusing the standalone
+ablation JSON.
 """
 
 from __future__ import annotations
