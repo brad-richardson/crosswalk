@@ -26,6 +26,7 @@ from loguru import logger
 from crosswalk.config import FEATURE_VERSION
 from crosswalk.resolver.extract import (
     build_edge_table,
+    concat_edge_tables,
     discover_candidates_parquet,
     load_candidates_parquet,
     load_sidecar_groups,
@@ -168,7 +169,11 @@ def _build_combined_table(
 
     if not frames:
         return pd.DataFrame(), per_ds_stats, groups_by_ds
-    combined = pd.concat(frames, ignore_index=True)
+    # Explicitly preserve each dataset's build_audit / build_stats through the
+    # concat (pd.concat drops df.attrs). The combined frame carries the dataset-
+    # keyed mapping under COMBINED_AUDIT_ATTR / COMBINED_STATS_ATTR so it can be
+    # summarized into the model artifact (see extract.summarize_build_audit).
+    combined = concat_edge_tables(frames)
     return combined, per_ds_stats, groups_by_ds
 
 
@@ -757,6 +762,7 @@ def save_model(
     training_stats: dict[str, Any],
     cv_summary: dict[str, Any] | None = None,
     selector: str = "ef1",
+    training_audit: dict[str, Any] | None = None,
 ) -> None:
     import joblib
 
@@ -773,6 +779,11 @@ def save_model(
         "training_stats": training_stats,
         "cv_summary": cv_summary or {},
         "selector": selector,
+        # Compact training-data provenance: dataset ids and per-dataset audit
+        # schema versions / counts, carried through concat by
+        # extract.summarize_build_audit. Informational only — load_model surfaces
+        # it but does not gate on it (unlike the feature_version stamp above).
+        "training_data_audit": training_audit or {},
     }
     joblib.dump(payload, str(output_path))
 
@@ -834,4 +845,13 @@ def load_model(path: str | Path, allow_version_mismatch: bool = False) -> dict[s
             logger.warning(msg)
         else:
             raise ValueError(msg)
+    # Surface (never gate on) the training-data audit provenance if present.
+    training_audit = payload.get("training_data_audit") or {}
+    if training_audit.get("dataset_ids"):
+        logger.info(
+            "Resolver model {} trained on datasets {} (per-dataset build audit: {})",
+            path,
+            training_audit["dataset_ids"],
+            training_audit.get("per_dataset", {}),
+        )
     return payload

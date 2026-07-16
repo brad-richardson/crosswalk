@@ -2324,6 +2324,7 @@ def register_commands(app: typer.Typer) -> None:
         resolver_train = importlib.import_module("crosswalk.resolver.train")
         resolver_features = importlib.import_module("crosswalk.resolver.features")
         resolver_round2 = importlib.import_module("crosswalk.resolver.round2")
+        resolver_extract = importlib.import_module("crosswalk.resolver.extract")
 
         BASE_FEAT_COLS = resolver_features.FEATURE_COLUMNS
         EXT_FEAT_COLS = resolver_round2.EXTENDED_FEATURE_COLUMNS
@@ -2358,6 +2359,11 @@ def register_commands(app: typer.Typer) -> None:
             for s in per_ds_stats:
                 console.print(f"  {s}")
             raise typer.Exit(1)
+
+        # Capture the per-dataset build audit that concat preserved onto df.attrs
+        # BEFORE featurize/filters reshape the frame (which need not carry attrs).
+        # Stamped into the saved model artifact via save_model(training_audit=...).
+        training_data_audit = resolver_extract.summarize_build_audit(df)
 
         featurize_base = resolver_features.featurize
         featurize_ext = resolver_round2.featurize_extended
@@ -2483,6 +2489,7 @@ def register_commands(app: typer.Typer) -> None:
             training_stats=training_stats,
             cv_summary=cv_summary,
             selector=selector,
+            training_audit=training_data_audit,
         )
         console.print(f"[green]Saved resolver model to {output}[/green]")
 

@@ -14,9 +14,15 @@ import pandas as pd
 import pytest
 
 from crosswalk.resolver.extract import (
+    COMBINED_AUDIT_ATTR,
+    COMBINED_STATS_ATTR,
     KEY_COLUMNS,
     build_edge_table,
+    concat_edge_tables,
     load_sidecar_groups,
+    read_edge_table_parquet,
+    summarize_build_audit,
+    write_edge_table_parquet,
 )
 from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
 
@@ -914,3 +920,96 @@ def test_legacy_known_omissions_separate_occurrences_from_unique_keys():
             ],
         }
     ]
+
+
+def test_build_audit_stamps_dataset_id():
+    groups = [_group("g1", [_edge("A", "T", 0.99), _edge("B", "T", 0.4)])]
+    human = _labels([_label_row("hg1", [("A", "T")])])
+    df = build_edge_table(groups, human, "ds_alpha")
+    assert df.attrs["build_audit"]["dataset_id"] == "ds_alpha"
+
+
+def _one_dataset_frame(dataset_id, keep_ref="A"):
+    groups = [_group("g1", [_edge("A", "T", 0.99), _edge("B", "T", 0.4)])]
+    human = _labels([_label_row("hg1", [(keep_ref, "T")])])
+    return build_edge_table(groups, human, dataset_id)
+
+
+def test_concat_edge_tables_preserves_per_dataset_audit():
+    """pd.concat drops df.attrs; concat_edge_tables must reattach a dataset-keyed
+    build_audit / build_stats mapping so the per-dataset audit survives."""
+    frame_a = _one_dataset_frame("ds_a")
+    frame_b = _one_dataset_frame("ds_b")
+
+    # Plain concat loses the attrs entirely (regression guard).
+    plain = pd.concat([frame_a, frame_b], ignore_index=True)
+    assert COMBINED_AUDIT_ATTR not in plain.attrs
+
+    combined = concat_edge_tables([frame_a, frame_b])
+    assert len(combined) == len(frame_a) + len(frame_b)
+    audit_by_ds = combined.attrs[COMBINED_AUDIT_ATTR]
+    stats_by_ds = combined.attrs[COMBINED_STATS_ATTR]
+    assert set(audit_by_ds) == {"ds_a", "ds_b"}
+    assert set(stats_by_ds) == {"ds_a", "ds_b"}
+    # Each preserved audit still identifies its own dataset.
+    assert audit_by_ds["ds_a"]["dataset_id"] == "ds_a"
+    assert audit_by_ds["ds_b"]["dataset_id"] == "ds_b"
+    assert audit_by_ds["ds_a"] == frame_a.attrs["build_audit"]
+    assert stats_by_ds["ds_b"] == frame_b.attrs["build_stats"]
+
+
+def test_summarize_build_audit_is_compact_and_per_dataset():
+    combined = concat_edge_tables([_one_dataset_frame("ds_a"), _one_dataset_frame("ds_b")])
+    summary = summarize_build_audit(combined)
+    assert summary["dataset_ids"] == ["ds_a", "ds_b"]
+    per_a = summary["per_dataset"]["ds_a"]
+    assert per_a["schema_version"] == 1
+    assert (
+        per_a["table_schema_version"]
+        == combined.attrs[COMBINED_AUDIT_ATTR]["ds_a"]["table_schema_version"]
+    )
+    assert per_a["rows"] == 2
+    assert per_a["positives"] == 1
+    assert per_a["negatives"] == 1
+    assert per_a["n_quarantined_groups"] == 0
+    # The compact summary must not embed the full per-edge audit payloads.
+    assert "quarantined_groups" not in per_a
+
+
+def test_summarize_build_audit_on_unpreserved_frame_is_empty():
+    plain = pd.concat([_one_dataset_frame("ds_a")], ignore_index=True)
+    summary = summarize_build_audit(plain)
+    assert summary == {"dataset_ids": [], "per_dataset": {}}
+
+
+def test_parquet_round_trip_preserves_per_dataset_audit(tmp_path):
+    """extract -> concat -> parquet write/read -> audit intact per dataset."""
+    combined = concat_edge_tables([_one_dataset_frame("ds_a"), _one_dataset_frame("ds_b")])
+    featurized = featurize(combined)
+    # featurize need not carry attrs; the persistence path re-attaches them.
+    featurized.attrs[COMBINED_AUDIT_ATTR] = combined.attrs[COMBINED_AUDIT_ATTR]
+    featurized.attrs[COMBINED_STATS_ATTR] = combined.attrs[COMBINED_STATS_ATTR]
+
+    out = tmp_path / "edges.parquet"
+    write_edge_table_parquet(featurized, out)
+
+    restored = read_edge_table_parquet(out)
+    assert len(restored) == len(featurized)
+    restored_audit = restored.attrs[COMBINED_AUDIT_ATTR]
+    assert set(restored_audit) == {"ds_a", "ds_b"}
+    assert restored_audit["ds_a"]["dataset_id"] == "ds_a"
+    assert (
+        restored_audit["ds_a"]["table_columns_sha256"]
+        == (combined.attrs[COMBINED_AUDIT_ATTR]["ds_a"]["table_columns_sha256"])
+    )
+    restored_stats = restored.attrs[COMBINED_STATS_ATTR]
+    assert restored_stats["ds_b"]["positives"] == 1
+
+
+def test_read_plain_parquet_yields_empty_audit_attrs(tmp_path):
+    frame = _one_dataset_frame("ds_a")
+    out = tmp_path / "plain.parquet"
+    frame.to_parquet(out, index=False)
+    restored = read_edge_table_parquet(out)
+    assert restored.attrs[COMBINED_AUDIT_ATTR] == {}
+    assert restored.attrs[COMBINED_STATS_ATTR] == {}
