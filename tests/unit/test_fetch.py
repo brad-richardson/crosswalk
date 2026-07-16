@@ -11,12 +11,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from crosswalk.fetch.arcgis import _is_truthy
 from crosswalk.fetch.normalize import map_column, normalize_oneway_value, normalize_speed_to_kph
 from crosswalk.fetch.overture import (
     parse_names_lr,
     parse_oneway_lr,
     parse_speed_limit_lr,
+)
+from crosswalk.fetch.physical_tags import (
+    add_trivial_lr_columns,
+    build_level_rules,
+    build_road_flags,
+    is_truthy,
+    matches_flag_value,
 )
 
 
@@ -162,7 +168,7 @@ class TestNormalizeSpeedToKph:
 
 
 class TestIsTruthy:
-    """Tests for _is_truthy in arcgis.py."""
+    """Tests for is_truthy in physical_tags.py."""
 
     @pytest.mark.parametrize(
         "value,expected",
@@ -203,7 +209,123 @@ class TestIsTruthy:
     )
     def test_is_truthy(self, value, expected):
         """Test boolean value conversion."""
-        assert _is_truthy(value) == expected
+        assert is_truthy(value) == expected
+
+
+class TestBuildLevelRules:
+    """Tests for build_level_rules in physical_tags.py (cross-source contract)."""
+
+    def test_missing_value_is_unknown_not_ground(self):
+        """NaN/None means unknown level -> empty rules, NOT ground level (0)."""
+        assert build_level_rules(None) == []
+        assert build_level_rules(np.nan) == []
+        assert build_level_rules(pd.NA) == []
+
+    def test_ground_level_zero_is_preserved(self):
+        """A real 0 is known ground level and must survive as a rule."""
+        assert build_level_rules(0) == [{"value": 0}]
+
+    def test_integer_and_negative_levels(self):
+        assert build_level_rules(2) == [{"value": 2}]
+        assert build_level_rules(-1) == [{"value": -1}]
+        assert build_level_rules("3") == [{"value": 3}]
+
+    def test_non_integer_is_unknown(self):
+        assert build_level_rules("mezzanine") == []
+
+
+class TestMatchesFlagValue:
+    """Tests for matches_flag_value in physical_tags.py."""
+
+    def test_none_domain_falls_back_to_truthy(self):
+        assert matches_flag_value("yes", None) is True
+        assert matches_flag_value("no", None) is False
+
+    def test_coded_domain_string_match_case_insensitive(self):
+        assert matches_flag_value("Viaduct", ["viaduct"]) is True
+        assert matches_flag_value("bridge", ["viaduct"]) is False
+
+    def test_coded_domain_numeric_match(self):
+        assert matches_flag_value(1, [1, 2]) is True
+        assert matches_flag_value("2", [1, 2]) is True
+        assert matches_flag_value(3, [1, 2]) is False
+
+    def test_missing_value_never_matches_coded_domain(self):
+        assert matches_flag_value(None, ["yes"]) is False
+        assert matches_flag_value(np.nan, [1]) is False
+
+
+class TestBuildRoadFlags:
+    """Tests for build_road_flags in physical_tags.py."""
+
+    def test_no_columns_configured_is_unknown_none(self):
+        """No bridge/tunnel column -> None per row (unknown), not [] (no flags)."""
+        gdf = pd.DataFrame({"x": [1, 2]})
+        assert build_road_flags(gdf, None, None) == [None, None]
+
+    def test_bridge_and_tunnel_flags(self):
+        gdf = pd.DataFrame({"br": ["yes", "no"], "tn": ["no", "yes"]})
+        assert build_road_flags(gdf, "br", "tn") == [["is_bridge"], ["is_tunnel"]]
+
+    def test_coded_domain_values(self):
+        gdf = pd.DataFrame({"br": ["viaduct", "culvert"]})
+        result = build_road_flags(gdf, "br", None, bridge_values=["viaduct"])
+        assert result == [["is_bridge"], []]
+
+
+class TestAddTrivialLrColumns:
+    """Tests for the single shared add_trivial_lr_columns (target/arcgis parity)."""
+
+    def test_unknown_level_stays_none_not_ground(self):
+        """None level_rules -> level_lr value None, never fabricated as 0."""
+        import geopandas as gpd
+        from shapely.geometry import LineString
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "names": [{"primary": "Main St"}],
+                "level_rules": [[]],  # unknown level
+                "road_flags": [None],  # unknown flags
+                "geometry": [LineString([(0, 0), (1, 1)])],
+            },
+            crs="EPSG:4326",
+        )
+        result = add_trivial_lr_columns(gdf)
+        assert result["level_lr"].iloc[0] == [{"between": [0.0, 1.0], "value": None}]
+        # Unknown road_flags stay None (not empty-list "known no flags").
+        assert result["road_flags_lr"].iloc[0] == [{"between": [0.0, 1.0], "value": None}]
+
+    def test_known_ground_level_preserved(self):
+        import geopandas as gpd
+        from shapely.geometry import LineString
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "names": [{"primary": "Deck St"}],
+                "level_rules": [[{"value": 0}]],
+                "road_flags": [["is_bridge"]],
+                "geometry": [LineString([(0, 0), (1, 1)])],
+            },
+            crs="EPSG:4326",
+        )
+        result = add_trivial_lr_columns(gdf)
+        assert result["level_lr"].iloc[0] == [{"between": [0.0, 1.0], "value": 0}]
+        assert result["road_flags_lr"].iloc[0] == [{"between": [0.0, 1.0], "value": ["is_bridge"]}]
+
+    def test_target_and_arcgis_paths_share_one_implementation(self):
+        """Both fetch paths must resolve to the identical shared function.
+
+        A missed lockstep edit between two copies previously risked diverging
+        unknown-vs-ground semantics between download- and ArcGIS-sourced data.
+        Pinning them to one object guarantees they cannot drift.
+        """
+        from crosswalk.fetch import arcgis, target
+        from crosswalk.fetch.physical_tags import (
+            add_trivial_lr_columns as shared,
+        )
+
+        assert arcgis.add_trivial_lr_columns is shared
+        assert target.add_trivial_lr_columns is shared
 
 
 class TestParseOnewayLr:

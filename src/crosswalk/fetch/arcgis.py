@@ -16,7 +16,6 @@ from loguru import logger
 from ..config import DATA_VERSION, SCHEMA_VERSION, TRANSFORM_VERSION
 from ..utils.dataframe import find_id_column
 from ..utils.geometry import convert_polygons_to_centerlines
-from ..utils.linear_ref import create_trivial_lr
 from .metadata import FetchMetadata, save_metadata
 from .normalize import (
     default_class_for_type,
@@ -24,6 +23,11 @@ from .normalize import (
     normalize_oneway_value,
     normalize_speed_to_kph,
     resolve_column,
+)
+from .physical_tags import (
+    add_trivial_lr_columns,
+    build_level_rules,
+    build_road_flags,
 )
 
 
@@ -429,7 +433,7 @@ def _transform_to_overture_schema(
     )
 
     # Road flags (bridge/tunnel indicators)
-    data["road_flags"] = _build_road_flags(
+    data["road_flags"] = build_road_flags(
         gdf,
         bridge_column,
         tunnel_column,
@@ -439,7 +443,7 @@ def _transform_to_overture_schema(
 
     # Level rules
     if level_column and level_column in gdf.columns:
-        data["level_rules"] = gdf[level_column].apply(_build_level_rules).values
+        data["level_rules"] = gdf[level_column].apply(build_level_rules).values
     else:
         data["level_rules"] = [[] for _ in range(len(gdf))]
 
@@ -507,197 +511,3 @@ def _get_layer_id_field(url: str) -> str | None:
     except Exception as e:
         logger.warning(f"Could not determine ID field from layer metadata: {e}")
         return None
-
-
-def _build_level_rules(value: Any) -> list:
-    """Build level_rules array from z-level value.
-
-    Args:
-        value: Z-level value from source data
-
-    Returns:
-        List of level rule dicts, or empty list
-    """
-    if pd.isna(value):
-        return []
-    try:
-        level = int(value)
-        return [{"value": level}]
-    except (ValueError, TypeError):
-        return []
-
-
-def _build_road_flags(
-    gdf: gpd.GeoDataFrame,
-    bridge_column: str | None,
-    tunnel_column: str | None,
-    *,
-    bridge_values: list[str | int | float] | None = None,
-    tunnel_values: list[str | int | float] | None = None,
-) -> list[list[str] | None]:
-    """Build road_flags arrays from bridge/tunnel columns.
-
-    Args:
-        gdf: Input GeoDataFrame
-        bridge_column: Column name for bridge indicator
-        tunnel_column: Column name for tunnel indicator
-
-    Returns:
-        List of road flag lists (one per row)
-    """
-    configured = bool(
-        (bridge_column and bridge_column in gdf.columns)
-        or (tunnel_column and tunnel_column in gdf.columns)
-    )
-    if not configured:
-        return [None for _ in range(len(gdf))]
-
-    result = []
-
-    for idx in range(len(gdf)):
-        flags = []
-
-        # Check bridge
-        if bridge_column and bridge_column in gdf.columns:
-            val = gdf.iloc[idx][bridge_column]
-            if _matches_flag_value(val, bridge_values):
-                flags.append("is_bridge")
-
-        # Check tunnel
-        if tunnel_column and tunnel_column in gdf.columns:
-            val = gdf.iloc[idx][tunnel_column]
-            if _matches_flag_value(val, tunnel_values):
-                flags.append("is_tunnel")
-
-        result.append(flags)
-
-    return result
-
-
-def _matches_flag_value(value: Any, accepted: list[str | int | float] | None) -> bool:
-    """Match a source flag against an explicit coded domain or truthy fallback."""
-    if accepted is None:
-        return _is_truthy(value)
-    if pd.isna(value):
-        return False
-    value_text = str(value).strip().casefold()
-    for candidate in accepted:
-        if value_text == str(candidate).strip().casefold():
-            return True
-        try:
-            if float(value) == float(candidate):
-                return True
-        except (TypeError, ValueError):
-            pass
-    return False
-
-
-def _is_truthy(value: Any) -> bool:
-    """Check if a value indicates True/Yes/1.
-
-    Handles various representations from different data sources:
-    - Boolean True/False
-    - Numeric 1/0
-    - String "Y"/"N", "Yes"/"No", "True"/"False", "1"/"0"
-
-    Args:
-        value: Value to check
-
-    Returns:
-        True if value indicates a truthy state
-    """
-    if pd.isna(value):
-        return False
-
-    if isinstance(value, bool):
-        return value
-
-    if isinstance(value, (int, float)):
-        return value == 1 or value > 0
-
-    if isinstance(value, str):
-        return value.upper() in ("Y", "YES", "TRUE", "1", "T")
-
-    return bool(value)
-
-
-def add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Add trivial linear-referenced columns for target-side data.
-
-    Target-side data typically doesn't have linear-referenced attributes,
-    so we create trivial LR columns with a single range [0.0, 1.0, value]
-    for each attribute.
-
-    This enables the same feature computation code to work with both
-    Overture (which has LR attributes) and target data.
-
-    Args:
-        gdf: GeoDataFrame with flat attribute columns
-
-    Returns:
-        GeoDataFrame with added *_lr columns
-    """
-
-    # Get name from names struct or flat name column
-    def get_name(row):
-        names = row.get("names")
-        if isinstance(names, dict):
-            return names.get("primary")
-        return row.get("name")
-
-    # Names LR - extract primary from names struct
-    gdf["names_lr"] = gdf.apply(
-        lambda row: create_trivial_lr(get_name(row)).to_dict_list(),
-        axis=1,
-    )
-
-    # Subclass LR
-    if "subclass" in gdf.columns:
-        gdf["subclass_lr"] = gdf["subclass"].apply(lambda x: create_trivial_lr(x).to_dict_list())
-    else:
-        gdf["subclass_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
-
-    # Level LR. Empty rules mean the source did not establish a level; do not
-    # fabricate ground level (0), which is materially different from unknown.
-    def get_level(row):
-        level_rules = row.get("level_rules")
-        if isinstance(level_rules, list) and len(level_rules) > 0:
-            first = level_rules[0]
-            if isinstance(first, dict):
-                return first.get("value")
-        return None
-
-    gdf["level_lr"] = gdf.apply(
-        lambda row: create_trivial_lr(get_level(row)).to_dict_list(),
-        axis=1,
-    )
-
-    # Road flags LR - extract from road_flags if present
-    def get_flags(row):
-        road_flags = row.get("road_flags")
-        if isinstance(road_flags, list):
-            return sorted(road_flags)
-        return None
-
-    gdf["road_flags_lr"] = gdf.apply(
-        lambda row: create_trivial_lr(get_flags(row)).to_dict_list(),
-        axis=1,
-    )
-
-    # One-way LR - extract from oneway flat column
-    if "oneway" in gdf.columns:
-        gdf["oneway_lr"] = gdf["oneway"].apply(lambda x: create_trivial_lr(x).to_dict_list())
-    else:
-        gdf["oneway_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
-
-    # Speed limit LR - extract from speed_limit_kph flat column
-    if "speed_limit_kph" in gdf.columns:
-        gdf["speed_limit_kph_lr"] = gdf["speed_limit_kph"].apply(
-            lambda x: create_trivial_lr(x).to_dict_list()
-        )
-    else:
-        gdf["speed_limit_kph_lr"] = [
-            [{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))
-        ]
-
-    return gdf
