@@ -43,8 +43,11 @@ def parse_selected_edge_set(raw) -> frozenset[tuple[str, str]]:
     ``selected_edges`` is stored as a JSON array of ``{"ref_id", "target_id"}``
     objects (``"[]"`` == reject-all). This is the ONE lenient crosswalk parser,
     shared by ``stitch_eval`` / ``stitch_coverage`` / ``stitch_rekey`` /
-    ``resolver.extract`` / ``stitch_expressibility`` (each previously kept a
-    byte-identical private copy): input that does not DECODE — non-string
+    ``resolver.extract`` / ``stitch_expressibility`` (the first four previously
+    kept byte-identical private copies; expressibility's copy added an
+    ``isinstance(str)`` guard whose only behavioral divergence — rejecting raw
+    ``bytes`` — is unreachable for pandas CSV cells): input that does not
+    DECODE — non-string
     (NaN, ``None``), blank, or non-JSON — yields an EMPTY frozenset rather than
     raising, so a single unparseable label row never aborts a whole
     drift-mapping / coverage / expressibility pass.
