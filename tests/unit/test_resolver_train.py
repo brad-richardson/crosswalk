@@ -694,3 +694,88 @@ def test_save_model_payload_structure(tmp_path):
     assert "feature_columns" in payload
     assert "feature_version" in payload
     assert payload["selector"] == "ef1"
+
+
+def _train_tiny_model():
+    from crosswalk.resolver.extract import build_edge_table
+    from crosswalk.resolver.features import FEATURE_COLUMNS, featurize
+    from crosswalk.resolver.train import train_model
+
+    groups = [
+        _group(f"g{i}", [_edge(f"R{i}", f"T{i}", 0.95), _edge(f"S{i}", f"T{i}", 0.3)])
+        for i in range(4)
+    ]
+    labels = [_label_row(f"h{i}", [(f"R{i}", f"T{i}")]) for i in range(4)]
+    df = featurize(build_edge_table(groups, _labels(labels), "ds"))
+    return train_model(df, FEATURE_COLUMNS, seed=0), FEATURE_COLUMNS, df
+
+
+def test_save_model_stamps_resolver_feature_version_not_pairwise(tmp_path):
+    from crosswalk.config import FEATURE_VERSION
+    from crosswalk.resolver.features import RESOLVER_FEATURE_VERSION
+    from crosswalk.resolver.train import save_model
+
+    model, feat_cols, df = _train_tiny_model()
+    out = tmp_path / "resolver_model.joblib"
+    save_model(model, feat_cols, out, training_stats={"n": len(df)})
+
+    import joblib
+
+    payload = joblib.load(str(out))
+    # The stamp must be the RESOLVER contract, never the pairwise one (they must
+    # differ today, otherwise this assertion is vacuous).
+    assert RESOLVER_FEATURE_VERSION != FEATURE_VERSION
+    assert payload["feature_version"] == RESOLVER_FEATURE_VERSION
+
+
+def test_load_model_round_trips_current_stamp(tmp_path):
+    from crosswalk.resolver.features import RESOLVER_FEATURE_VERSION
+    from crosswalk.resolver.train import load_model, save_model
+
+    model, feat_cols, df = _train_tiny_model()
+    out = tmp_path / "resolver_model.joblib"
+    save_model(model, feat_cols, out, training_stats={"n": len(df)}, selector="ef1")
+
+    payload = load_model(out)
+    assert payload["feature_version"] == RESOLVER_FEATURE_VERSION
+    assert payload["selector"] == "ef1"
+    assert "model" in payload
+
+
+def test_load_model_rejects_mismatched_stamp(tmp_path):
+    """Old models stamped the pairwise FEATURE_VERSION under feature_version;
+    those (and any other stale stamp) must fail loudly, not load silently."""
+    import joblib
+
+    from crosswalk.resolver.train import load_model
+
+    out = tmp_path / "stale_resolver_model.joblib"
+    joblib.dump(
+        {"model": object(), "feature_columns": [], "feature_version": "2026-07-07.2"}, str(out)
+    )
+
+    with pytest.raises(ValueError, match="RESOLVER_FEATURE_VERSION"):
+        load_model(out)
+
+    # Escape hatch downgrades to a warning and still returns the payload.
+    payload = load_model(out, allow_version_mismatch=True)
+    assert payload["feature_version"] == "2026-07-07.2"
+
+
+def test_load_model_rejects_missing_stamp(tmp_path):
+    import joblib
+
+    from crosswalk.resolver.train import load_model
+
+    out = tmp_path / "unversioned_resolver_model.joblib"
+    joblib.dump({"model": object(), "feature_columns": []}, str(out))
+
+    with pytest.raises(ValueError, match="pre-versioning"):
+        load_model(out)
+
+
+def test_load_model_missing_file_raises(tmp_path):
+    from crosswalk.resolver.train import load_model
+
+    with pytest.raises(FileNotFoundError):
+        load_model(tmp_path / "nope.joblib")
