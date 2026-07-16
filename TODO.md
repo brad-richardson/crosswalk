@@ -145,6 +145,21 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ## Stitch Ground Truth
 
+### IN PROGRESS: Resume Targeted Physical/Frontage Stitch Wave
+
+The reviewed v7 production manifest is built from clean merged commit
+`70957a2` and is ready to run, but voting is intentionally paused until the
+Claude daily allowance has more headroom. No ballots were persisted. Before
+resuming, expose `META_API_KEY` to the noninteractive runner and add the existing
+`~/.opencode/bin/opencode` installation to `PATH`; stop the wave on the first
+Claude quota/rate-limit or timeout symptom.
+
+After the 65-pack counterbalanced schedule completes, analyze the five 2x2
+physical/coincidence repeats and agent feedback, then build a deduplicated
+v7-only 50-group manual-review pack. Full state, commands, manifest hash, and
+the post-vote analysis checklist are in
+[`research/physical_feature_experiment_2026-07-15.md`](research/physical_feature_experiment_2026-07-15.md#operational-handoff-targeted-v7-stitching-wave).
+
 ### DONE: Stitch Ground Truth Store and Review Flow
 
 **Priority:** HIGH

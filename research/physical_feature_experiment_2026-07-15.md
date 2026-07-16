@@ -223,3 +223,106 @@ leverage examples to inspect first; probabilities are mean out-of-fold baseline
 5. Do not add these columns to `FEATURE_COLUMNS`, bump `FEATURE_VERSION`, or
    reship the model until the informative slice improves without relying on the
    availability-count proxy.
+
+## Operational handoff: targeted v7 stitching wave
+
+**Status (2026-07-15):** packs complete and validated; voting intentionally
+paused before the first group completed. Resume on or after 2026-07-16 when the
+Claude allowance has more headroom. Claude was not confirmed exhausted; the
+pause is precautionary because it is close to the daily limit.
+
+The experiment-integrity changes went through adversarial review, fixes, and a
+fully green CI run in PR #433 before being squash-merged. The packs were then
+regenerated from clean `main` commit
+`70957a232a61450f0dfff32a7acfd1524fde272e`. Every generated batch records zero
+tracked changes and zero untracked files in its source provenance.
+
+The production manifest is:
+
+`data/agents/stitching/batches/physical_context_v7_20260715_manifest.json`
+
+Manifest SHA-256:
+`a6fd6372df1dea362eb45816ed6098ad03656cbfe904231c9ef4f79637d1ed93`.
+
+It contains:
+
+- 50 unique enriched groups from Sydney, Helsinki, London, Hong Kong, Berlin,
+  Amsterdam, Geneva, and Philadelphia;
+- five dataset-diverse groups repeated across the other three cells of a 2x2
+  physical-evidence / same-side-coincidence design;
+- 15 paired control packs, for 65 scheduled packs in 23 batch directories;
+- forced known regressions whose exact pairs survive into the displayed option
+  menus;
+- a counterbalanced/interleaved run schedule; and
+- the exact high-effort panel: Claude Opus 4.8, Codex GPT-5.6 Sol, and Muse
+  Spark 1.1.
+
+This is a v7-only wave. Do not substitute v6 ballots or packs. Earlier dry
+builds under `/tmp` were generated from dirty provenance and are diagnostics,
+not vote inputs.
+
+### Why the first launch stopped
+
+The first launch could not find `opencode` because the noninteractive shell did
+not inherit `~/.opencode/bin`. The installed executable is
+`/home/brad/.opencode/bin/opencode` (1.17.18).
+
+After restarting with that directory on `PATH`, Muse returned `invalid_api_key`
+because `META_API_KEY` was absent from the execution environment. During the
+manual stop, Claude also returned one empty output that the runner classified
+as likely quota-capped. Because the daily allowance was already close to its
+limit, the entire panel was stopped rather than retrying. This is not evidence
+that Claude's quota was fully exhausted.
+
+No `votes*.csv` or `consensus*.csv` file was persisted. The next run therefore
+starts cleanly at schedule row 1, Sydney group `66e22055`; there are no partial
+ballots to reconcile.
+
+### Resume checklist
+
+1. Confirm `META_API_KEY` is present in the same noninteractive environment
+   that will execute the runner. Do not copy a credential into this repository
+   or this note.
+2. Put the existing OpenCode binary on `PATH` and smoke-test Muse authentication
+   before starting the three-seat panel. Avoid spending Claude quota while a
+   different seat is known-broken.
+3. Revalidate the immutable manifest:
+
+   ```bash
+   UV_CACHE_DIR=/tmp/uv-cache uv run python \
+     scripts/run_physical_stitch_wave.py \
+     data/agents/stitching/batches/physical_context_v7_20260715_manifest.json \
+     --validate-only
+   ```
+
+4. Resume the counterbalanced schedule:
+
+   ```bash
+   PATH=/home/brad/.opencode/bin:$PATH \
+   UV_CACHE_DIR=/tmp/uv-cache uv run python \
+     scripts/run_physical_stitch_wave.py \
+     data/agents/stitching/batches/physical_context_v7_20260715_manifest.json
+   ```
+
+5. Treat the first Claude quota/rate-limit or timeout symptom as a wave-level
+   stop. Preserve completed partial CSVs and rerun the same command later; the
+   runner resumes completed groups. Use `--retry-timeouts` only when timeout
+   ballots were actually persisted and need selective replacement.
+
+### Analysis after voting
+
+Before human evaluation, analyze vote choice, confidence, reasoning, and
+`pack_feedback` per provider and per paired group. The primary contrasts are:
+
+- enriched vs no physical evidence;
+- enriched vs no coincidence context;
+- the full 2x2 interaction across the five repeated groups;
+- behavior on known bridge/tunnel/layer regression pairs;
+- NONE as genuine reject-all vs a missing exact option; and
+- whether physical/coincidence context helps with the dominant frontage-road
+  and vertically layered-road ambiguities without overvaluing continuity.
+
+Then generate a v7-only stitching-review pack containing all 50 unique groups
+and their current evidence snapshots. Factorial repeats should be compared in
+the agent analysis but deduplicated for Brad's manual truth review. Do not mix
+in v6 cases unless the same group independently appears in this v7 manifest.
