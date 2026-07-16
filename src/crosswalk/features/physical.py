@@ -80,9 +80,19 @@ def _level_profile(
     start_frac: float,
     end_frac: float,
 ) -> tuple[float, float]:
-    """Return (nonzero fraction, signed mean) over known aligned level rules."""
+    """Return (nonzero fraction, signed mean) over known aligned level rules.
+
+    Fractions are measured against the UNION-covered length, not the raw sum of
+    rule spans, so overlapping ranges of different level values (which
+    ``normalize_lr_rules`` cannot merge) do not inflate the denominator or push a
+    ratio past 1.0. Same-value overlaps are already merged upstream. The
+    missing-vs-ground doctrine is untouched: ``None``/NaN levels drop out as
+    unknown, explicit level 0 stays a real ground observation (sign 0).
+    """
     clipped = clip_lr_rules(rules, start_frac, end_frac)
-    weighted: list[tuple[float, float]] = []
+    pos_intervals: list[tuple[float, float]] = []
+    neg_intervals: list[tuple[float, float]] = []
+    all_intervals: list[tuple[float, float]] = []
     for rule in clipped:
         try:
             value = float(rule["value"])
@@ -90,14 +100,25 @@ def _level_profile(
             continue
         if math.isnan(value):
             continue
-        duration = float(rule["between"][1]) - float(rule["between"][0])
-        if duration > 0:
-            weighted.append((duration, float(np.sign(value))))
-    known = sum(duration for duration, _sign in weighted)
+        start, end = float(rule["between"][0]), float(rule["between"][1])
+        if end <= start:
+            continue
+        interval = (start, end)
+        all_intervals.append(interval)
+        sign = float(np.sign(value))
+        if sign > 0:
+            pos_intervals.append(interval)
+        elif sign < 0:
+            neg_intervals.append(interval)
+    known = interval_union_length(all_intervals)
     if known <= 0:
         return float("nan"), float("nan")
-    nonzero = sum(duration for duration, sign in weighted if sign != 0.0) / known
-    signed_mean = sum(duration * sign for duration, sign in weighted) / known
+    nonzero = interval_union_length(pos_intervals + neg_intervals) / known
+    # Signed mean via per-sign union coverage: an overlap covered by both a + and a
+    # - rule cancels in the numerator, and |pos - neg| <= known keeps it in [-1, 1].
+    signed_mean = (
+        interval_union_length(pos_intervals) - interval_union_length(neg_intervals)
+    ) / known
     return min(max(nonzero, 0.0), 1.0), min(max(signed_mean, -1.0), 1.0)
 
 

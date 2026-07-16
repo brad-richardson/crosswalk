@@ -172,7 +172,12 @@ def test_varied_confidence_does_not_trip_constant():
 # ---------------------------------------------------------------------------
 
 
-def test_none_and_abstain_excluded_from_position_stats():
+def test_none_excluded_from_position_but_abstain_split_out():
+    """NONE is a decisive verdict (own accounting + confidence), ABSTAIN a failure.
+
+    NONE occupies no letter slot so it stays out of POSITION statistics, but its
+    real confidence joins the confidence view; ABSTAIN's synthetic 0.0 stays out.
+    """
     rows = [{"provider": "v", "choice": "A", "confidence": 0.9} for _ in range(10)]
     rows += [{"provider": "v", "choice": "NONE", "confidence": 0.1} for _ in range(3)]
     rows += [
@@ -182,13 +187,17 @@ def test_none_and_abstain_excluded_from_position_stats():
     stat = _one(compute_voter_stats(_votes(rows)), "v")
 
     assert stat.n_ballots == 15
-    assert stat.n_valid == 10  # only the 10 A ballots
-    assert stat.n_abstain == 5
+    assert stat.n_valid == 10  # only the 10 A letter ballots
+    assert stat.n_none == 3  # NONE broken out from failures
+    assert stat.n_abstain == 2  # only the ABSTAIN/error rows
+    assert stat.n_ballots == stat.n_valid + stat.n_none + stat.n_abstain
     assert stat.position_counts == {0: 10}  # no position entry for NONE/ABSTAIN
-    assert stat.modal_position_share == pytest.approx(1.0)
-    # Confidence stats over VALID ballots only: the forced 0.0s must not drag the mean.
-    assert stat.conf_mean == pytest.approx(0.9)
-    assert stat.conf_std == pytest.approx(0.0)
+    assert stat.modal_position_share == pytest.approx(1.0)  # denominator is n_valid
+    # Confidence spans the 13 CAST ballots (letters + NONE); the forced ABSTAIN 0.0
+    # does not drag it, but the real NONE 0.1s do.
+    assert stat.n_scored == 13
+    assert stat.conf_mean == pytest.approx((10 * 0.9 + 3 * 0.1) / 13)
+    assert stat.conf_std > 0.0
 
 
 def test_errored_row_is_not_valid_even_with_letter_choice():
@@ -234,6 +243,88 @@ def test_dissent_and_calibration_from_consensus():
     assert stat.conf_on_agree == pytest.approx((0.9 + 0.8) / 2)
     assert stat.conf_on_dissent == pytest.approx(0.6)
     assert stat.calibration_gap == pytest.approx((0.85) - 0.6)
+
+
+def test_none_counts_as_a_decisive_dissenting_or_agreeing_ballot():
+    """NONE is a first-class verdict in the decided/dissent view.
+
+    - NONE against a letter consensus  -> dissent
+    - a letter against a NONE consensus -> dissent
+    - NONE agreeing with a NONE consensus -> agreement
+    """
+    votes = _votes(
+        [
+            {"provider": "v", "group_id": "g1", "choice": "NONE", "confidence": 0.7},  # vs A
+            {"provider": "v", "group_id": "g2", "choice": "A", "confidence": 0.6},  # vs NONE
+            {"provider": "v", "group_id": "g3", "choice": "NONE", "confidence": 0.9},  # vs NONE
+            {"provider": "v", "group_id": "g4", "choice": "A", "confidence": 0.8},  # vs A (agree)
+        ]
+    )
+    consensus = pd.DataFrame(
+        [
+            {"group_id": "g1", "choice": "A"},
+            {"group_id": "g2", "choice": "NONE"},
+            {"group_id": "g3", "choice": "NONE"},
+            {"group_id": "g4", "choice": "A"},
+        ]
+    )
+    stat = _one(compute_voter_stats(votes, consensus), "v")
+
+    assert stat.n_none == 2  # the two NONE ballots are cast verdicts
+    assert stat.n_decided == 4  # all four groups reached a verdict (letter or NONE)
+    assert stat.n_dissent == 2  # g1 (NONE vs A) and g2 (A vs NONE)
+    assert stat.dissent_rate == pytest.approx(0.5)
+    # Confidence/calibration span NONE too: agree = g3,g4 (0.9,0.8); dissent = g1,g2.
+    assert stat.conf_on_agree == pytest.approx((0.9 + 0.8) / 2)
+    assert stat.conf_on_dissent == pytest.approx((0.7 + 0.6) / 2)
+    assert stat.calibration_gap == pytest.approx(0.85 - 0.65)
+
+
+def test_none_heavy_voter_does_not_trip_position_anchor():
+    """A voter that reject-alls (NONE) most groups but spreads its few letters must
+    NOT trip POSITION_ANCHOR: NONE holds no letter slot, so it cannot make the voter
+    look slot-anchored."""
+    rows = [{"provider": "v", "choice": "NONE", "confidence": 0.3 + 0.01 * i} for i in range(12)]
+    rows += [{"provider": "v", "choice": "A", "confidence": 0.5}]
+    rows += [{"provider": "v", "choice": "B", "confidence": 0.6}]
+    stat = _one(compute_voter_stats(_votes(rows)), "v")
+
+    assert stat.n_none == 12
+    assert stat.n_valid == 2  # only the two letter ballots feed POSITION stats
+    assert stat.position_counts == {0: 1, 1: 1}
+    assert stat.modal_position_share == pytest.approx(0.5)
+    assert POSITION_ANCHOR not in stat.alarms
+
+
+def test_constant_confidence_catches_flat_reject_all_voter():
+    """A voter that reject-alls (NONE) at a flat confidence is a rubber stamp and must
+    trip CONSTANT_CONFIDENCE even with zero letter ballots — the n-floor is scored
+    (cast) ballots, not letters."""
+    rows = [{"provider": "v", "choice": "NONE", "confidence": 0.95} for _ in range(12)]
+    stat = _one(compute_voter_stats(_votes(rows)), "v")
+
+    assert stat.n_valid == 0
+    assert stat.n_none == 12
+    assert stat.n_scored == 12
+    assert stat.conf_std == pytest.approx(0.0)
+    assert CONSTANT_CONFIDENCE in stat.alarms
+    assert constant_confidence_tripped(stat)
+
+
+def test_abstain_still_excluded_from_confidence():
+    """ABSTAIN's synthetic 0.0 confidence never enters the confidence view."""
+    rows = [{"provider": "v", "choice": "A", "confidence": 0.9} for _ in range(6)]
+    rows += [
+        {"provider": "v", "choice": "ABSTAIN", "confidence": 0.0, "error": "timeout"}
+        for _ in range(4)
+    ]
+    stat = _one(compute_voter_stats(_votes(rows)), "v")
+
+    assert stat.n_abstain == 4
+    assert stat.n_none == 0
+    assert stat.n_scored == 6  # only the six real letter ballots
+    assert stat.conf_mean == pytest.approx(0.9)
+    assert stat.conf_std == pytest.approx(0.0)
 
 
 def test_stats_work_without_consensus():
