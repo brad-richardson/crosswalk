@@ -83,7 +83,7 @@ _ALIGNMENT_KEYS = ("gers_start_frac", "gers_end_frac", "local_start_frac", "loca
 # removal of the top few flagged edges, all deduped. An edge is a drop candidate
 # only when it carries a real droppability SIGNAL (never flagged blindly by
 # count); the cap then keeps the *most* droppable ones.
-MAX_FLAGGED_SINGLE_DROPS = 6  # max single-edge removals emitted per base set
+MAX_FLAGGED_SINGLE_DROPS = 4  # max single-edge removals emitted per base set
 MAX_COMBINED_DROP = 3  # max edges removed together in the one combined seed
 # An edge's confidence is "low" (a drop signal) if it is below this absolute
 # floor, OR this far below the base set's strongest edge (relative gap).
@@ -143,9 +143,11 @@ def generate_top_k_alternatives(
             target, so only ref-side contiguity is needed, and the N:1 path
             already enumerates the full ref power set).
         k: Number of top organic alternatives to return (before seeds)
-        include_seed_options: When True (default), append the full-candidate-set
-            and optimizer-selected-set seed options after the top-K. Set False
-            to recover the pure top-K-by-confidence behavior.
+        include_seed_options: When True (default), append the seed options after
+            the top-K: the full-candidate-set and optimizer-selected-set
+            whole-group seeds, plus the bounded "base set minus flagged edge(s)"
+            seeds (see ``_seed_alternatives`` / ``_edge_droppability``). Set
+            False to recover the pure top-K-by-confidence behavior.
 
     Returns:
         List of alternative dicts, each with:
