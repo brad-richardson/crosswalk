@@ -483,6 +483,14 @@ class Vote:
     # free-text ``error`` — see :class:`AbstainReason`.
     abstain_reason: AbstainReason = AbstainReason.UNSET
     pack_feedback: str = ""  # diagnostic self-report JSON (wave-local; usually "")
+    # Structured NONE-ballot analysis metadata (mirrors the immutable contract in
+    # :mod:`stitch_diagnostic`). ``none_reason`` is one of :data:`NONE_REASONS`
+    # iff choice == "NONE" (else ""); ``desired_edges`` is canonical JSON of the
+    # exact ref->target set the voter wanted, populated only when
+    # ``none_reason == "no_exact_option"``. ADDITIVE capture for analysis only:
+    # nothing in routing/consensus/export branches on either field.
+    none_reason: str = ""
+    desired_edges: str = ""
     evidence_id: str = ""
     evidence_pack_sha256: str = ""
     displayed_candidate_universe_sha256: str = ""
@@ -566,6 +574,67 @@ def _extract_json_object(text: str) -> dict | None:
         if obj is not None:
             return obj
     return _scan_json_object(text)
+
+
+# Structured reasons a voter may give for a NONE ballot. Single source of truth
+# for the enum shared with the isolated Codex diagnostic
+# (:mod:`stitch_diagnostic` imports this so the two contracts cannot diverge).
+NONE_REASONS = frozenset(
+    {
+        "all_edges_no_match",
+        "no_exact_option",
+        "insufficient_evidence",
+    }
+)
+
+
+def _extract_none_reason(raw_text: str, choice: str) -> str:
+    """Extract and normalize the structured ``none_reason`` enum from a ballot.
+
+    Additive analysis metadata mirroring the :mod:`stitch_diagnostic` contract.
+    Lenient by construction (never raises): a NONE ballot missing or carrying an
+    invalid reason records an empty string rather than failing the whole vote,
+    and a stray reason on a non-NONE choice is dropped. Nothing in
+    routing/consensus/export branches on the returned value.
+    """
+    if choice != "NONE":
+        return ""
+    obj = _extract_json_object(raw_text)
+    if not obj:
+        return ""
+    raw = obj.get("none_reason")
+    if isinstance(raw, str) and raw.strip() in NONE_REASONS:
+        return raw.strip()
+    return ""
+
+
+def _extract_desired_edges(raw_text: str, none_reason: str) -> str:
+    """Capture the voter's exact desired ref->target edge set as canonical JSON.
+
+    Only populated when ``none_reason == "no_exact_option"`` (the voter wanted a
+    set no displayed option expressed). Stored in the same canonical JSON shape as
+    the ``edge_set`` column, using the visible R#/T# labels as the voter expressed
+    them. Never raises; returns "" when absent or malformed. Analysis-only capture.
+    """
+    if none_reason != "no_exact_option":
+        return ""
+    obj = _extract_json_object(raw_text)
+    if not obj:
+        return ""
+    raw = obj.get("desired_edges")
+    if not isinstance(raw, list):
+        return ""
+    edges: list[list[str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        ref = str(item.get("ref_id", "")).strip()
+        target = str(item.get("target_id", "")).strip()
+        if ref and target:
+            edges.append([ref, target])
+    if not edges:
+        return ""
+    return json.dumps(sorted(edges))
 
 
 def parse_vote(raw_text: str, valid_letters: set[str]) -> tuple[str, float, str]:
@@ -680,6 +749,23 @@ _JSON_SCHEMA = json.dumps(
             # --pack-feedback flag augments the prompt). Declared here so a
             # schema-enforcing provider (claude) may emit it; omitted otherwise.
             "pack_feedback": {"type": "object", "additionalProperties": True},
+            # Structured NONE-ballot analysis metadata (always in the prompt
+            # contract; mirrors :mod:`stitch_diagnostic`). Required in the PROMPT
+            # only when choice == "NONE" — a conditional the JSON schema cannot
+            # express — so declared here as allowed optional fields. Additive
+            # capture; nothing branches on them.
+            "none_reason": {"type": ["string", "null"]},
+            "desired_edges": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "ref_id": {"type": "string"},
+                        "target_id": {"type": "string"},
+                    },
+                    "additionalProperties": True,
+                },
+            },
         },
         "required": ["choice", "confidence", "reasoning"],
         "additionalProperties": False,
@@ -1743,6 +1829,7 @@ def _attempt_provider(
         last_raw = raw
         try:
             choice, confidence, reasoning = parse_vote(raw, valid)
+            none_reason = _extract_none_reason(raw, choice)
             return Vote(
                 group_id=group_id,
                 provider=provider.name,
@@ -1755,6 +1842,8 @@ def _attempt_provider(
                 timestamp=datetime.now(UTC).isoformat(),
                 raw=raw[:2000],
                 pack_feedback=_extract_pack_feedback(raw) if collect_feedback else "",
+                none_reason=none_reason,
+                desired_edges=_extract_desired_edges(raw, none_reason),
                 invocation_route=last_route,
             )
         except ValueError as e:
@@ -2151,6 +2240,12 @@ VOTES_COLUMNS = [
     # >1 = filled during a seat-level retry). Appended last so historical
     # votes.csv readers that key by column NAME are unaffected.
     "attempt",
+    # Structured NONE-ballot analysis metadata (mirrors stitch_diagnostic).
+    # Appended LAST for the same backward-compat reason as ``attempt``: readers
+    # that key older votes.csv rows by column NAME are unaffected. Captured for
+    # analysis only — nothing in routing/consensus/export branches on them.
+    "none_reason",
+    "desired_edges",
 ]
 CONSENSUS_COLUMNS = [
     "group_id",
@@ -2200,6 +2295,8 @@ def _vote_row(v: Vote) -> dict:
         "chosen_option_id": v.chosen_option_id,
         "panel_invocation_sha256": v.panel_invocation_sha256,
         "attempt": v.attempt,
+        "none_reason": v.none_reason,
+        "desired_edges": v.desired_edges,
     }
 
 
@@ -2571,6 +2668,8 @@ def run_batch(
                             else AbstainReason.UNSET
                         ),
                         invocation_route=_text(row.get("invocation_route")),
+                        none_reason=_text(row.get("none_reason")),
+                        desired_edges=_text(row.get("desired_edges")),
                     )
                     for row in vote_group.to_dict("records")
                 ]
@@ -2671,6 +2770,8 @@ def run_batch(
                         ),
                         invocation_route=_text(row.get("invocation_route")),
                         attempt=_attempt_of(row),
+                        none_reason=_text(row.get("none_reason")),
+                        desired_edges=_text(row.get("desired_edges")),
                     )
                 )
                 kept_rows.append(row)

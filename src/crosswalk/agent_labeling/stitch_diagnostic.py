@@ -34,6 +34,7 @@ from .stitch_provenance import (
     validate_manifest_against_batch,
 )
 from .stitch_runner import (
+    NONE_REASONS,
     ProviderSpec,
     Vote,
     get_panel,
@@ -50,12 +51,6 @@ NO_EXPORT_MARKER = ".no-export"
 PLAN_FILENAME = "diagnostic_manifest.json"
 PLAN_DIGEST_FIELD = "diagnostic_manifest_sha256"
 RESULT_DIGEST_FIELD = "result_sha256"
-
-NONE_REASONS = {
-    "all_edges_no_match",
-    "no_exact_option",
-    "insufficient_evidence",
-}
 
 AUDIT_INSTRUCTION = """
 

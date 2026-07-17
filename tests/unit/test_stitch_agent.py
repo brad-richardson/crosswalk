@@ -397,6 +397,121 @@ def test_extract_json_skips_unparseable_brace_runs():
 
 
 # ---------------------------------------------------------------------------
+# Structured NONE-ballot metadata (none_reason + desired_edges)
+#
+# Additive analysis capture mirroring the stitch_diagnostic contract. Nothing in
+# routing/consensus/export branches on these fields.
+# ---------------------------------------------------------------------------
+
+
+def test_none_reasons_enum_is_shared_with_diagnostic():
+    # The production runner is the single source of truth; the isolated diagnostic
+    # imports the SAME object so the two contracts cannot drift apart.
+    from crosswalk.agent_labeling import stitch_diagnostic as diag
+
+    assert set(sr.NONE_REASONS) == {
+        "all_edges_no_match",
+        "no_exact_option",
+        "insufficient_evidence",
+    }
+    assert diag.NONE_REASONS is sr.NONE_REASONS
+
+
+def test_extract_none_reason_valid_on_none_choice():
+    raw = (
+        '{"choice": "NONE", "confidence": 0.3, "reasoning": "x", "none_reason": "no_exact_option"}'
+    )
+    assert sr._extract_none_reason(raw, "NONE") == "no_exact_option"
+
+
+def test_extract_none_reason_invalid_enum_normalized_to_empty():
+    # A NONE ballot with a bogus reason must not crash the ballot — it degrades to "".
+    raw = '{"choice": "NONE", "confidence": 0.3, "reasoning": "x", "none_reason": "banana"}'
+    assert sr._extract_none_reason(raw, "NONE") == ""
+
+
+def test_extract_none_reason_missing_on_none_is_empty():
+    raw = '{"choice": "NONE", "confidence": 0.3, "reasoning": "x"}'
+    assert sr._extract_none_reason(raw, "NONE") == ""
+
+
+def test_extract_none_reason_stray_reason_on_letter_choice_dropped():
+    # A reason attached to a real option letter is metadata noise; drop it.
+    raw = '{"choice": "A", "confidence": 0.9, "reasoning": "x", "none_reason": "no_exact_option"}'
+    assert sr._extract_none_reason(raw, "A") == ""
+
+
+def test_extract_desired_edges_roundtrips_canonical_json():
+    raw = (
+        '{"choice": "NONE", "confidence": 0.4, "reasoning": "x", '
+        '"none_reason": "no_exact_option", '
+        '"desired_edges": [{"ref_id": "R2", "target_id": "T1"}, '
+        '{"ref_id": "R1", "target_id": "T1"}]}'
+    )
+    out = sr._extract_desired_edges(raw, "no_exact_option")
+    # Canonical (sorted) JSON, same shape as the edge_set column.
+    assert json.loads(out) == [["R1", "T1"], ["R2", "T1"]]
+
+
+def test_extract_desired_edges_empty_for_other_reasons():
+    raw = (
+        '{"choice": "NONE", "confidence": 0.4, "reasoning": "x", '
+        '"none_reason": "all_edges_no_match", '
+        '"desired_edges": [{"ref_id": "R1", "target_id": "T1"}]}'
+    )
+    # desired_edges is only captured for the no_exact_option reason.
+    assert sr._extract_desired_edges(raw, "all_edges_no_match") == ""
+
+
+def test_extract_desired_edges_ignores_malformed_entries():
+    raw = (
+        '{"choice": "NONE", "confidence": 0.4, "reasoning": "x", '
+        '"none_reason": "no_exact_option", '
+        '"desired_edges": ["nope", {"ref_id": "R1"}, {"ref_id": "R1", "target_id": "T2"}]}'
+    )
+    out = sr._extract_desired_edges(raw, "no_exact_option")
+    assert json.loads(out) == [["R1", "T2"]]
+
+
+def test_new_metadata_columns_appended_last_in_votes_schema():
+    # Appended LAST so name-keyed readers of older votes.csv are unaffected.
+    assert sr.VOTES_COLUMNS[-2:] == ["none_reason", "desired_edges"]
+
+
+def test_vote_row_persists_none_reason_and_desired_edges():
+    vote = sr.Vote(
+        group_id="g",
+        provider="codex",
+        model="m",
+        choice="NONE",
+        confidence=0.3,
+        reasoning="",
+        none_reason="no_exact_option",
+        desired_edges='[["R1", "T1"]]',
+    )
+    row = sr._vote_row(vote)
+    assert row["none_reason"] == "no_exact_option"
+    assert row["desired_edges"] == '[["R1", "T1"]]'
+    # A default vote records empty metadata (absent).
+    plain = sr._vote_row(sr.Vote("g", "codex", "m", "A", 0.9, ""))
+    assert plain["none_reason"] == ""
+    assert plain["desired_edges"] == ""
+
+
+def test_stitch_prompt_embeds_none_reason_contract(tmp_path):
+    g = make_group()
+    ctx = build_stitch_options(g)
+    meta = build_metadata(g, ctx)
+    prompt = build_prompt(tmp_path, meta, ctx)
+    assert '"none_reason"' in prompt
+    assert '"desired_edges"' in prompt
+    for reason in ("all_edges_no_match", "no_exact_option", "insufficient_evidence"):
+        assert reason in prompt
+    assert "If choice is NONE" in prompt
+    assert "must differ from every displayed option" in prompt
+
+
+# ---------------------------------------------------------------------------
 # Consensus rules
 # ---------------------------------------------------------------------------
 
@@ -4326,6 +4441,49 @@ def test_run_batch_seat_fill_keeps_valid_ballots_and_reinvokes_only_missing(tmp_
     assert set(out_votes["panel_invocation_sha256"].astype(str)) == {
         str(surviving.iloc[0]["panel_invocation_sha256"])
     }
+
+
+def test_run_batch_seat_fill_roundtrips_none_reason_metadata(tmp_path, monkeypatch):
+    """A kept NONE seat's structured none_reason/desired_edges survive a resume."""
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return (
+            '{"choice": "NONE", "confidence": 0.4, "reasoning": "no exact set", '
+            '"none_reason": "no_exact_option", '
+            '"desired_edges": [{"ref_id": "R1", "target_id": "T1"}]}'
+        )
+
+    for name in ("claude", "codex", "muse"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    panel = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "muse")]
+    sr.run_batch(batch_dir, panel=panel)
+
+    votes = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
+    # The structured metadata was captured on the fresh panel run.
+    assert set(votes["none_reason"]) == {"no_exact_option"}
+    for value in votes["desired_edges"]:
+        assert json.loads(value) == [["R1", "T1"]]
+
+    # Drop one seat + the consensus row and resume; the kept seats must retain the
+    # metadata verbatim through the #446 seat-fill reconstruction/re-flush.
+    surviving = votes[votes["provider"] != "muse"].copy()
+    surviving.to_csv(batch_dir / "votes.partial.csv", index=False)
+    pd.read_csv(batch_dir / "consensus.partial.csv", dtype={"group_id": str}).iloc[0:0].to_csv(
+        batch_dir / "consensus.partial.csv", index=False
+    )
+    out_votes, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
+
+    for provider in ("claude", "codex"):
+        row = out_votes[out_votes["provider"] == provider].iloc[0]
+        assert row["none_reason"] == "no_exact_option"
+        assert json.loads(row["desired_edges"]) == [["R1", "T1"]]
+    # The refilled seat re-captured it on its own draw.
+    muse = out_votes[out_votes["provider"] == "muse"].iloc[0]
+    assert muse["none_reason"] == "no_exact_option"
+    assert json.loads(muse["desired_edges"]) == [["R1", "T1"]]
 
 
 def test_run_batch_seat_fill_reinvokes_only_the_stale_seat(tmp_path, monkeypatch):

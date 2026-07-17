@@ -1109,8 +1109,19 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("")
     lines.append("Look at overview.png first, then each option image. Then respond with ONLY a")
     lines.append("single JSON object (no prose, no markdown fence) of the form:")
-    lines.append(f'  {{"choice": "<{choices}>", "confidence": 0.0-1.0, "reasoning": "..."}}')
+    lines.append(
+        f'  {{"choice": "<{choices}>", "confidence": 0.0-1.0, "reasoning": "...", '
+        '"none_reason": "all_edges_no_match"|"no_exact_option"|"insufficient_evidence"|null, '
+        '"desired_edges": [{"ref_id": "R1", "target_id": "T2"}]}'
+    )
     lines.append('"choice" MUST be exactly one of the option letters above, or "NONE".')
+    lines.append(
+        'If choice is NONE, "none_reason" is required and must be one of "all_edges_no_match", '
+        '"no_exact_option", or "insufficient_evidence"; otherwise "none_reason" must be null. '
+        'If "none_reason" is "no_exact_option", "desired_edges" must be the non-empty exact set '
+        "of R#->T# edges you would accept (use the visible R#/T# labels) and it must differ from "
+        'every displayed option; otherwise omit "desired_edges" or use an empty list.'
+    )
     return "\n".join(lines)
 
 
