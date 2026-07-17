@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 import yaml
+from loguru import logger
 
 from crosswalk.agent_labeling.matching_rubric import MATCHING_RUBRIC_VERSION
 from crosswalk.agent_labeling.stitch_evidence import generate_group_evidence
@@ -1388,6 +1389,94 @@ def test_vote_provenance_strict_mode_links_ballots_consensus_and_menu(tmp_path):
         "consensus.csv",
         "evidence.csv",
     }
+
+
+def _stamp_stale_policy(batch: Path, group_id: str, sha: str = "deadbeef" * 8) -> str:
+    """Overwrite the batch consensus row's policy sha with a stale signature."""
+    path = batch / "consensus.csv"
+    rows = list(csv.DictReader(path.open()))
+    for row in rows:
+        if str(row.get("group_id")) == group_id:
+            row["consensus_policy_sha256"] = sha
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    return sha
+
+
+def _current_policy_signature() -> str:
+    return consensus_policy_signature(
+        max_edges=settings.stitch_export_backstop_max_edges,
+        min_voter_confidence=settings.stitch_min_voter_confidence,
+        runtime_contract_sha256=sha256_file(
+            Path(__file__).parents[2] / "src/crosswalk/agent_labeling/stitch_runner.py"
+        ),
+    )
+
+
+def test_vote_provenance_strict_mode_refuses_stale_consensus_policy(tmp_path):
+    """A stale consensus_policy_sha256 is a hard refusal by default."""
+    batch, _group = _make_linked_evidence_batch(tmp_path, "stale-policy", "g1")
+    _stamp_stale_policy(batch, "g1")
+
+    with pytest.raises(ValueError, match="consensus policy linkage is stale"):
+        write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+        )
+    # Fail-closed: nothing archived when the preflight raised.
+    assert not (tmp_path / "votes" / f"dataset={DATASET}" / "consensus.csv").exists()
+
+
+def test_vote_provenance_allow_stale_policy_mints_with_warning(tmp_path):
+    """--allow-stale-policy downgrades the stale-policy refusal to a warning."""
+    batch, _group = _make_linked_evidence_batch(tmp_path, "stale-policy-override", "g1")
+    stale = _stamp_stale_policy(batch, "g1")
+
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, level="WARNING", format="{message}")
+    try:
+        n_votes, n_consensus = write_vote_provenance(
+            [batch],
+            DATASET,
+            votes_dir=tmp_path / "votes",
+            require_evidence=True,
+            allow_stale_policy=True,
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert (n_votes, n_consensus) == (3, 1)
+    warning = "\n".join(messages)
+    # The warning must be auditable: name the group and both signatures.
+    assert "consensus policy linkage is stale" in warning
+    assert "stale-policy-override/g1" in warning
+    assert stale in warning
+    assert _current_policy_signature() in warning
+
+
+def test_vote_provenance_allow_stale_policy_records_stored_policy_sha(tmp_path):
+    """The mint records the batch's OWN stored policy sha, not the current one."""
+    batch, _group = _make_linked_evidence_batch(tmp_path, "stale-policy-recorded", "g1")
+    stale = _stamp_stale_policy(batch, "g1")
+    votes_dir = tmp_path / "votes"
+
+    write_vote_provenance(
+        [batch],
+        DATASET,
+        votes_dir=votes_dir,
+        require_evidence=True,
+        allow_stale_policy=True,
+    )
+
+    cons = list(csv.DictReader((votes_dir / f"dataset={DATASET}" / "consensus.csv").open()))
+    assert len(cons) == 1
+    # Recorded under the stored historical policy — never re-stamped to current.
+    assert cons[0]["consensus_policy_sha256"] == stale
+    assert cons[0]["consensus_policy_sha256"] != _current_policy_signature()
 
 
 def test_vote_provenance_strict_mode_passes_mixed_attempt_group(tmp_path):
