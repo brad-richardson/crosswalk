@@ -154,11 +154,15 @@ The wave resumed from the 7 pre-existing packs at `--group-workers 2` (quota
 headroom); no Codex/Claude quota halt occurred. `stitch_runner.py` was untouched
 throughout, so every ballot stayed resume-compatible.
 
-**Wave provenance is preserved in git** (2026-07-17): all 65 groups' ballots +
-consensus + evidence (282 vote rows, 94 consensus rows across 8 datasets) are
-archived to the tracked `labels/votes/dataset=*/` tree via `write_vote_provenance`.
-The 660 MB / 3.8k-PNG batch working dirs under `data/agents/stitching/batches/`
-stay git-ignored by design — `labels/votes/` is the durable form.
+**Wave provenance is preserved in git** (2026-07-17): the wave is **195 ballots
+= 65 group-runs × 3 seats over 50 unique groups** (0 errors, 0 abstains; every
+NONE is a decisive verdict), all archived to the tracked `labels/votes/dataset=*/`
+tree via `write_vote_provenance`. (Note: `write_vote_provenance` *accumulates*,
+so it reported a post-merge file total of 282 vote / 94 consensus rows for these
+8 datasets — that total folds in ~87 prior-wave rows; the v7 wave itself is 195
+ballots, confirmed independently by both analysts.) The 660 MB / 3.8k-PNG batch
+working dirs under `data/agents/stitching/batches/` stay git-ignored by design —
+`labels/votes/` is the durable form.
 
 **⚠️ OTHER PIECE — deferred label minting (do not lose this):** the wave's
 **6 auto-accepts** (unanimous/quorum) were **NOT** minted into
@@ -186,12 +190,29 @@ no future wave is lost to a forgotten manual export, while production labels
 still require the deliberate provenance decision. Export failures warn, never
 crash a completed wave.
 
-**Analysis in flight (2026-07-17):** two independent analysts (Claude Fable +
-Codex `gpt-5.6-sol`, both high/deep reasoning) are reviewing the ballots per the
-checklist below, writing to `research/v7_wave_analysis_{fable,codex}_2026-07-17.md`
-(shared goals doc: `research/v7_wave_analysis_context_2026-07-17.md`). After that:
-build a deduplicated v7-only 50-group manual-review pack. Full state, commands,
-manifest hash, and the post-vote analysis checklist are in
+**Analysis DONE (2026-07-17):** two independent analysts (Claude Fable + Codex
+`gpt-5.6-sol`) reviewed all 195 ballots — reports at
+`research/v7_wave_analysis_{fable,codex}_2026-07-17.md` (shared goals doc:
+`research/v7_wave_analysis_context_2026-07-17.md`). **Convergent verdict: do NOT
+bless v7 yet — the binding constraint is option-menu expressibility, not evidence
+or panel quality.** ~76–82% of the 74 NONE ballots are "no exact option offered"
+(often all 3 seats naming the same missing set, e.g. `1b90f03b` = "all edges
+except e1"); only 11 are genuine reject-alls (Berlin underpasses `422d5d7b`/
+`d4d2e782`, Geneva cycleway `e4746a04`, HK `4eed5e80`). The physical/coincidence
+enrichment works in the hypothesized direction (control reject rate
+enriched/no_coinc 53% → no_phys 33% → minimal 13%, all flips toward over-merge
+as context is removed; physical is the dominant factor) but is NOT yet validated
+against human truth. Prioritized next steps (both analysts agree): (1) exact-pair
+option generation + `none_reason` enum; (2) rubric fixes — anchor-vs-clip,
+duplicate-vs-split-carriageway/MI-2-vs-MI-4 precedence, unknown-physical default;
+(3) diff-highlighted option images (17 groups called them pixel-identical);
+(4) suspected option-generator bugs `750ae089`/`e085519d` (conf-0.99 edges absent
+from every option); (5) human-adjudicate the 5 controls (esp. `92c0997f` —
+possible over-split/false-edge, and `fb8f359f`), then a small confirmation wave
+measuring agreement with truth, not NONE rate. Panel composition is fine — no
+seat change warranted. THEN build a deduplicated v7-only 50-group manual-review
+pack. Full state, commands, manifest hash, and the post-vote analysis checklist
+are in
 [`research/physical_feature_experiment_2026-07-15.md`](research/physical_feature_experiment_2026-07-15.md#operational-handoff-targeted-v7-stitching-wave).
 
 To re-run a similar wave (needs `META_API_KEY` in the environment and
