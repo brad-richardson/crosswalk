@@ -346,6 +346,86 @@ def execute_schedule(
     return False
 
 
+def _auto_export_wave(manifest: dict) -> None:
+    """Archive vote provenance (always) and mint labels (blessed panels only).
+
+    Runs after a wave COMPLETES cleanly (never after a pause), so no finished
+    wave depends on a remembered manual export step — the failure mode that
+    otherwise loses a wave's ballots to the git-ignored ``data/`` tree.
+
+    Two tiers, split on a provenance line:
+
+    1. **Vote provenance -> ``labels/votes/`` is UNCONDITIONAL.** Copying every
+       ballot/consensus/evidence row into the tracked tree is the "never lose a
+       wave" guarantee and carries no provenance commitment.
+    2. **Label minting -> ``labels/stitching/`` is gated on a BLESSED panel.** A
+       candidate/unpromoted composition (e.g. an un-calibrated v7) has its
+       labels WITHHELD with an explicit notice and the exact mint command:
+       stamping production ``panel_*`` labels from an unblessed panel is a
+       deliberate provenance decision, not an automatic side effect. Blessed
+       panels mint through the same ``write_vote_provenance(require_evidence=
+       True)`` + ``plan_exports`` + ``write_exports`` path the CLI uses.
+
+    Export failures WARN but never raise: the wave already succeeded, and
+    obscuring that behind an export traceback would be its own way to lose work.
+    """
+    from crosswalk.agent_labeling.stitch_export import (
+        filter_exportable_batch_dirs,
+        nonstandard_panel_batches,
+        plan_exports,
+        write_exports,
+        write_vote_provenance,
+    )
+
+    by_dataset: dict[str, list[Path]] = defaultdict(list)
+    for row in manifest["run_schedule"]:
+        bd = Path(row["batch_dir"])
+        if bd not in by_dataset[row["dataset_id"]]:
+            by_dataset[row["dataset_id"]].append(bd)
+
+    # (1) Provenance archival — always, per dataset.
+    total_v = total_c = 0
+    for dataset, batch_dirs in sorted(by_dataset.items()):
+        try:
+            nv, nc = write_vote_provenance(batch_dirs, dataset)
+            total_v += nv
+            total_c += nc
+        except Exception as exc:  # noqa: BLE001 — never mask a completed wave
+            print(f"WARNING: vote-provenance archival failed for {dataset}: {exc}", flush=True)
+    print(
+        f"Auto-export: archived {total_v} vote rows, {total_c} consensus rows "
+        f"to labels/votes/ ({len(by_dataset)} datasets)",
+        flush=True,
+    )
+
+    # (2) Label minting — blessed panels only.
+    all_dirs = [bd for dirs in by_dataset.values() for bd in dirs]
+    nonstandard = nonstandard_panel_batches(filter_exportable_batch_dirs(all_dirs))
+    if nonstandard:
+        print(
+            "Auto-export: panel composition is nonstandard/unpromoted — WITHHOLDING "
+            "stitching-label minting (provenance is archived; nothing is lost). "
+            "After a provenance decision, mint the auto-accepts per dataset with:\n"
+            "  crosswalk agent stitch-export -d <dataset> -b <batch dir(s)> "
+            "--allow-nonstandard-panel --stamp-era <era>",
+            flush=True,
+        )
+        return
+    for dataset, batch_dirs in sorted(by_dataset.items()):
+        dirs = filter_exportable_batch_dirs(batch_dirs)
+        if not dirs:
+            continue
+        try:
+            # Mirror the CLI: the require_evidence gate refuses to mint a label
+            # whose evidence pack is missing.
+            write_vote_provenance(dirs, dataset, require_evidence=True)
+            report = plan_exports(dirs, dataset, Path("labels/stitching"))
+            n = write_exports(report, dataset, Path("labels/stitching"))
+            print(f"Auto-export: minted {n} stitching label(s) for {dataset}", flush=True)
+        except Exception as exc:  # noqa: BLE001 — a wave already succeeded
+            print(f"WARNING: label export failed for {dataset}: {exc}", flush=True)
+
+
 def _install_pause_handler(pause: threading.Event) -> None:
     """Make SIGINT/SIGTERM request a graceful pause instead of an abort.
 
@@ -445,6 +525,11 @@ def main() -> None:
     )
     if paused:
         sys.exit(130)
+
+    # The wave completed and consolidated. Persist it into the tracked tree now,
+    # so a finished wave never survives only in the git-ignored data/ working
+    # dirs waiting on a manual export nobody remembers to run.
+    _auto_export_wave(manifest)
 
 
 if __name__ == "__main__":

@@ -145,18 +145,56 @@ Some target datasets have Polygon geometries instead of LineStrings (files delet
 
 ## Stitch Ground Truth
 
-### IN PROGRESS: Resume Targeted Physical/Frontage Stitch Wave
+### DONE (2026-07-17): Targeted Physical/Frontage Stitch Wave — all 65 packs voted
 
-The reviewed v7 production manifest is built from clean merged commit
-`70957a2`. **State as of 2026-07-16 afternoon: 7/65 packs complete** (Sydney
-3, Helsinki enriched 2, Helsinki no_coincidence 1, Berlin no_physical 1) with
-full 3-seat panels flushed to the batch dirs' partial CSVs; the wave was
-paused for Claude quota headroom. `stitch_runner.py` is unchanged since those
-ballots were cast, so they remain resume-compatible — do not merge anything
-touching that file before the wave completes (its file hash is part of
-`panel_invocation_sha256`).
+The reviewed v7 production manifest (built from clean merged commit `70957a2`)
+**completed 2026-07-17: 65/65 packs voted and consolidated** with full 3-seat
+panels (`claude-opus-4-8`/high, `gpt-5.6-sol`/high, `meta/muse-spark-1.1`/high).
+The wave resumed from the 7 pre-existing packs at `--group-workers 2` (quota
+headroom); no Codex/Claude quota halt occurred. `stitch_runner.py` was untouched
+throughout, so every ballot stayed resume-compatible.
 
-Resume (needs `META_API_KEY` in the environment and
+**Wave provenance is preserved in git** (2026-07-17): all 65 groups' ballots +
+consensus + evidence (282 vote rows, 94 consensus rows across 8 datasets) are
+archived to the tracked `labels/votes/dataset=*/` tree via `write_vote_provenance`.
+The 660 MB / 3.8k-PNG batch working dirs under `data/agents/stitching/batches/`
+stay git-ignored by design — `labels/votes/` is the durable form.
+
+**⚠️ OTHER PIECE — deferred label minting (do not lose this):** the wave's
+**6 auto-accepts** (unanimous/quorum) were **NOT** minted into
+`labels/stitching/` as production `panel_*_v7` labels. The v7 composition is
+still a nonstandard/unpromoted panel, and minting production labels from it is a
+provenance decision that should wait until the wave analysis validates v7. Once
+validated, mint per dataset with:
+
+```bash
+crosswalk agent stitch-export -d <dataset> \
+  -b data/agents/stitching/batches/<dataset>_physical_context_v7_20260715[_variant] \
+  --allow-nonstandard-panel --stamp-era v7
+```
+
+(Only the 6 auto_accept groups export; the 52 human_review/NONE groups stay in
+review by design.)
+
+**New (2026-07-17): the wave driver auto-exports on completion.**
+`scripts/run_physical_stitch_wave.py` now calls `_auto_export_wave()` after a
+clean (non-paused) run: it **always** archives vote provenance to
+`labels/votes/`, and mints `labels/stitching/` labels **only for blessed
+panels**. A nonstandard/unpromoted panel (like this v7) has label minting
+withheld with an explicit notice + the exact `stitch-export` command above — so
+no future wave is lost to a forgotten manual export, while production labels
+still require the deliberate provenance decision. Export failures warn, never
+crash a completed wave.
+
+**Analysis in flight (2026-07-17):** two independent analysts (Claude Fable +
+Codex `gpt-5.6-sol`, both high/deep reasoning) are reviewing the ballots per the
+checklist below, writing to `research/v7_wave_analysis_{fable,codex}_2026-07-17.md`
+(shared goals doc: `research/v7_wave_analysis_context_2026-07-17.md`). After that:
+build a deduplicated v7-only 50-group manual-review pack. Full state, commands,
+manifest hash, and the post-vote analysis checklist are in
+[`research/physical_feature_experiment_2026-07-15.md`](research/physical_feature_experiment_2026-07-15.md#operational-handoff-targeted-v7-stitching-wave).
+
+To re-run a similar wave (needs `META_API_KEY` in the environment and
 `~/.opencode/bin` on `PATH`; smoke-test Muse before spending Claude quota):
 
 ```bash
@@ -164,35 +202,37 @@ set -a; . ./.env; set +a
 PATH=/home/brad/.opencode/bin:$PATH UV_CACHE_DIR=/tmp/uv-cache uv run python \
   scripts/run_physical_stitch_wave.py \
   data/agents/stitching/batches/physical_context_v7_20260715_manifest.json \
-  --group-workers 3
+  --group-workers 2
 ```
 
-`--group-workers 3` (PR #441) runs three packs concurrently via an
-order-preserving dispatcher (~3x wall-clock; validated live on packs 3-7).
-Provider concurrency is 3 per seat, so quota/rate-limit halts are more likely
-than sequential — the wave halts safely and resumes. To pause: send ONE
-SIGINT/SIGTERM to the runner (`pkill -INT -f run_physical_stitch_wave` is
-fine — a duplicate signal within 2s is debounced); it finishes in-flight
-packs, flushes, prints a pause message, and exits 130. A deliberate second
-signal after 2s force-aborts, but the process still waits for in-flight
-provider invocations (worker threads blocked in `subprocess.run`, up to
-`--timeout`, default 600s) before exiting — do NOT escalate to SIGKILL while
-it waits: that reparents the provider subprocesses and they keep spending
-quota on discarded ballots (observed 2026-07-16). If you do SIGKILL, clean up
-with `pkill -f 'opencode run|codex exec|claude -p|codex-linux'`.
+`--group-workers N` (PR #441) runs N packs concurrently via an order-preserving
+dispatcher (~Nx wall-clock). Provider concurrency is N per seat, so
+quota/rate-limit halts are more likely at higher N — the wave halts safely and
+resumes. To pause: send ONE SIGINT/SIGTERM to the runner (`pkill -INT -f
+run_physical_stitch_wave` is fine — a duplicate signal within 2s is debounced);
+it finishes in-flight packs, flushes, prints a pause message, and exits 130. A
+deliberate second signal after 2s force-aborts, but the process still waits for
+in-flight provider invocations (worker threads blocked in `subprocess.run`, up
+to `--timeout`, default 600s) before exiting — do NOT escalate to SIGKILL while
+it waits: that reparents the provider subprocesses and they keep spending quota
+on discarded ballots (observed 2026-07-16). If you do SIGKILL, clean up with
+`pkill -f 'opencode run|codex exec|claude -p|codex-linux'`.
 
-After the 65-pack counterbalanced schedule completes, analyze the five 2x2
-physical/coincidence repeats and agent feedback, then build a deduplicated
-v7-only 50-group manual-review pack. Full state, commands, manifest hash, and
-the post-vote analysis checklist are in
-[`research/physical_feature_experiment_2026-07-15.md`](research/physical_feature_experiment_2026-07-15.md#operational-handoff-targeted-v7-stitching-wave).
+Note (2026-07-16, #440): the manifest contract lives in
+`agent_labeling/wave_manifest.py`. The production manifest file is untouched;
+`--validate-only` warns that the legacy manifest predates the embedded integrity
+digest — that warning is expected. New manifests get an embedded
+`manifest_sha256` automatically.
 
-Note (2026-07-16, #440): the manifest contract now lives in
-`agent_labeling/wave_manifest.py`. The resume commands are unchanged and the
-production manifest file is untouched; `--validate-only` now also warns that
-the legacy manifest predates the embedded integrity digest — that warning is
-expected. Verify the file against the recorded external SHA-256 manually if
-wanted. New manifests get an embedded `manifest_sha256` automatically.
+**Sequencing guard (still active):** the separate Codex consistency diagnostic
+is runtime-bound: its sealed holdout must be analyzed with the current
+`stitch_diagnostic.py` and `stitch_runner.py` bytes after the fix hypothesis is
+frozen, but before #446 or the diagnostic-analyzer fix lands. See the tracked
+design in [`research/codex_stitch_diagnostic.md`](research/codex_stitch_diagnostic.md)
+and the local, non-exportable findings at
+`data/agents/stitching/diagnostics/codex_deep_v1/development_readout.md`. With
+the wave complete, PR #446 (era branch) is no longer gated on wave completion —
+it now only awaits the diagnostic holdout read (see resume checklist below).
 
 ### FOLLOW-UPS: from the 2026-07-16 external wave audit (separate agent)
 
@@ -201,45 +241,77 @@ The audit also confirmed the v7 archive clean: 26/26 human labels, 78
 effective ballots, no roster/edge-set/option/evidence-link/consensus
 mismatches.
 
-- **Resolved in PR #441**: `--group-workers` originally regrouped the
+**Status 2026-07-17: all 8 findings implemented.** #441-#445 are merged.
+#447 (isolated Codex consistency diagnostic) is also merged and its 260/260
+calls are complete. #446 remains open, unreviewed; with the v7 wave now
+complete it is gated only on the diagnostic holdout read described above.
+
+**Resume checklist, in order:**
+
+1. ~~Resume the v7 wave and consolidate it without changing the current
+   rubric/runtime.~~ **DONE 2026-07-17** — 65/65 voted; provenance archived to
+   `labels/votes/`; the 6 auto-accept label mints are deferred (see the "OTHER
+   PIECE" note in the wave section above).
+2. **IN FLIGHT 2026-07-17** — high-effort wave analysis over ballots, feedback,
+   and the five 2x2 controls (Fable + Codex `gpt-5.6-sol` analysts, writing to
+   `research/v7_wave_analysis_{fable,codex}_2026-07-17.md`).
+3. Freeze the narrow diagnostic fix hypothesis, create the required marker,
+   and analyze the sealed holdout using the current #447 runtime. Do this
+   before changing either `stitch_diagnostic.py` or `stitch_runner.py`.
+4. Adversarially review/update #446 against current `main`, get green CI, and
+   squash-merge. It starts provenance era `2026-07-16.1`.
+5. In a new era, fix diagnostic `NONE` expressibility accounting and the
+   truth-backed cycleway uncertainty gate; regenerate packs so #443's exact
+   pair overlays are present; then run the fresh Claude/Codex/Muse panel.
+6. Once v7 is validated by the analysis, mint the 6 deferred auto-accept
+   stitching labels (the "OTHER PIECE" command above).
+7. Clean up merged agent worktrees/branches under `.claude/worktrees/`.
+
+Finding-by-finding disposition:
+
+- **Merged in PR #441**: `--group-workers` originally regrouped the
   schedule by batch dir, collapsing the factorial counterbalancing rotation.
   Reworked to an order-preserving dispatcher (workers claim the
-  lowest-index row whose dir is free). Voter invocations are stateless
-  one-shot subprocesses, so ordering never changes an individual ballot —
-  the rotation matters for temporal-drift confounds on the 2x2 contrasts and
-  for balanced early-stop coverage, both preserved within a ~3-row window.
-- **Seat-level retries** (HIGH for label quality): retries rerun the entire
-  panel rather than only the failed seat, and 4/7 provider/group sequences
-  with repeated valid draws changed choices — effective-attempt selection
-  exists only in prose. Fold into the planned `stitch_runner` schedule API
-  work (`forget_groups`, cross-batch entry point): make retry granularity
-  per-seat and record which attempt is ballot-of-record in provenance.
-- **Monitoring counts NONE as abstention**: excludes 19/78 valid, decisive
-  v7 ballots from dissent/confidence statistics. NONE is a first-class
-  reject-all verdict, not an abstain. Fix the monitoring/stats path before
-  the post-wave analysis (it would skew the 2x2 read).
-- **Invocation provenance gaps**: `panel_invocation_sha256` does not bind
-  effort translation (Muse effort is pinned by `opencode.json`, not the CLI),
-  prompt-feedback augmentation, opencode agent/config content, or Muse
-  routing config. Bind these (or their hashes) into the invocation signature
-  at the next provenance-era boundary — do NOT touch `stitch_runner.py`
-  mid-wave.
-- **Wave-manifest semantic validation**: `WaveManifest.load_validated`
-  verifies digest/files/panel but not that schedule `dataset_id`/`variant`/
-  `group_id` agree with each batch dir's `batch.json`. Add cross-checks in
-  `wave_manifest.py`.
-- **Option images depict members, not exact pair edges**: 50/185 images
-  redundant within their group (10/26 groups) — an option differing only in
-  pair structure renders identically. Fold into the expressibility work
-  (minus-small-subset option generation / exact-pair adjudication mode).
-- **Resolver audit metadata dropped**: schema/audit fields added 2026-07-16
-  are lost through multi-dataset `pd.concat` and never reach parquet/model
-  artifacts (`resolver/extract.py`, `resolver/train.py`).
-- **Overlapping vertical-level ranges still double-count duration in
-  physical feature PROFILES** (the experimental `PHYSICAL_EXPERIMENT_FEATURES`
-  path in `features/physical.py`) — #436 fixed the evidence-summary path;
-  the profile path can bias v8 treatment comparisons. Reuse
-  `interval_union_length` there.
+  lowest-index row whose dir is free); rotation preserved within a ~3-row
+  window.
+- **Merged in PR #442**: monitoring counted NONE as abstention (excluded
+  19/78 valid, decisive v7 ballots from dissent/confidence stats) — NONE is
+  now a first-class reject-all verdict, `n_ballots == n_valid + n_none +
+  n_abstain`. Same PR: overlapping vertical-level ranges double-counted
+  duration in the experimental physical PROFILES path — now unioned via
+  `interval_union_length` (evidence-summary path was already fixed in #436).
+  Both were analysis-blocking for the post-wave 2x2 read; done before resume.
+- **Merged in PR #443** (`feat/option-image-pair-rendering`): option images now
+  draw green tie lines per exact pair edge (endpoints at aligned-span
+  midpoints), so options differing only in pair structure render
+  differently; prompt documents the semantics; legacy edge-less options fall
+  back to member-only rendering. Wave packs are immutable, so the running
+  wave is unaffected either way.
+- **Merged in PR #444** (`fix/wave-manifest-semantic-checks`):
+  `WaveManifest.load_validated` now cross-checks each schedule row's
+  `dataset_id`/`variant`/group roster against the batch dir's `batch.json`
+  (disagreement fatal; missing batch-side fields warn once per dir; legacy
+  manifests still load).
+- **Merged in PR #445** (`fix/resolver-audit-metadata-concat`): per-dataset
+  `build_audit`/`build_stats` now survive multi-dataset `pd.concat`
+  (dataset-keyed reattachment), persist to parquet via pyarrow schema
+  metadata, and a compact `training_data_audit` summary lands in the model
+  artifact. No `RESOLVER_FEATURE_VERSION` bump (metadata only).
+- **Merged in PR #447** (`agent/codex-stitch-diagnostic`): isolated,
+  non-exportable Codex-only repeated draws over all 65 immutable packs (three
+  canonical draws plus one audit each). All 260 calls completed without error.
+  Development: 27/44 unanimous, 15/44 strict majority, 2/44 split; only three
+  human labels were available, with one unanimous truth-backed miss. The audit
+  hypothesized `no_exact_option` on 14/44 packs. These are diagnostic findings,
+  never panel consensus. The 21-pack / 15-group holdout remains sealed.
+- **Open PR #446, DO-NOT-MERGE gated** (`era/seat-retries-provenance-binding`,
+  next provenance era): seat-level retries (failed seats re-run individually,
+  ballot-of-record = first valid draw, `attempt` counter in provenance;
+  panel-era changes still nuke the whole group via signature mismatch) +
+  invocation signature now binds `opencode.json` content hash,
+  `PACK_FEEDBACK_INSTRUCTION` hash, per-provider effort→CLI translation, and
+  injected `OPENCODE_CONFIG_CONTENT` hash. Export fail-closed gates needed no
+  change for mixed-attempt groups (regression test added).
 
 ### NEXT: Panel and agent-instruction improvements (post-wave sequencing)
 
@@ -258,7 +330,11 @@ Sequencing, in order:
    (frontage/service-road identity and vertically-layered roads are the
    dominant ambiguity themes MI-1..6 doesn't address explicitly). Rubric v2 =
    new provenance era.
-3. Buildable now (rubric-independent, from
+3. Freeze the Codex diagnostic fix hypothesis and analyze its sealed holdout
+   under the current #447 runtime before #446 changes `stitch_runner.py`.
+4. Review/merge #446, then implement the analyzer and truth-backed uncertainty
+   fixes and regenerate future packs before the fresh heterogeneous panel.
+5. Buildable afterward (rubric-independent, from
    `research/v7_reasoning_analysis_2026-07-15.md` follow-ups): structured
    `none_reason` enum (`all_edges_no_match` / `no_exact_option` /
    `insufficient_evidence`) in the vote schema; "dense assignment minus small
