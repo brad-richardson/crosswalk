@@ -20,6 +20,7 @@ from crosswalk.agent_labeling.matching_rubric import MATCHING_RUBRIC_VERSION
 from crosswalk.agent_labeling.stitch_evidence import generate_group_evidence
 from crosswalk.agent_labeling.stitch_export import (
     PANEL_LABELER,
+    REASON_ABLATION_VARIANT,
     REASON_CLASS_MISMATCH,
     REASON_CONTAINS_SLIVER,
     REASON_EMPTY_SELECTION,
@@ -773,6 +774,83 @@ def test_class_gate_runs_without_metadata_yaml(tmp_path, labels_dir):
     g = _by_gid(_plan([b], labels_dir))["xmode"]
     assert not g.exported
     assert g.reason == REASON_CLASS_MISMATCH
+
+
+def _set_experiment_variant(batch_dir: Path, variant: str) -> None:
+    """Inject an ``experiment.variant`` into a batch's batch.json.
+
+    Mirrors the shape written by ``scripts/build_physical_stitch_wave.py`` — the
+    2x2 physical/coincidence ablation wave stamps every batch with an
+    ``experiment`` block whose ``variant`` is one of enriched / no_physical /
+    no_coincidence / minimal.
+    """
+    path = Path(batch_dir) / "batch.json"
+    payload = json.loads(path.read_text())
+    payload["experiment"] = {
+        "wave": "physical_context_test",
+        "variant": variant,
+        "physical_metadata_visible": variant in ("enriched", "no_coincidence"),
+        "same_side_coincidence_visible": variant in ("enriched", "no_physical"),
+    }
+    path.write_text(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["minimal", "no_physical", "no_coincidence", "future_unknown_ablation"],
+)
+def test_ablation_variant_batch_mints_nothing(tmp_path, labels_dir, variant):
+    """A context-stripped ablation-variant batch never mints, even on auto_accept.
+
+    Prevents the v8 ``1b90f03b/minimal`` misfire: an auto_accept produced by a
+    context-blinded panel cell must be skipped as ``ablation_variant`` rather
+    than promoted to a durable panel label. "Anything present and != enriched"
+    is treated as ablation, so an unknown future variant is gated too.
+    """
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [{"group_id": "g_auto", "routing": "auto_accept", "edges": [("r1", "t1")]}],
+    )
+    _set_experiment_variant(b, variant)
+    report = _plan([b], labels_dir)
+    g = _by_gid(report)["g_auto"]
+    assert not g.exported
+    assert g.reason == REASON_ABLATION_VARIANT
+    assert report.skipped_by_reason().get(REASON_ABLATION_VARIANT) == 1
+    # And it mints nothing through the write path.
+    assert write_exports(report, DATASET, Path(labels_dir)) == 0
+    assert StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET).empty
+
+
+def test_enriched_variant_batch_mints_normally(tmp_path, labels_dir):
+    """An enriched (full-context) variant batch mints exactly like production."""
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [{"group_id": "g_auto", "routing": "auto_accept", "edges": [("r1", "t1")]}],
+    )
+    _set_experiment_variant(b, "enriched")
+    report = _plan([b], labels_dir)
+    g = _by_gid(report)["g_auto"]
+    assert g.exported
+    assert g.reason == REASON_EXPORTED
+    assert write_exports(report, DATASET, Path(labels_dir)) == 1
+
+
+def test_no_variant_field_mints_normally(tmp_path, labels_dir):
+    """An ordinary production batch (no experiment block) mints — no regression."""
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [{"group_id": "g_auto", "routing": "auto_accept", "edges": [("r1", "t1")]}],
+    )
+    # make_batch writes batch.json without an experiment block, i.e. no variant.
+    report = _plan([b], labels_dir)
+    g = _by_gid(report)["g_auto"]
+    assert g.exported
+    assert g.reason == REASON_EXPORTED
+    assert write_exports(report, DATASET, Path(labels_dir)) == 1
 
 
 def test_idempotent_write(tmp_path, labels_dir):
