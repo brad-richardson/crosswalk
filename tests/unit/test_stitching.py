@@ -594,6 +594,116 @@ class TestSeedOptions:
         alts = generate_top_k_alternatives(edges, ref_geoms=ref_geoms, k=10)
         assert len(alts) == 7  # 2^3 - 1 non-empty subsets, unchanged by geoms
 
+    def test_extra_seed_edge_set_injected_as_option(self):
+        """An externally-supplied seed set (e.g. consensus-desired edges) that no
+        option expresses is added as an is_seed option."""
+        # t1 spans 4 refs -> the all-4-on-t1 set is organically inexpressible and
+        # (uniform high conf, all selected) not a minus-flagged seed either.
+        edges = [_edge(f"r{i}", "t1", 0.99) for i in range(4)]
+        edges.append(_edge("r0", "t2", 0.99))
+        for e in edges:
+            e["selected"] = True
+        want = frozenset({("r0", "t1"), ("r1", "t1"), ("r2", "t1"), ("r3", "t1")})
+        without = self._full(generate_top_k_alternatives(edges, k=5))
+        assert want not in without
+        seeded = generate_top_k_alternatives(edges, k=5, seed_edge_sets=[want])
+        keys = self._full(seeded)
+        assert want in keys
+        injected = [
+            a
+            for a in seeded
+            if frozenset((e["ref_id"], e["target_id"]) for e in a["edges"]) == want
+        ]
+        assert injected and injected[0].get("is_seed") is True
+
+    def test_extra_seed_equal_to_offered_not_duplicated(self):
+        """A seed set already on the menu is not re-added (dedup + caps)."""
+        edges = [_edge("r1", "t1", 0.9), _edge("r2", "t1", 0.8), _edge("r3", "t1", 0.3)]
+        full = frozenset({("r1", "t1"), ("r2", "t1"), ("r3", "t1")})
+        keys = self._full(generate_top_k_alternatives(edges, k=10, seed_edge_sets=[full]))
+        assert keys.count(full) == 1
+        assert len(keys) == len(set(keys))
+
+    def test_extra_seed_non_subset_skipped(self):
+        """A seed set referencing an edge outside the group is skipped (invariant)."""
+        edges = [_edge("r1", "t1", 0.9), _edge("r2", "t2", 0.8)]
+        bogus = frozenset({("r1", "t1"), ("r9", "t9")})  # (r9,t9) not a group edge
+        keys = self._full(generate_top_k_alternatives(edges, k=5, seed_edge_sets=[bogus]))
+        assert bogus not in keys
+        # Every emitted option stays within the group's real edges (the bogus
+        # set was rejected whole, not silently clipped to its valid subset).
+        for k in keys:
+            assert k <= {("r1", "t1"), ("r2", "t2")}
+
+    def test_extra_empty_seed_skipped(self):
+        """An empty seed set is ignored (never an option)."""
+        edges = [_edge("r1", "t1", 0.9), _edge("r2", "t2", 0.8)]
+        keys = self._full(generate_top_k_alternatives(edges, k=5, seed_edge_sets=[frozenset()]))
+        assert frozenset() not in keys
+
+    def test_injected_seeds_bounded_by_max_injected(self):
+        """No more than MAX_INJECTED_SEEDS consensus seeds are injected, even when
+        many distinct valid sets are supplied (menu cannot balloon)."""
+        from crosswalk.matching.alternatives import MAX_INJECTED_SEEDS
+
+        # A wide group: t1 fed by 6 refs (no geom) so many 2-edge subsets are
+        # organically inexpressible and thus genuinely new.
+        edges = [_edge(f"r{i}", "t1", 0.99) for i in range(6)]
+        edges.append(_edge("r0", "t2", 0.99))
+        for e in edges:
+            e["selected"] = True
+        organic = generate_top_k_alternatives(edges, k=3, include_seed_options=True)
+        n_before = len(organic)
+        # Supply more distinct multi-edge-on-t1 sets than the cap allows.
+        supplied = [frozenset({("r0", "t1"), (f"r{i}", "t1")}) for i in range(1, 6)]
+        seeded = generate_top_k_alternatives(
+            edges, k=3, include_seed_options=True, seed_edge_sets=supplied
+        )
+        n_injected = len(seeded) - n_before
+        assert n_injected <= MAX_INJECTED_SEEDS
+
+    def test_injection_respects_max_total_options_on_full_menu(self):
+        """When the menu is already at/over max_total_options, injection adds
+        nothing — a near-full hk/de menu cannot be pushed past the max-menu cap."""
+        edges = [_edge(f"r{i}", "t1", 0.99) for i in range(6)]
+        edges.append(_edge("r0", "t2", 0.99))
+        for e in edges:
+            e["selected"] = True
+        base = generate_top_k_alternatives(edges, k=3, include_seed_options=True)
+        cap = len(base)  # menu already exactly at the cap
+        supplied = [frozenset({("r0", "t1"), ("r1", "t1")})]
+        want = frozenset({("r0", "t1"), ("r1", "t1")})
+        assert want not in self._full(base)  # genuinely new
+        seeded = generate_top_k_alternatives(
+            edges,
+            k=3,
+            include_seed_options=True,
+            seed_edge_sets=supplied,
+            max_total_options=cap,
+        )
+        assert len(seeded) <= cap
+        assert want not in self._full(seeded)  # not injected past the cap
+
+    def test_injection_prefers_smallest_set_under_cap(self):
+        """Under max_total_options=+1 slot, the SMALLEST supplied set wins."""
+        edges = [_edge(f"r{i}", "t1", 0.99) for i in range(6)]
+        edges.append(_edge("r0", "t2", 0.99))
+        for e in edges:
+            e["selected"] = True
+        base = generate_top_k_alternatives(edges, k=3, include_seed_options=True)
+        small = frozenset({("r0", "t1"), ("r1", "t1")})  # 2 edges
+        big = frozenset({("r0", "t1"), ("r1", "t1"), ("r2", "t1"), ("r3", "t1")})  # 4
+        seeded = generate_top_k_alternatives(
+            edges,
+            k=3,
+            include_seed_options=True,
+            seed_edge_sets=[big, small],
+            max_total_options=len(base) + 1,
+        )
+        keys = self._full(seeded)
+        assert small in keys
+        assert big not in keys
+
 
 class TestAlternativeOutputInvariant:
     """Every emitted alternative must be a deduplicated subset of the group edges.
