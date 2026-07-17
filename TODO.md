@@ -344,23 +344,34 @@ Design note for 1–2: **`docs/plans/2026-07-17-access-mode-channel-and-mi4-soft
 (MI-4 soften + access/mode channel are **bundled**, validated together on the
 holdout before any rerun; backfill is a re-extract — verified 2026-07-17).
 
-1. **Curated mint of the deferred v7+v8 auto-accepts** (quota-free, unblocked now) —
-   spot-check `6775ade1`, reconcile `8f152b92` low-confidence routing, then mint
-   `33a36ca5`, `3f53c7e7`, `7bac1f1d`, `91570f54`, `e0099fb8`, `ee358f5a`; withhold
-   `1b90f03b/minimal`.
-2. **Variant-aware auto-accept** — enriched-only minting; ablation ballots never
-   mint. Small, self-contained; prevents context-blind unanimity (`1b90f03b/minimal`).
-3. **MI-4 soften (Part A)** — polarity inversion, access/mode + route-overlay
-   signals. Doc+code parity change (`docs/MATCHING_MERGING_RULES.md` +
-   `matching_rubric.py`), `MATCHING_RUBRIC_VERSION` bump. Restructure the wording
-   into 3–4 sentences before shipping.
-4. **Access/mode evidence channel (Part B)** — `access_lr` from Overture
-   `access_restrictions` (never infer denials except the motorway entailment) +
-   per-dataset `target_kind: route_network` flag (Geneva). Backfill = re-extract.
-5. **Pre-register + holdout-validate** the bundle (3+4) with the six-group blind
-   checklist in the design note (`7175635e`/`a451bf05`/`b33a27f5` → merge;
-   `66e22055`/`5faa0b72`/`92c0997f` → NONE), then a **targeted** rerun of only the
-   ≥6 regressed cycleway groups + guard — NOT the full 65 (quota).
+1. ~~**Curated mint of the deferred v7+v8 auto-accepts**~~ **DONE 2026-07-17**
+   (`fa650fd`): minted 7 v8 enriched auto-accepts (`33a36ca5`, `3f53c7e7`,
+   `7bac1f1d`, `91570f54`, `e0099fb8`, `6775ade1`, `ee358f5a`) stamped
+   `panel_unanimous_v7` (v8 panel+current rubric resolves to v7 era; real v8 rubric
+   era bound in each evidence record). Withheld `1b90f03b/minimal`. **`8f152b92`
+   still deferred** — v8 routed it human_review (low_confidence) and its only
+   auto_accept is the v7 batch, which the consensus-policy-signature guard rejects
+   as stale (pre-Fix-A rubric). Mint needs an explicit stale-policy override or a
+   fresh vote; left for human confirmation.
+2. ~~**Variant-aware auto-accept**~~ **MERGED #454** (`459bcef`) — ablation-variant
+   batches never mint (fail-closed on corrupt batch.json + `.no-export` marker on
+   ablation dirs). Adversarial-reviewed, CI green.
+3. ~~**MI-4 soften (Part A)**~~ **MERGED #453** (`32f1eda`) — polarity inversion +
+   access-aware signals, rubric era `2026-07-17+d1ba3b9a025a`. Access references
+   gated behind "where present" (review fix) so they no-op until Part B.
+4. ~~**Access/mode evidence channel (Part B)**~~ **MERGED #455** (`3bb9b48`) —
+   `access_lr` from Overture `access_restrictions` (never infer denials except the
+   motorway entailment; explicit order-independent multi-entry precedence), prompt
+   `access=` line + legend, `target_kind: route_network` for Geneva.
+   Evidence-pack-only. **Backfill = re-extract not yet run** (new stitch runs pick
+   it up automatically via the shared path; a re-extract backfills existing
+   datasets without an S3 refetch).
+5. **← NEXT / DECISION POINT: Pre-register + holdout-validate** the 3+4 bundle with
+   the six-group blind checklist in the design note (`7175635e`/`a451bf05`/`b33a27f5`
+   → merge; `66e22055`/`5faa0b72`/`92c0997f` → NONE), then a **targeted** rerun of
+   only the ≥6 regressed cycleway groups + guard — NOT the full 65 (**spends panel
+   quota** — needs an explicit go). NB: under Part A alone the two Geneva merges lean
+   on names; they're properly credited to the A+B bundle validated here.
 6. **Consensus-`desired_edges` path** — route cross-seat-identical desired sets
    (`bdbdf792`, `00e8e9fd`, `fb8f359f`) to a one-click confirm / next-wave seed;
    attacks the 38 residual `no_exact_option` NONEs menu enumeration can't reach.
