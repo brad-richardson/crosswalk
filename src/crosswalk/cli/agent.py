@@ -1956,6 +1956,21 @@ def export_stitch_panel(
             "panel_* generation unknown provenance belongs to."
         ),
     ),
+    allow_stale_policy: bool = typer.Option(
+        False,
+        "--allow-stale-policy",
+        help=(
+            "Mint even when a batch's stored consensus_policy_sha256 no longer "
+            "equals the signature recomputed from current code (max_edges, "
+            "min_voter_confidence, runtime contract / rubric). Default is a hard "
+            "refusal; with this flag the stale-policy check is downgraded to a "
+            "logged warning naming the group and the stored-vs-expected "
+            "signatures, and the mint proceeds. The label keeps its OWN stored "
+            "policy sha and real era stamp — nothing is re-stamped to current. "
+            "Relaxes ONLY the policy-signature check; every other gate stays in "
+            "force. Use only for a genuine, rubric-stable historical auto-accept."
+        ),
+    ),
 ):
     """Export accepted panel consensus into human-equivalent stitching labels.
 
@@ -2153,6 +2168,7 @@ def export_stitch_panel(
             batch_dirs,
             dataset,
             require_evidence=True,
+            allow_stale_policy=allow_stale_policy,
         )
     except Exception as e:  # noqa: BLE001 - surfaced as an operator-facing CLI failure
         console.print(

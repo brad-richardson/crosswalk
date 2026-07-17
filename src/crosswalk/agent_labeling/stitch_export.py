@@ -1619,6 +1619,7 @@ def write_vote_provenance(
     votes_dir: Path = Path("labels/votes"),
     *,
     require_evidence: bool = False,
+    allow_stale_policy: bool = False,
 ) -> tuple[int, int]:
     """Snapshot raw panel ballots + consensus into a git-tracked location.
 
@@ -1647,6 +1648,17 @@ def write_vote_provenance(
     fatal. When ``require_evidence`` is true (the label-export CLI uses it),
     every consensus group must also have a verifiable evidence pack; otherwise
     the call raises before a panel label can be minted without its menu.
+
+    ``allow_stale_policy`` is a narrow, logged operator escape: when set, a
+    consensus row whose stored ``consensus_policy_sha256`` no longer equals the
+    signature recomputed from current code is downgraded from a hard refusal to
+    a warning (naming the group and the stored-vs-expected signatures), and the
+    mint proceeds. It relaxes ONLY that signature-equality check — every other
+    strict gate (routing/auto_accept, size, class-consistency, sliver,
+    human-precedence, panel composition) stays in force — and the archived
+    consensus row keeps its OWN stored policy sha and real era stamp; nothing is
+    re-stamped to the current signature. Use it only to mint a genuine,
+    rubric-stable historical auto-accept under its recorded policy.
     Returns ``(n_vote_rows, n_consensus_rows)``.
     """
     out_dir = Path(votes_dir) / f"dataset={dataset}"
@@ -1804,8 +1816,23 @@ def write_vote_provenance(
             min_voter_confidence=settings.stitch_min_voter_confidence,
             runtime_contract_sha256=sha256_file(Path(__file__).with_name("stitch_runner.py")),
         )
-        if _cell_text(consensus_row.get("consensus_policy_sha256")) != expected_policy:
-            raise ValueError(f"consensus policy linkage is stale or missing for {where}")
+        stored_policy = _cell_text(consensus_row.get("consensus_policy_sha256"))
+        if stored_policy != expected_policy:
+            if not allow_stale_policy:
+                raise ValueError(f"consensus policy linkage is stale or missing for {where}")
+            # Operator override: mint under the recorded historical policy,
+            # explicitly acknowledged. The archived consensus row keeps its OWN
+            # stored consensus_policy_sha256 and its real era stamp — this only
+            # relaxes the signature-equality check, never re-stamps to current.
+            logger.warning(
+                "consensus policy linkage is stale for {where}; --allow-stale-policy "
+                "is set, so minting under the recorded historical policy "
+                "(stored={stored}, expected={expected}). Verify this is a "
+                "rubric-stable historical auto-accept before trusting the label.",
+                where=where,
+                stored=stored_policy or "<missing>",
+                expected=expected_policy,
+            )
 
         try:
             recorded_n_votes = int(consensus_row.get("n_votes"))
