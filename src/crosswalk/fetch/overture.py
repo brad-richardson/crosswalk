@@ -784,6 +784,185 @@ def parse_oneway_lr(access_restrictions: list | None) -> LinearReferencedAttribu
     return create_trivial_lr(value)
 
 
+# -----------------------------------------------------------------------------
+# Access / mode evidence channel (evidence-pack only; NOT an ML feature)
+# -----------------------------------------------------------------------------
+
+# Modes tracked in the access/mode channel. See utils.physical.ACCESS_MODES.
+ACCESS_MODES = ("motor_vehicle", "bicycle", "foot")
+
+# Overture road classes on which motor traffic is entailed by the class itself
+# (``motor_vehicle=allowed`` is the reliably class-entailed merge signal).
+DRIVEABLE_CLASSES = frozenset(
+    {
+        "motorway",
+        "trunk",
+        "primary",
+        "secondary",
+        "tertiary",
+        "residential",
+        "living_street",
+        "unclassified",
+        "service",
+    }
+)
+
+# Overture ``access_type`` values mapped to per-mode access values. Anything
+# else — or a permit / time / recognized-user scoped entry — resolves to
+# ``restricted`` rather than a hard allowed/denied.
+_ACCESS_TYPE_VALUES = {
+    "allowed": "allowed",
+    "denied": "denied",
+    "designated": "designated",
+}
+
+
+def _access_class_defaults(road_class: str | None) -> dict[str, str]:
+    """Per-mode values entailed by the road class alone (never a tagged fact).
+
+    Only the safe, tautological or legally-entailed inferences are emitted:
+
+    - driveable classes (motorway … residential/service) ⇒ ``motor_vehicle=allowed``
+    - ``motorway`` additionally ⇒ ``bicycle=denied``, ``foot=denied`` (the one
+      safe inferred denial — legally entailed)
+    - ``cycleway`` ⇒ ``bicycle=designated``
+    - ``footway`` / ``sidewalk`` ⇒ ``foot=designated``
+
+    Every other mode stays unset (unknown). Notably ``motor_vehicle`` is only
+    ever inferred ``allowed`` — never inferred ``denied`` off a
+    pedestrian/cycleway/footway class (the European permit-traffic
+    counterexample), so no brittle inferred denial is ever produced.
+    """
+    if road_class is None:
+        return {}
+    cls = str(road_class).strip().lower()
+    defaults: dict[str, str] = {}
+    if cls in DRIVEABLE_CLASSES:
+        defaults["motor_vehicle"] = "allowed"
+    if cls == "motorway":
+        defaults["bicycle"] = "denied"
+        defaults["foot"] = "denied"
+    elif cls == "cycleway":
+        defaults["bicycle"] = "designated"
+    elif cls in ("footway", "sidewalk"):
+        defaults["foot"] = "designated"
+    return defaults
+
+
+def _tagged_access_observations(
+    access_restrictions: list | None,
+) -> list[tuple[float, float, str, str, int]]:
+    """Extract tagged ``(start, end, mode, value, priority)`` access observations.
+
+    Entries carrying ``when.heading`` belong to the direction/oneway channel and
+    are skipped here (see :func:`parse_oneway_lr`). For the rest, ``access_type ×
+    when.mode[]`` maps to per-mode values; a null ``when.mode`` is a blanket
+    entry over all modes; a ``when.during`` / ``when.recognized`` (permit / time /
+    private) scope resolves to ``restricted`` regardless of ``access_type``.
+    """
+    if access_restrictions is None:
+        return []
+    if hasattr(access_restrictions, "tolist"):
+        access_restrictions = access_restrictions.tolist()
+    if not isinstance(access_restrictions, list):
+        return []
+
+    observations: list[tuple[float, float, str, str, int]] = []
+    for index, rule in enumerate(access_restrictions):
+        if not isinstance(rule, dict):
+            continue
+        when = rule.get("when")
+        when = when if isinstance(when, dict) else {}
+
+        # Heading-scoped entries are the oneway/direction channel — leave them.
+        if when.get("heading") is not None:
+            continue
+
+        scoped = when.get("during") is not None or when.get("recognized") is not None
+        if scoped:
+            value = "restricted"
+        else:
+            value = _ACCESS_TYPE_VALUES.get(rule.get("access_type"))
+            if value is None:
+                continue
+
+        modes = when.get("mode")
+        if hasattr(modes, "tolist"):
+            modes = modes.tolist()
+        if modes is None:
+            affected = ACCESS_MODES  # blanket entry → all modes
+        elif isinstance(modes, list):
+            affected = tuple(m for m in modes if m in ACCESS_MODES)
+        elif modes in ACCESS_MODES:
+            affected = (modes,)
+        else:
+            affected = ()
+        if not affected:
+            continue
+
+        range_tuple = _extract_range_from_rule(rule)
+        start, end = range_tuple if range_tuple else (0.0, 1.0)
+        for mode in affected:
+            observations.append((start, end, mode, value, index))
+    return observations
+
+
+def parse_access_lr(
+    access_restrictions: list | None, road_class: str | None = None
+) -> LinearReferencedAttribute:
+    """Parse Overture ``access_restrictions[]`` into a per-mode access channel.
+
+    Each LR span value is a per-mode map over :data:`ACCESS_MODES`::
+
+        {mode: {"value": allowed|designated|denied|restricted,
+                "source": "tagged" | "class_default"}}
+
+    Tagged observations (explicit data) take precedence; a single class-default
+    pass then fills unset modes from :func:`_access_class_defaults` (class
+    defaults never override tags). Modes left unknown are omitted from the map.
+    Applies even when ``access_restrictions`` is absent — a driveable class still
+    yields ``motor_vehicle=allowed`` (class_default).
+    """
+    class_defaults = _access_class_defaults(road_class)
+    observations = _tagged_access_observations(access_restrictions)
+
+    if not observations:
+        if not class_defaults:
+            return create_trivial_lr(None)
+        value = {
+            mode: {"value": class_defaults[mode], "source": "class_default"}
+            for mode in ACCESS_MODES
+            if mode in class_defaults
+        }
+        return create_trivial_lr(value)
+
+    boundaries: set[float] = {0.0, 1.0}
+    for start, end, _, _, _ in observations:
+        boundaries.add(start)
+        boundaries.add(end)
+    ordered_bounds = sorted(boundaries)
+    ordered_obs = sorted(observations, key=lambda o: o[4])  # earlier entries win
+
+    rule_tuples: list[tuple[float, float, dict, int]] = []
+    for i in range(len(ordered_bounds) - 1):
+        a, b = ordered_bounds[i], ordered_bounds[i + 1]
+        if b <= a:
+            continue
+        per_mode: dict[str, dict[str, str]] = {}
+        for start, end, mode, value, _prio in ordered_obs:
+            if start <= a and b <= end and mode not in per_mode:
+                per_mode[mode] = {"value": value, "source": "tagged"}
+        for mode, value in class_defaults.items():
+            per_mode.setdefault(mode, {"value": value, "source": "class_default"})
+        if per_mode:
+            ordered_map = {mode: per_mode[mode] for mode in ACCESS_MODES if mode in per_mode}
+            rule_tuples.append((a, b, ordered_map, i))
+
+    if not rule_tuples:
+        return create_trivial_lr(None)
+    return normalize_ranges(rule_tuples, default_value=None)
+
+
 def parse_speed_limit_lr(speed_limits: list | None) -> LinearReferencedAttribute:
     """Parse Overture speed_limits array into linear-referenced attribute.
 
@@ -860,6 +1039,7 @@ def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     - level_lr: From level_rules array
     - road_flags_lr: From top-level road_flags (or legacy road.road_flags)
     - oneway_lr: From access struct (forward/backward)
+    - access_lr: Per-mode access channel from access_restrictions + class defaults
     - speed_limit_kph_lr: From speed_limits array (normalized to kph)
 
     The LR columns store JSON-serializable dict lists for parquet compatibility.
@@ -937,6 +1117,25 @@ def extract_lr_attributes(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         )
     else:
         gdf["oneway_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
+
+    # Parse access/mode channel (evidence-pack only; never an ML feature). Runs
+    # for every row so class-default inferences (e.g. driveable ⇒ mv:allowed)
+    # apply even when access_restrictions is absent.
+    class_col = (
+        "class"
+        if "class" in gdf.columns
+        else ("road_class" if "road_class" in gdf.columns else None)
+    )
+    if "access_restrictions" in gdf.columns or class_col is not None:
+        gdf["access_lr"] = gdf.apply(
+            lambda row: parse_access_lr(
+                row.get("access_restrictions"),
+                row.get(class_col) if class_col else None,
+            ).to_dict_list(),
+            axis=1,
+        )
+    else:
+        gdf["access_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
 
     # Parse speed limit from speed_limits array
     if "speed_limits" in gdf.columns:

@@ -226,6 +226,24 @@ def add_trivial_lr_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     else:
         gdf["oneway_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
 
+    # Access/mode LR - target sources carry no Overture access_restrictions, so
+    # the channel is class-default only (e.g. a cycleway target ⇒ bike:designated°),
+    # matching the reference-side inferences. Imported here to keep the shared
+    # class-default table in one place (fetch.overture.parse_access_lr).
+    from .overture import parse_access_lr
+
+    access_class_col = (
+        "class"
+        if "class" in gdf.columns
+        else ("road_class" if "road_class" in gdf.columns else None)
+    )
+    if access_class_col is not None:
+        gdf["access_lr"] = gdf[access_class_col].apply(
+            lambda c: parse_access_lr(None, c).to_dict_list()
+        )
+    else:
+        gdf["access_lr"] = [[{"between": [0.0, 1.0], "value": None}] for _ in range(len(gdf))]
+
     # Speed limit LR - extract from speed_limit_kph flat column
     if "speed_limit_kph" in gdf.columns:
         gdf["speed_limit_kph_lr"] = gdf["speed_limit_kph"].apply(

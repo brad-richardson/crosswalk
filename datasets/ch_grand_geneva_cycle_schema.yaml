@@ -22,6 +22,11 @@ fetch:
   - 6.55
   - 46.55
   crs: EPSG:4326
+matching:
+  # Targets are signed cycle route/itinerary overlays (Liaison/Maillage/Voie
+  # Verte), not physically-separated infrastructure — a route that follows a road
+  # matches the road. Surfaced as a stitch-prompt header (Part B / B.5).
+  target_kind: route_network
 last_fetch:
   reference:
     fetched_at: '2026-07-13T23:48:51.423730+00:00'

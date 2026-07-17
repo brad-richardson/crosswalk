@@ -96,6 +96,11 @@ class MatchingConfig(BaseModel):
     """Configuration for matching behavior."""
 
     block_cross_tier: bool = False  # Hard block vehicle↔pedestrian candidate pairs
+    # Deterministic per-dataset kind flag surfaced as a stitch-prompt header.
+    # ``route_network`` marks datasets whose targets are signed route/itinerary
+    # designations (not separately-built infrastructure), so a route that follows
+    # a road matches the road. Not runtime name-parsing — set on inspection.
+    target_kind: str | None = None
 
 
 class LastFetchInfo(BaseModel):
