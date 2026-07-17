@@ -97,6 +97,7 @@ def generate_top_k_alternatives(
     target_geoms: dict[str, dict] | None = None,
     k: int = 5,
     include_seed_options: bool = True,
+    seed_edge_sets: list[frozenset[tuple[str, str]]] | None = None,
 ) -> list[dict]:
     """Generate top-K assignment alternatives for a match group.
 
@@ -148,6 +149,17 @@ def generate_top_k_alternatives(
             whole-group seeds, plus the bounded "base set minus flagged edge(s)"
             seeds (see ``_seed_alternatives`` / ``_edge_droppability``). Set
             False to recover the pure top-K-by-confidence behavior.
+        seed_edge_sets: Optional externally-supplied edge-id sets to inject as
+            additional ``is_seed`` options, a SIBLING to the exact-pair seeds
+            above. Each is a ``frozenset`` of ``(ref_id, target_id)`` pairs — the
+            id-space output of the consensus-desired-edges detector (see
+            ``agent_labeling.consensus_desired``). Every supplied set is
+            validated to be a non-empty subset of the group's candidate edges
+            (non-subset / empty sets are skipped) and deduped against the organic
+            top-K and the whole-group seeds, so a menu cap is never exceeded by a
+            set the menu already offers. Injected independently of
+            ``include_seed_options`` (the caller decides which sets are worth an
+            option regardless of the auto-seed policy).
 
     Returns:
         List of alternative dicts, each with:
@@ -233,6 +245,7 @@ def generate_top_k_alternatives(
     # truncation, so they are guaranteed present even when they rank below the
     # confidence-sorted top-K (large groups) or are structurally inexpressible by
     # the per-target enumeration (e.g. settled answer == accept every edge).
+    seen_keys = {frozenset((e["ref_id"], e["target_id"]) for e in alt["edges"]) for alt in top_k}
     if include_seed_options:
         # Selected pairs are collected from ALL input edges (not the deduped
         # edge_data survivors), so the flag is not lost when a duplicate pair's
@@ -241,14 +254,27 @@ def generate_top_k_alternatives(
             (e["ref_id"], e["target_id"]) for e in component_edges if e.get("selected")
         }
         selected_keys = [key for key in edge_data if key in selected_pairs]
-        seen_keys = {
-            frozenset((e["ref_id"], e["target_id"]) for e in alt["edges"]) for alt in top_k
-        }
         for seed in _seed_alternatives(edge_data, ref_ids, selected_keys):
             key = frozenset((e["ref_id"], e["target_id"]) for e in seed["edges"])
             if key and key not in seen_keys:
                 seen_keys.add(key)
                 top_k.append(seed)
+
+    # Externally-supplied seed sets (e.g. consensus-desired edges) — a sibling to
+    # the exact-pair seeds above. Each must be a non-empty subset of the group's
+    # candidate edges (so it satisfies the same output invariant) and is deduped
+    # against everything already offered, so a set the menu already expresses is
+    # never re-seeded and the caps are respected.
+    if seed_edge_sets:
+        for raw in seed_edge_sets:
+            keys = {(str(r), str(t)) for r, t in raw}
+            if not keys or not keys <= valid_keys:
+                continue
+            fkey = frozenset(keys)
+            if fkey in seen_keys:
+                continue
+            seen_keys.add(fkey)
+            top_k.append(_seed_alt_from_keys(edge_data, ref_ids, sorted(keys)))
 
     # Assign option indices over the final (organic + seed) list.
     for i, alt in enumerate(top_k):
@@ -329,6 +355,29 @@ def _flagged_edges(
     return [k for _, _, k in scored[:MAX_FLAGGED_SINGLE_DROPS]]
 
 
+def _seed_alt_from_keys(
+    edge_data: dict[tuple[str, str], dict],
+    ref_ids: list[str],
+    keys: list[tuple[str, str]],
+) -> dict:
+    """Build one ``is_seed`` alternative from an explicit list of edge keys.
+
+    Shared by the whole-group / minus-flagged seeds (:func:`_seed_alternatives`)
+    and the externally-supplied ``seed_edge_sets`` injection so both render an
+    identically-shaped seed option (edges enriched with alignment fracs, summed
+    confidence, ``is_seed=True``). Callers guarantee ``keys`` is a non-empty
+    subset of ``edge_data``.
+    """
+    edges = [_make_edge(edge_data, rid, tid) for rid, tid in keys]
+    total = round(sum(e["confidence"] for e in edges), 4)
+    return {
+        "edges": edges,
+        "total_confidence": total,
+        "summary": _build_summary(edges, ref_ids),
+        "is_seed": True,
+    }
+
+
 def _seed_alternatives(
     edge_data: dict[tuple[str, str], dict],
     ref_ids: list[str],
@@ -360,22 +409,12 @@ def _seed_alternatives(
     seeds: list[dict] = []
     seen: set[frozenset[tuple[str, str]]] = set()
 
-    def _alt(keys: list[tuple[str, str]]) -> dict:
-        edges = [_make_edge(edge_data, rid, tid) for rid, tid in keys]
-        total = round(sum(e["confidence"] for e in edges), 4)
-        return {
-            "edges": edges,
-            "total_confidence": total,
-            "summary": _build_summary(edges, ref_ids),
-            "is_seed": True,
-        }
-
     def _emit(keys: list[tuple[str, str]]) -> None:
         fkey = frozenset(keys)
         if not fkey or fkey in seen:
             return
         seen.add(fkey)
-        seeds.append(_alt(list(keys)))
+        seeds.append(_seed_alt_from_keys(edge_data, ref_ids, list(keys)))
 
     all_keys = list(edge_data.keys())
     if all_keys:
