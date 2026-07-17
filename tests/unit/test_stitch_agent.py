@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import errno
+import io
 import json
 import math
 import subprocess
@@ -4522,6 +4523,91 @@ def test_run_batch_seat_fill_reinvokes_only_the_stale_seat(tmp_path, monkeypatch
     assert set(out_votes["panel_invocation_sha256"].astype(str)) == {
         str(codex_before["panel_invocation_sha256"])
     }
+
+
+def test_run_batch_seat_fill_crash_preserves_pending_groups_ballots(tmp_path, monkeypatch):
+    """A crash mid seat-fill keeps NOT-yet-reached groups' salvaged ballots on disk.
+
+    --retry-timeouts drops the muse seat from BOTH g1 and g2. On resume the runner
+    seat-fills g1 and flushes, then a crash (killed process / breaker halt) hits
+    during g2's fill. g2's surviving claude/codex ballots of record lived only in
+    the in-memory kept-seat mapping before this fix, so g1's flush wrote none of
+    them — the next resume then re-ran g2's full panel, re-rolling its stochastic
+    draws and violating the "first fully-valid recorded draw per (group, seat) is
+    never overwritten" invariant. Every flush must now carry the pending groups'
+    kept rows, so the next resume salvages g2 instead of re-drawing it.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    _write_min_pack(batch_dir, "g2")
+
+    def ok_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "muse"):
+        monkeypatch.setitem(sr._INVOKERS, name, ok_invoker)
+    panel = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "muse")]
+    sr.run_batch(batch_dir, panel=panel)
+
+    # Drop the muse seat from BOTH groups + all consensus rows (what a
+    # --retry-timeouts drop of one timed-out seat leaves): claude/codex survive as
+    # ballots of record for g1 and g2.
+    votes = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
+    votes[votes["provider"] != "muse"].to_csv(batch_dir / "votes.partial.csv", index=False)
+    pd.read_csv(batch_dir / "consensus.partial.csv", dtype={"group_id": str}).iloc[0:0].to_csv(
+        batch_dir / "consensus.partial.csv", index=False
+    )
+
+    # Resume that fills g1 (flushing at the end of its iteration), then snapshot
+    # both partials at the instant g2's fill is invoked — the exact on-disk state a
+    # kill/breaker-halt after g1 (but before g2 completes) would leave behind.
+    snap = {"n": 0}
+
+    def snapshotting_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        snap["n"] += 1
+        if snap["n"] == 2 and "votes" not in snap:  # second fill == g2's muse seat
+            snap["votes"] = (batch_dir / "votes.partial.csv").read_text()
+            snap["consensus"] = (batch_dir / "consensus.partial.csv").read_text()
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "muse"):
+        monkeypatch.setitem(sr._INVOKERS, name, snapshotting_invoker)
+    sr.run_batch(batch_dir, panel=panel, resume=True)
+
+    # g2's surviving ballots must be on disk even though g2 had not completed.
+    partial = pd.read_csv(io.StringIO(snap["votes"]), dtype={"group_id": str})
+    g2_partial = partial[partial["group_id"] == "g2"]
+    assert set(g2_partial["provider"]) >= {"claude", "codex"}, (
+        f"pending g2 ballots dropped after g1's flush; partial had "
+        f"{partial[['group_id', 'provider']].to_dict('records')}"
+    )
+    # No (group, seat) row is written twice by the pending-inclusive flush.
+    assert not partial.duplicated(subset=["group_id", "provider"]).any()
+
+    # Restore that crash-window state (discarding g2's completion) and resume: the
+    # runner must SALVAGE g2 (only its missing muse seat re-runs); g1 is already
+    # fully done and re-runs nothing.
+    (batch_dir / "votes.partial.csv").write_text(snap["votes"])
+    (batch_dir / "consensus.partial.csv").write_text(snap["consensus"])
+    calls = {"n": 0}
+
+    def counting_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "muse"):
+        monkeypatch.setitem(sr._INVOKERS, name, counting_invoker)
+    out_votes, out_cons = sr.run_batch(batch_dir, panel=panel, resume=True)
+
+    assert calls["n"] == 1  # only g2's missing muse seat re-runs; g2 claude/codex kept
+    for gid in ("g1", "g2"):
+        assert set(out_votes[out_votes["group_id"] == gid]["provider"]) == {
+            "claude",
+            "codex",
+            "muse",
+        }
+    assert set(out_cons["group_id"].astype(str)) == {"g1", "g2"}
 
 
 def test_run_batch_resume_panel_era_change_salvages_nothing(tmp_path, monkeypatch):

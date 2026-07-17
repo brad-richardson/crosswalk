@@ -2487,6 +2487,13 @@ def run_batch(
     # is empty and the whole group re-runs, exactly as before this change.
     kept_seat_votes: dict[str, list[Vote]] = {}
     kept_seat_rows: dict[str, list[dict]] = {}
+    # Salvaged rows for groups still awaiting seat-fill. Seeded from every
+    # salvage group up front and drained as each group's rows are folded into
+    # vote_rows on reach. Every _flush() includes it, so a crash or breaker-halt
+    # mid-wave keeps the surviving ballots of NOT-yet-reached groups on disk —
+    # otherwise they live only in kept_seat_rows (memory) and are lost, forcing
+    # the next resume to re-run those full panels (re-rolling stochastic draws).
+    pending_kept: dict[str, list[dict]] = {}
     # Rows for previously-done groups OUTSIDE the current selection: excluded
     # from the final output but preserved in the partials, so a filtered resume
     # never destroys another group's crash-recovery data.
@@ -2778,6 +2785,7 @@ def run_batch(
             if kept_votes:
                 kept_seat_votes[gid] = kept_votes
                 kept_seat_rows[gid] = kept_rows
+                pending_kept[gid] = kept_rows
                 filled = sorted(
                     p.name for p in panel if p.name not in {v.provider for v in kept_votes}
                 )
@@ -2806,7 +2814,13 @@ def run_batch(
             logger.info(f"resume: skipping {len(done_ids)} already-completed groups")
 
     def _flush() -> None:
-        pd.DataFrame(unselected_votes + vote_rows, columns=VOTES_COLUMNS).to_csv(
+        # pending_kept holds salvaged ballots of groups not yet folded into
+        # vote_rows; including them here is what keeps a mid-wave crash from
+        # dropping the surviving ballots of not-yet-reached groups. A group's
+        # rows are drained from pending_kept the moment they enter vote_rows,
+        # so no (group, seat) row is ever written twice.
+        pending_rows = [row for rows in pending_kept.values() for row in rows]
+        pd.DataFrame(unselected_votes + vote_rows + pending_rows, columns=VOTES_COLUMNS).to_csv(
             votes_partial, index=False
         )
         pd.DataFrame(unselected_cons + consensus_out, columns=CONSENSUS_COLUMNS).to_csv(
@@ -2865,12 +2879,15 @@ def run_batch(
             fill_attempt = 1
             logger.info(f"[{i + 1}/{len(pending)}] panel on group {gid}")
 
-        # Preserve the salvaged ballots of record in the partial up front so a
-        # mid-fill provider-down halt can never drop them (they are already valid
-        # and must survive to the next resume). New seats are appended only after
-        # the breaker check, mirroring the historical "incomplete group leaves no
-        # rows" behavior for the seats being (re)invoked now.
+        # Fold this group's salvaged ballots of record into vote_rows and drain
+        # them from pending_kept (where every _flush() up to now has kept them on
+        # disk for the not-yet-reached groups). The rows move from one flush
+        # source to the other atomically, so a mid-fill provider-down halt can
+        # never drop them and never writes them twice. New seats are appended
+        # only after the breaker check, mirroring the historical "incomplete
+        # group leaves no rows" behavior for the seats being (re)invoked now.
         vote_rows.extend(kept_row_by_name[p.name] for p in panel if p.name in kept_by_name)
+        pending_kept.pop(gid, None)
 
         new_votes = (
             run_panel_on_group(
