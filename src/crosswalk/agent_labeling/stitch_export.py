@@ -556,6 +556,10 @@ REASON_CLASS_MISMATCH = "class_mismatch"
 REASON_EMPTIED_BY_SLIVER = "emptied_by_sliver"
 REASON_EMPTY_SELECTION = "empty_selection"
 REASON_HUMAN_PRECEDENCE = "human_precedence"
+# A batch whose ``experiment.variant`` is a context-stripped ablation cell
+# (anything present and != ``enriched``). Its ballots are experiment data and
+# must never mint a production label, even when a group routes ``auto_accept``.
+REASON_ABLATION_VARIANT = "ablation_variant"
 # Decomposed-group (recomposition) outcomes: a sub-problem the panel could not
 # unanimously accept, or one never voted (including size-gated irreducible
 # blocks), blocks the whole-group label.
@@ -696,6 +700,74 @@ def _load_batch_groups(batch_dir: Path) -> dict[str, dict]:
     except (ValueError, OSError):
         return {}
     return {str(g.get("group_id")): g for g in batch.get("groups", [])}
+
+
+#: The one experiment variant whose ballots are full-context and MAY mint panel
+#: labels. See :func:`_is_ablation_variant`.
+ENRICHED_VARIANT = "enriched"
+
+#: Sentinel returned by :func:`_batch_experiment_variant` when a batch.json is
+#: PRESENT but unreadable/unparseable (bad JSON, non-object payload, or a
+#: non-object ``experiment`` block). It is non-empty and != ENRICHED_VARIANT, so
+#: :func:`_is_ablation_variant` GATES it: a batch whose provenance we cannot
+#: verify must never mint (fail closed). An ABSENT batch.json is different — it
+#: reads as an ordinary (non-experimental) production batch and mints normally.
+UNREADABLE_VARIANT = "<unreadable_batch_json>"
+
+
+def _batch_experiment_variant(batch_dir: Path) -> str:
+    """Return the ``experiment.variant`` stamped in a batch's ``batch.json``.
+
+    The physical/coincidence ablation wave (``scripts/build_physical_stitch_wave.py``)
+    stamps every batch with an ``experiment`` block whose ``variant`` is one of
+    ``enriched`` / ``no_physical`` / ``no_coincidence`` / ``minimal``. Ordinary
+    (non-experimental) production batches carry NO ``experiment`` block.
+
+    Three cases, deliberately distinguished so the gate can fail CLOSED on
+    corruption (an ablation batch with a valid ``consensus.csv`` but a corrupt
+    ``batch.json`` must not slip through as mintable):
+
+      * batch.json ABSENT, or present with no ``experiment`` block / no
+        ``variant`` -> ``""`` (reads as production; mints).
+      * batch.json PRESENT but unreadable/unparseable (bad JSON, non-object
+        payload, or a non-object ``experiment``) -> :data:`UNREADABLE_VARIANT`
+        (gated; never mints).
+      * a stamped variant -> that stripped variant string.
+    """
+    batch_path = Path(batch_dir) / "batch.json"
+    if not batch_path.exists():
+        return ""
+    try:
+        batch = json.loads(batch_path.read_text())
+    except (ValueError, OSError):
+        return UNREADABLE_VARIANT
+    if not isinstance(batch, dict):
+        return UNREADABLE_VARIANT
+    if "experiment" not in batch:
+        return ""  # ordinary production batch
+    experiment = batch["experiment"]
+    if not isinstance(experiment, dict):
+        return UNREADABLE_VARIANT  # present but corrupt experiment block -> gate
+    variant = experiment.get("variant")
+    return "" if variant is None else str(variant).strip()
+
+
+def _is_ablation_variant(variant: str) -> bool:
+    """True when ``variant`` must NOT mint a production label.
+
+    Ablation-variant ballots (``no_physical`` / ``no_coincidence`` / ``minimal``,
+    and any FUTURE variant name) are experiment data: stripping physical or
+    coincidence context can make the panel confidently wrong (the v8
+    ``1b90f03b/minimal`` misfire — a context-blinded auto_accept that every
+    informed cell unanimously rejected in favor of the correct seeded option),
+    so such ballots must NEVER mint. The :data:`UNREADABLE_VARIANT` sentinel (an
+    unverifiable batch.json) is likewise gated — fail closed. Only the
+    full-context ``enriched`` variant may mint. An empty variant (no experiment
+    block / ordinary production batch) is NOT gated and mints normally; treating
+    "anything present and != enriched" as ablation gates unknown future ablation
+    names too.
+    """
+    return bool(variant) and variant != ENRICHED_VARIANT
 
 
 def _group_sliver_pairs(group: dict) -> set[tuple[str, str]]:
@@ -913,6 +985,22 @@ def plan_exports(
             )
         batch_groups[bd] = _load_batch_groups(bd)
 
+    # Ablation-variant gate: a batch stamped with a context-stripped experiment
+    # variant (``no_physical`` / ``no_coincidence`` / ``minimal``, or any future
+    # non-``enriched`` variant) is experiment data. Stripping physical/coincidence
+    # context can make the panel confidently wrong (the v8 ``1b90f03b/minimal``
+    # misfire), and the auto_accept flag is variant-blind, so such a batch must
+    # NEVER mint a label — its auto_accept groups are skipped as
+    # ``ablation_variant`` below. Enriched batches (``variant == "enriched"``) and
+    # ordinary production batches (no experiment block) mint normally.
+    variant_by_dir: dict[Path, str] = {bd: _batch_experiment_variant(bd) for bd in batch_groups}
+    for bd, variant in variant_by_dir.items():
+        if _is_ablation_variant(variant):
+            logger.info(
+                f"Batch {bd.name} is ablation variant {variant!r}: its groups are "
+                "experiment data and will NOT mint panel labels (auto_accept skipped)."
+            )
+
     # Decomposition rosters (#367 Mode B): a parent entry written by
     # ``stitch-batch --decompose`` carries the FULL sub-problem roster
     # (including size-gated oversized sub-problems that were never packed).
@@ -1033,6 +1121,24 @@ def plan_exports(
         # read-time overlay in panel_routing surfaces it to the human queue.
         if str(row.get("routing")) == "auto_accept" and not _accept_below_quorum(row):
             n_auto += 1
+            # Ablation-variant gate (batch-level): a context-stripped experiment
+            # cell must never mint, even on auto_accept. Skip before any minting
+            # gate so a context-blinded artifact can never reach production.
+            if _is_ablation_variant(variant_by_dir.get(bd, "")):
+                grp = batch_groups.get(bd, {}).get(gid, {})
+                edges_pairs = _parse_edge_set_pairs(row.get("edge_set"))
+                groups.append(
+                    GroupExport(
+                        group_id=gid,
+                        source_batch=bd.name,
+                        exported=False,
+                        reason=REASON_ABLATION_VARIANT,
+                        match_type=str(grp.get("match_type") or ""),
+                        n_edges_raw=len(edges_pairs),
+                        n_edges_final=len(edges_pairs),
+                    )
+                )
+                continue
             ge = _gate_group(
                 gid=gid,
                 bd=bd,
@@ -1102,6 +1208,26 @@ def plan_exports(
         # mixed-composition union under a single era. On a mismatch the group
         # is blocked (subproblem_era_mixed) — never stamped.
         sub_dirs = {merged[sid][0] for sid in roster_ids if sid in merged}
+        # Ablation-variant gate (defense in depth on the recomposition path): if
+        # the roster dir OR any dir contributing a consumed sub-verdict is a
+        # context-stripped experiment cell, the union must not mint either.
+        if any(_is_ablation_variant(variant_by_dir.get(d, "")) for d in ({bd} | sub_dirs)):
+            groups.append(
+                GroupExport(
+                    group_id=parent_gid,
+                    source_batch=bd.name,
+                    exported=False,
+                    reason=REASON_ABLATION_VARIANT,
+                    match_type=str(grp.get("match_type") or ""),
+                    n_edges_raw=len(rec.union_edges),
+                    mean_confidence=min_conf,
+                    from_decomposition=True,
+                    n_subproblems=rec.n_subproblems,
+                    n_subproblems_resolved=rec.n_resolved,
+                    is_quorum=sub_quorum,
+                )
+            )
+            continue
         sub_eras = {era_by_dir.get(d, "") for d in (sub_dirs or {bd})}
         if len(sub_eras) > 1:
             groups.append(
