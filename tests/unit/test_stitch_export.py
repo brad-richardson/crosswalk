@@ -853,6 +853,101 @@ def test_no_variant_field_mints_normally(tmp_path, labels_dir):
     assert write_exports(report, DATASET, Path(labels_dir)) == 1
 
 
+def test_unreadable_batch_json_fails_closed(tmp_path, labels_dir):
+    """An auto_accept whose batch.json is present-but-corrupt must NOT mint.
+
+    ``_merge_consensus`` only hard-requires consensus.csv, so a batch with a
+    valid consensus row but an unparseable batch.json could otherwise reach the
+    minting gates. Provenance we cannot verify is gated (fail closed) with the
+    ablation_variant reason, since we cannot confirm it is the enriched variant.
+    """
+    b = make_batch(
+        tmp_path / "b1",
+        DATASET,
+        [{"group_id": "g_auto", "routing": "auto_accept", "edges": [("r1", "t1")]}],
+    )
+    (b / "batch.json").write_text("{ this is not valid json ]")
+    report = _plan([b], labels_dir)
+    g = _by_gid(report)["g_auto"]
+    assert not g.exported
+    assert g.reason == REASON_ABLATION_VARIANT
+    assert write_exports(report, DATASET, Path(labels_dir)) == 0
+    assert StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET).empty
+
+
+def test_recomposed_parent_in_ablation_batch_mints_nothing(tmp_path, labels_dir):
+    """The recomposition-path (#367 Mode B) ablation gate blocks a parent too.
+
+    A decomposed parent whose ONLY consumed sub-verdict lives in an
+    ablation-variant batch dir must be skipped as ablation_variant — the union
+    of context-blinded sub-decisions must never mint. The parent has no DIRECT
+    consensus row here, so its outcome comes solely from recomposition: this
+    exercises the recomposition gate, not the direct-loop gate.
+    """
+    b = tmp_path / "b1"
+    b.mkdir(parents=True)
+    # consensus.csv: only the sub-problem is directly voted (auto_accept).
+    with (b / "consensus.csv").open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=CONSENSUS_COLUMNS)
+        w.writeheader()
+        w.writerow(
+            {
+                "group_id": "sub1",
+                "consensus": "unanimous",
+                "choice": "A",
+                "edge_set": json.dumps([["r1", "t1"]]),
+                "routing": "auto_accept",
+                "n_votes": 4,
+                "n_valid": 4,
+                "minority": "",
+                "mean_confidence": 0.9,
+                "route_reason": "unanimous_non_none_small",
+            }
+        )
+    _write_votes_csv(b, _V5_VOTERS)
+
+    def _seg(gid: str, *, parent: bool) -> dict:
+        node = {
+            "group_id": gid,
+            "match_type": "M:N",
+            "ref_ids": ["r1"],
+            "target_ids": ["t1"],
+            "edges": [_edge("r1", "t1")],
+            "ref_geometries": {"r1": _line(42.28, 0.0005)},
+            "target_geometries": {"t1": _line(42.29, 0.0005)},
+            "ref_classes": {"r1": "residential"},
+            "target_classes": {"t1": "residential"},
+        }
+        if parent:
+            node["decomposed_parent"] = True
+            node["subproblem_ids"] = ["sub1"]
+        else:
+            node["parent_group_id"] = "parent"
+        return node
+
+    (b / "batch.json").write_text(
+        json.dumps(
+            {
+                "dataset_id": DATASET,
+                "experiment": {
+                    "wave": "physical_context_test",
+                    "variant": "minimal",
+                    "physical_metadata_visible": False,
+                    "same_side_coincidence_visible": False,
+                },
+                "groups": [_seg("parent", parent=True), _seg("sub1", parent=False)],
+            }
+        )
+    )
+    report = _plan([b], labels_dir)
+    g = _by_gid(report)["parent"]
+    assert g.from_decomposition
+    assert not g.exported
+    assert g.reason == REASON_ABLATION_VARIANT
+    assert write_exports(report, DATASET, Path(labels_dir)) == 0
+    assert StitchingLabelStore(DATASET, labels_dir=labels_dir).load(DATASET).empty
+
+
 def test_idempotent_write(tmp_path, labels_dir):
     b = make_batch(
         tmp_path / "b1",

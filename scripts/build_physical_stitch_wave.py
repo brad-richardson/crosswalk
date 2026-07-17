@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from shapely.geometry import shape as shape_from_geojson
 
 from crosswalk.agent_labeling.stitch_evidence import generate_stitch_evidence
+from crosswalk.agent_labeling.stitch_export import NO_EXPORT_MARKER
 from crosswalk.agent_labeling.stitch_provenance import artifact_descriptor
 from crosswalk.agent_labeling.stitch_runner import get_panel, panel_descriptor
 from crosswalk.agent_labeling.wave_manifest import (
@@ -603,6 +604,14 @@ def _write_batch(
         "groups": selected,
     }
     (batch_dir / "batch.json").write_text(json.dumps(batch))
+    # Belt-and-suspenders: drop a .no-export marker on every ablation-variant
+    # batch so filter_exportable_batch_dirs drops it from the export path even if
+    # its batch.json ever becomes unreadable. Ablation ballots are experiment
+    # data and must never mint; only the enriched (full-context) variant may.
+    if variant != "enriched":
+        (batch_dir / NO_EXPORT_MARKER).write_text(
+            f"ablation variant {variant!r}: experiment data, must not mint panel labels\n"
+        )
     generated = generate_stitch_evidence(batch, batch_dir)
     if len(generated) != len(selected):
         raise RuntimeError(

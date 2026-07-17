@@ -706,6 +706,14 @@ def _load_batch_groups(batch_dir: Path) -> dict[str, dict]:
 #: labels. See :func:`_is_ablation_variant`.
 ENRICHED_VARIANT = "enriched"
 
+#: Sentinel returned by :func:`_batch_experiment_variant` when a batch.json is
+#: PRESENT but unreadable/unparseable (bad JSON, non-object payload, or a
+#: non-object ``experiment`` block). It is non-empty and != ENRICHED_VARIANT, so
+#: :func:`_is_ablation_variant` GATES it: a batch whose provenance we cannot
+#: verify must never mint (fail closed). An ABSENT batch.json is different — it
+#: reads as an ordinary (non-experimental) production batch and mints normally.
+UNREADABLE_VARIANT = "<unreadable_batch_json>"
+
 
 def _batch_experiment_variant(batch_dir: Path) -> str:
     """Return the ``experiment.variant`` stamped in a batch's ``batch.json``.
@@ -713,10 +721,18 @@ def _batch_experiment_variant(batch_dir: Path) -> str:
     The physical/coincidence ablation wave (``scripts/build_physical_stitch_wave.py``)
     stamps every batch with an ``experiment`` block whose ``variant`` is one of
     ``enriched`` / ``no_physical`` / ``no_coincidence`` / ``minimal``. Ordinary
-    (non-experimental) production batches carry NO ``experiment`` block. Returns
-    the stripped variant string, or ``""`` when there is no experiment block, no
-    variant field, or the file is missing/unreadable — all of which read as "not
-    an ablation variant" (see :func:`_is_ablation_variant`).
+    (non-experimental) production batches carry NO ``experiment`` block.
+
+    Three cases, deliberately distinguished so the gate can fail CLOSED on
+    corruption (an ablation batch with a valid ``consensus.csv`` but a corrupt
+    ``batch.json`` must not slip through as mintable):
+
+      * batch.json ABSENT, or present with no ``experiment`` block / no
+        ``variant`` -> ``""`` (reads as production; mints).
+      * batch.json PRESENT but unreadable/unparseable (bad JSON, non-object
+        payload, or a non-object ``experiment``) -> :data:`UNREADABLE_VARIANT`
+        (gated; never mints).
+      * a stamped variant -> that stripped variant string.
     """
     batch_path = Path(batch_dir) / "batch.json"
     if not batch_path.exists():
@@ -724,27 +740,32 @@ def _batch_experiment_variant(batch_dir: Path) -> str:
     try:
         batch = json.loads(batch_path.read_text())
     except (ValueError, OSError):
-        return ""
-    experiment = batch.get("experiment")
+        return UNREADABLE_VARIANT
+    if not isinstance(batch, dict):
+        return UNREADABLE_VARIANT
+    if "experiment" not in batch:
+        return ""  # ordinary production batch
+    experiment = batch["experiment"]
     if not isinstance(experiment, dict):
-        return ""
+        return UNREADABLE_VARIANT  # present but corrupt experiment block -> gate
     variant = experiment.get("variant")
     return "" if variant is None else str(variant).strip()
 
 
 def _is_ablation_variant(variant: str) -> bool:
-    """True when ``variant`` names a context-stripped ablation cell.
+    """True when ``variant`` must NOT mint a production label.
 
     Ablation-variant ballots (``no_physical`` / ``no_coincidence`` / ``minimal``,
     and any FUTURE variant name) are experiment data: stripping physical or
     coincidence context can make the panel confidently wrong (the v8
     ``1b90f03b/minimal`` misfire — a context-blinded auto_accept that every
     informed cell unanimously rejected in favor of the correct seeded option),
-    so such ballots must NEVER mint a production label. Only the full-context
-    ``enriched`` variant may mint. An empty variant (no experiment block /
-    ordinary production batch) is NOT an ablation variant and mints normally;
-    treating "anything present and != enriched" as ablation gates unknown future
-    ablation names too.
+    so such ballots must NEVER mint. The :data:`UNREADABLE_VARIANT` sentinel (an
+    unverifiable batch.json) is likewise gated — fail closed. Only the
+    full-context ``enriched`` variant may mint. An empty variant (no experiment
+    block / ordinary production batch) is NOT gated and mints normally; treating
+    "anything present and != enriched" as ablation gates unknown future ablation
+    names too.
     """
     return bool(variant) and variant != ENRICHED_VARIANT
 
