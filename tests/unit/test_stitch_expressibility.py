@@ -156,8 +156,13 @@ def test_inexpressible_subset_is_a_miss():
     """A recoverable label whose set is neither enumerable, the full set, nor
     the selected set counts as an inexpressible miss."""
     # No geometries -> no chains: t1 mapping to BOTH r1 and r2 is not enumerable.
-    # Label drops t2 entirely, so it is not the full set either.
-    edges = [_edge("r1", "t1"), _edge("r2", "t1"), _edge("r3", "t2")]
+    # Label drops t2 entirely, so it is not the full set either. Edges are
+    # uniformly strong and all optimizer-selected, so the "base minus flagged
+    # edge" seeds flag nothing (no weak/sliver/unselected edge to drop) and the
+    # r3/t2 exclusion stays inexpressible -- exactly the miss this test asserts.
+    edges = [_edge("r1", "t1", 0.99), _edge("r2", "t1", 0.99), _edge("r3", "t2", 0.99)]
+    for e in edges:
+        e["selected"] = True
     groups = [_group("G_miss", edges)]
     labels = pd.DataFrame([_label_row("G_miss", [("r1", "t1"), ("r2", "t1")])])
     rep = measure_expressibility("ds", groups, labels, k=10)
@@ -241,8 +246,15 @@ def test_set_label_no_option_honors_exclusions():
     confidence), so it is the ONLY option generated -- the full-set seed
     dedups into it. This is the small-fixture analogue of the real bug: no
     option in the menu ever omits a ref/target the human excluded.
+
+    The edges are uniformly strong and all optimizer-selected, so the "base
+    minus flagged edge" seeds flag nothing (no weak/sliver/unselected edge to
+    drop): the r3/t3 exclusion stays inexpressible, preserving the miss this
+    test documents.
     """
-    edges = [_edge("r1", "t1"), _edge("r2", "t2"), _edge("r3", "t3")]
+    edges = [_edge("r1", "t1", 0.99), _edge("r2", "t2", 0.99), _edge("r3", "t3", 0.99)]
+    for e in edges:
+        e["selected"] = True
     groups = [_group("G_set", edges)]
     # Human excludes r3 / t3 -- keeps only r1, r2, t1, t2.
     labels = pd.DataFrame([_set_label_row("G_set", ["r1", "r2"], ["t1", "t2"])])
