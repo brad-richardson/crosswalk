@@ -364,6 +364,76 @@ Sequencing, in order:
    coverage/interval-partition + topology table in evidence packs; optional
    exact-pair adjudication mode after membership review in the UI.
 
+### PLAN: Exact-pair option generation (the v7 wave's #1 expressibility lever)
+
+Both v7 analysts (`research/v7_wave_analysis_{fable,codex}_2026-07-17.md`)
+independently found the **binding constraint is the option menu, not evidence or
+panel quality**: ~76–82% of the 74 NONE ballots are "no exact option offered",
+often with all three seats naming the *same* missing set (e.g. `1b90f03b` = "all
+edges except e1") that just isn't on the menu. Fix the generator, not the rubric,
+first.
+
+**Current generator** (source of truth for the fix):
+`matching/alternatives.py::generate_top_k_alternatives` (per-target confidence-
+ranked whole-group assignments; top-K) + two always-appended seeds in
+`_seed_alternatives` (full candidate set + optimizer-selected set) →
+`matching/stitch_options.py::build_stitch_options` builds the lettered menu. The
+gap: "optimizer set minus exactly edge eᵢ" is never emitted deliberately — it
+only appears if it happens to rank in the top-K.
+
+**Offline validation harness (no panel quota):**
+`crosswalk agent stitch-expressibility <dataset> [-k N]`
+(`agent_labeling/stitch_expressibility.py::measure_expressibility`) measures the
+fraction of settled `labels/stitching/` labels whose exact edge set some
+generated option can express. Run it before/after every generator change;
+`1b90f03b` / `e085519d` are the regression fixtures.
+
+**Baseline measured 2026-07-17** (before any generator change): pair
+expressibility us_boston 97.3% (2 misses), us_seattle 93.3% (1 miss),
+de_berlin/fi_helsinki 100%; SET-label expressibility us_seattle 90.9% (boundary
+precision 0.980), de_berlin 50%. **Key nuance:** pair-expressibility is
+near-ceiling because settled labels are SURVIVORSHIP-BIASED — a human could only
+ever pick a set the menu offered, so the labels we have are the expressible ones.
+Every residual miss is the "correct set = a subset of what's offered" pattern
+(e.g. seattle set-label `d35b4619`: boundary precision 0.643, coverage 1.000 —
+every option over-includes members), which is exactly Phase 1's target. But the
+v7 wave's real 56–61-ballot gap lives in PANEL-DESIRED sets that were never
+recorded as labels (they became NONE), which this harness cannot see. **So the
+real before/after test for Phase 1 is the v7 panel's STATED sets** — build it by
+mining the wave's NONE ballots' stated edge sets (a slice of Phase 3) FIRST, then
+measure minus-flagged-edge seed coverage against that set. The existing harness
+is the regression guard (must not drop); the mined-set probe is the real lever.
+
+Phases, in order:
+
+- **Phase 0 — confirm/fix the generator bugs.** Both analysts flagged
+  `750ae089` and `e085519d`: conf-0.99, high-coverage edges absent from *every*
+  option (also `3b876df0`: every trimmed option keeps a cross-layer edge). If
+  enumeration/truncation is pruning strong edges, that's a straight bug and the
+  cheapest win. Reproduce first, then fix.
+- **Phase 1 — optimizer-minus-flagged-edge seeds (the MVP).** Extend
+  `_seed_alternatives` (same bounded, deduped append site as the existing +2
+  seeds) to also emit "optimizer set minus edge eᵢ" for a *targeted* set of
+  flagged edges — NOT a blind power set (menu bloat + worsens the pixel-identical
+  image problem). Flag signals are exactly what the wave showed matter: low
+  per-edge confidence, layer/bridge/tunnel mismatch at the aligned subspan,
+  class/role mismatch, sliver overlaps. Keep to single-edge (maybe 2-edge)
+  removals so added-option count stays bounded like the current +2. Validate with
+  `stitch-expressibility` across the labeled datasets; expect the rate to climb.
+  Ship with diff-highlighted option images (see #443 pair rendering) or two
+  options differing by one edge render identically.
+- **Phase 2 — free-form / structured edge-set ballot.** Add an edge_set field to
+  the vote schema for a "propose" verdict when no option is exact. Bigger change
+  (schema + `panel_invocation`/provenance + export gates); do after Phase 1
+  proves the cheap seeds close most of the gap. Keep NONE as decisive reject-all.
+- **Phase 3 — seat-stated-set mining.** Parse the *prior wave's* `reasoning` for
+  explicitly-stated edge sets and seed the confirmation wave's menu with them —
+  converts unanimous-NONE-lost-to-menu-shape groups (`1b90f03b`, `e085519d`,
+  `c8da4c08`, `17053a69`) into decisive letters.
+
+Couple with the `none_reason` enum (item 5 above) — the two together are what a
+future "does context help" claim must measure against human truth, not NONE rate.
+
 ### FOLLOW-UPS: from the 2026-07-16 architecture review batch
 
 Merged that day: #434 (experiment-boundary guard + `physical_flag_domains`),
