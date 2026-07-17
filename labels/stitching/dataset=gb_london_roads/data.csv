@@ -1,0 +1,2 @@
+group_id,dataset_id,selected_edges,match_type,num_refs,num_targets,labeler,labeled_at,session_id,label_semantics,ref_ids,target_ids,notes
+91570f54,gb_london_roads,"[{""ref_id"": ""e313e3a2-3dcf-4c1e-907a-dbf42b6b9049"", ""target_id"": ""gb_london_266E2CA7-EE39-4907-92E6-39CEAE0FC2B8_88194ad339""}, {""ref_id"": ""e5b3e829-d6c4-4439-9b3c-3359997f4eb4"", ""target_id"": ""gb_london_266E2CA7-EE39-4907-92E6-39CEAE0FC2B8_88194ad339""}]",N:1,2,1,panel_unanimous_v7,2026-07-17T19:15:11.045520+00:00,gb_london_roads_physical_context_v8_20260717,pair,,,
