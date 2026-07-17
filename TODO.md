@@ -287,25 +287,66 @@ complete it is gated only on the diagnostic holdout read described above.
    factorial invariance, informed) falsified — an anchor-exactness phenomenon in
    the out-of-scope exact-pair track, touches neither fix. **This lifts #446's
    last gate.**
-4. **NEXT — #446:** adversarially reviewed 2026-07-17 (no correctness issues; see
-   the review note in the audit-followups status). Rebase onto current `main`
-   (6 behind; auto-merges clean with the wave auto-export change — `git
-   merge-tree` shows 0 conflict markers), confirm green CI, squash-merge. Starts
-   provenance era `2026-07-16.1`.
-5. In a new era, implement the two corroborated diagnostic fixes as SEPARATE PRs
-   (per the diagnostic design's attributability rule):
-   - **Fix B** — analyzer `NONE`-expressibility accounting (deterministic
-     reporting bug; verify the dev 3/3→0/3 flip, all else unchanged).
-   - **Fix A** — truth-backed cycleway/separated-infrastructure uncertainty gate
-     (rubric = new provenance era); add `7175635e` as a non-regression fixture
-     (must NOT flip the correct unanimous cycleway merge to NONE).
-   Then regenerate packs so #443's exact-pair overlays are present, and run the
-   fresh Claude/Codex/Muse panel. NOTE the holdout's draw-level near-misses
-   (`9f56d71d`, `35329743`, `92c0997f`) suggest a FUTURE, separately-registered
-   extension of Fix A to layer/level identity — not part of this fix.
-6. Once v7 is validated by the analysis, mint the 6 deferred auto-accept
-   stitching labels (the "OTHER PIECE" command above).
+4. ~~#446 seat retries + provenance binding.~~ **MERGED 2026-07-17** (`de2ae83`,
+   era `2026-07-16.1`) — rebased, reviewed, CI green.
+5. ~~Implement the two corroborated diagnostic fixes as separate PRs.~~
+   **BOTH MERGED 2026-07-17**: Fix B analyzer accounting (#449 `fb9d943`, dev
+   3→0, re-analysis unblocked); Fix A cycleway/separated-infra uncertainty gate
+   (#448 `3f9b488`, rubric era `2026-07-17+9463c80a0f77`) — review caught+fixed
+   an over-trigger regression; `7175635e` is a FRESH-PANEL non-regression check
+   (must not flip that correct unanimous cycleway merge to NONE) — verify it
+   holds when v8 votes land. The holdout's draw-level near-misses (`9f56d71d`,
+   `35329743`, `92c0997f`) still suggest a FUTURE, separately-registered
+   extension of Fix A to layer/level identity — not in v8.
+6. Once **v8** is analyzed and v7/v8 stitching is validated, mint the deferred
+   v7 auto-accept stitching labels (the "OTHER PIECE" command above).
 7. Clean up merged agent worktrees/branches under `.claude/worktrees/`.
+
+### ⭐ READY TO LAUNCH: v8 wave (built + validated 2026-07-17)
+
+`physical_context_v8_20260717` is **built and manifest-validated** — a single
+"generation jump" folding every corroborated improvement into one wave (quota is
+the bottleneck, so we mint one v8, not incremental v8/v9). The 65-pack packs
+(50 enriched + 15 factorial, same 8 datasets / same design as v7) embed:
+
+- **Rubric era `2026-07-17+9463c80a0f77`** — MI-4 cycleway/separated-infra
+  uncertainty gate (Fix A, holdout-corroborated).
+- **`none_reason` + `desired_edges` prompt contract** (#451) — v8's NONE ballots
+  are machine-analyzable (v7 needed hand-classification).
+- **Exact-pair minus-flagged-edge option seeds** (#450, cap 4, max menu 20) —
+  closes the dominant "no exact option offered" expressibility gap.
+- **#443 exact-pair image overlays** + **#446 invocation era `2026-07-16.1`**.
+
+Panel unchanged: `claude-opus-4-8`/high + `gpt-5.6-sol`/high + `meta/muse-spark-1.1`/high.
+
+**Launch command** (needs `META_API_KEY` in env + `~/.opencode/bin` on PATH;
+smoke-test Muse first per the v7 runbook; start at `--group-workers 2` for quota
+headroom). The driver **auto-archives vote provenance to `labels/votes/` on clean
+completion** and withholds label minting (v8 is still a nonstandard/candidate
+panel) — nothing is lost:
+
+```bash
+set -a; . ./.env; set +a
+PATH=/home/brad/.opencode/bin:$PATH UV_CACHE_DIR=/tmp/uv-cache uv run python \
+  scripts/run_physical_stitch_wave.py \
+  data/agents/stitching/batches/physical_context_v8_20260717_manifest.json \
+  --group-workers 2
+```
+
+Post-v8 analysis carries these forward:
+- **`desired_edges` are stored as raw R#/T# display labels** (not source ids like
+  `edge_set`). The v8 analysis must map labels→ids per group via `batch.json`
+  label maps and validate non-empty / differs-from-every-option itself
+  (the diagnostic does this; production capture does not).
+- **Verify the `7175635e` Fix-A non-regression** in the v8 ballots.
+- Phase 1 left 3 residual pair misses (`d8f883c1`/`3ef22541` boston, `ea80307f`
+  seattle) needing a per-ref-isolation seed track (future), and the reviewer
+  suggested a follow-up total-menu ceiling (≤16) with drop-rank preference.
+- Deferred (NOT in v8, candidates for a future jump): rubric-v2 clarifications
+  the analysts floated (anchor-vs-clip threshold; duplicate-vs-split-carriageway /
+  MI-2-vs-MI-4 precedence) — behavior-shaping, not holdout-corroborated, so held
+  out of the quota jump. Fix B nits (guard-split drift test; analyzer attribution
+  in summary.json) — diagnostic-only.
 
 Note: the holdout's out-of-scope P9 (audit menu-gap 14/21 = 66.7%, double dev)
 independently strengthens the exact-pair option-generation plan (see "PLAN:
