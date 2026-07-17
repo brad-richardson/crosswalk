@@ -76,7 +76,19 @@ def _record_wave_timeout_streaks(
 
 
 def _drop_timeout_groups_from_partials(batch_dirs: set[Path]) -> set[tuple[Path, str]]:
-    """Forget only timeout-affected groups so resume reinvokes their full panel."""
+    """Drop ONLY the timed-out SEATS' ballots (plus the affected group's stale
+    consensus row) so resume seat-fills just those seats.
+
+    A whole-panel re-drop would re-draw the seats that already returned valid
+    ballots, silently re-rolling stochastic model draws that were fine. Instead
+    this removes exactly the TIMEOUT-abstain ballot rows: ``run_batch`` resume
+    then keeps every surviving seat's ballot of record and re-invokes only the
+    dropped seats. The affected group's consensus row is also removed because it
+    described the pre-retry roster and MUST be recomputed from the completed
+    (surviving + refilled) ballot set. Returns the (batch_dir, group_id) pairs
+    whose roster is now incomplete, preserving the wave-level breaker's
+    ``dropped``-count reporting.
+    """
     dropped: set[tuple[Path, str]] = set()
     for batch_dir in batch_dirs:
         votes_path = batch_dir / "votes.partial.csv"
@@ -87,14 +99,17 @@ def _drop_timeout_groups_from_partials(batch_dirs: set[Path]) -> set[tuple[Path,
         consensus = pd.read_csv(consensus_path, dtype={"group_id": str})
         if "abstain_reason" not in votes:
             continue
-        timeout_rows = votes[
-            (votes["choice"].astype(str) == "ABSTAIN")
-            & (votes["abstain_reason"].fillna("").astype(str) == str(AbstainReason.TIMEOUT))
-        ]
-        timeout_ids = set(timeout_rows["group_id"].astype(str))
+        timeout_mask = (votes["choice"].astype(str) == "ABSTAIN") & (
+            votes["abstain_reason"].fillna("").astype(str) == str(AbstainReason.TIMEOUT)
+        )
+        timeout_ids = set(votes.loc[timeout_mask, "group_id"].astype(str))
         if not timeout_ids:
             continue
-        votes[~votes["group_id"].astype(str).isin(timeout_ids)].to_csv(votes_path, index=False)
+        # Keep every NON-timed-out ballot (the surviving seats' ballots of
+        # record); drop only the timed-out seat rows.
+        votes[~timeout_mask].to_csv(votes_path, index=False)
+        # Drop the affected groups' consensus rows so resume recomputes them from
+        # the refilled roster rather than replaying a pre-retry verdict.
         consensus[~consensus["group_id"].astype(str).isin(timeout_ids)].to_csv(
             consensus_path, index=False
         )

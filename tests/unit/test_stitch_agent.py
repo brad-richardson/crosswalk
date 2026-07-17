@@ -2760,6 +2760,93 @@ def test_gemini_route_order_changes_panel_invocation_signature():
     )
 
 
+def test_invocation_signature_binds_opencode_config_and_pack_feedback():
+    from crosswalk.agent_labeling.stitch_provenance import invocation_signature
+
+    panel = [sr.ProviderSpec("claude", "m", effort="high")]
+    base = {
+        "timeout": None,
+        "collect_feedback": True,
+        "invocation_budget_s": 300.0,
+        "effective_timeouts": [240],
+        "runtime_contract_sha256": "a" * 64,
+        "opencode_config_sha256": "b" * 64,
+        "pack_feedback_sha256": "c" * 64,
+        "provider_bindings": [{"effort_cli_translation": "claude:--effort=high"}],
+    }
+    ref = invocation_signature(panel, **base)
+    # Each newly-bound input moves the signature.
+    assert invocation_signature(panel, **{**base, "opencode_config_sha256": "d" * 64}) != ref
+    assert invocation_signature(panel, **{**base, "pack_feedback_sha256": "e" * 64}) != ref
+    assert (
+        invocation_signature(
+            panel,
+            **{**base, "provider_bindings": [{"effort_cli_translation": "claude:--effort=low"}]},
+        )
+        != ref
+    )
+
+
+def test_provider_invocation_binding_translates_effort_per_provider():
+    # Effort translation is provider-specific: a real CLI flag/param, or a
+    # documented non-translation.
+    assert (
+        sr._provider_invocation_binding(sr.ProviderSpec("claude", "m", effort="high"))[
+            "effort_cli_translation"
+        ]
+        == "claude:--effort=high"
+    )
+    # codex binds the default-low fallback explicitly.
+    assert (
+        sr._provider_invocation_binding(sr.ProviderSpec("codex", "m"))["effort_cli_translation"]
+        == "codex:model_reasoning_effort=low"
+    )
+    assert (
+        "opencode.json-pinned"
+        in sr._provider_invocation_binding(sr.MUSE_HIGH_EFFORT)["effort_cli_translation"]
+    )
+    # The Gemini flex route injects an OPENCODE_CONFIG_CONTENT -> bound by sha.
+    flex_binding = sr._provider_invocation_binding(sr.GEMINI)
+    assert flex_binding["injected_opencode_config_sha256"]
+    # A seat that injects no config binds an empty sha there.
+    assert (
+        sr._provider_invocation_binding(sr.ProviderSpec("claude", "m"))[
+            "injected_opencode_config_sha256"
+        ]
+        == ""
+    )
+
+
+def test_run_batch_binds_new_invocation_inputs(tmp_path, monkeypatch):
+    """run_batch's recorded panel_invocation_sha256 reflects the new bound inputs.
+
+    Changing the repo-root opencode.json content must change the recorded
+    signature, proving run_batch actually binds it.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    monkeypatch.setitem(sr._INVOKERS, "claude", fake_invoker)
+    panel = [sr.ProviderSpec("claude", "m")]
+
+    real = sr._repo_opencode_config_sha256
+    monkeypatch.setattr(sr, "_repo_opencode_config_sha256", lambda: "0" * 64)
+    votes_a, _ = sr.run_batch(batch_dir, panel=panel)
+    sha_a = str(votes_a.iloc[0]["panel_invocation_sha256"])
+
+    monkeypatch.setattr(sr, "_repo_opencode_config_sha256", lambda: "1" * 64)
+    votes_b, _ = sr.run_batch(batch_dir, panel=panel)
+    sha_b = str(votes_b.iloc[0]["panel_invocation_sha256"])
+
+    assert sha_a != sha_b
+    # Sanity: the real helper returns a 64-hex digest (opencode.json present).
+    assert len(real()) == 64
+
+
 def test_get_panel_unknown_name_is_a_hard_error():
     """Panel choice is era-load-bearing (it decides the export labeler
     generation), so a typo must error listing the valid names — never silently
@@ -3670,8 +3757,24 @@ def test_run_batch_resume_rejects_invalid_delivery_provenance(
     calls["n"] = 0
     repaired, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
 
-    assert calls["n"] == 3
+    # Seat-level retry: dropping the WHOLE evidence_delivery column poisons every
+    # seat's provenance, so all three re-run; tampering only the claude ballot
+    # re-invokes just that seat and keeps codex/agy's valid ballots of record.
+    assert calls["n"] == (3 if mutation == "missing" else 1)
     assert repaired["evidence_delivery"].astype(str).str.len().gt(0).all()
+    for _row in repaired.to_dict("records"):
+        manifest = load_evidence_manifest(batch_dir / str(_row["group_id"]))
+        mode, transport = {
+            "claude": (sr.DELIVERY_MODE_PROMPT_PATH, "claude:Read"),
+            "codex": (sr.DELIVERY_MODE_NATIVE_ATTACHMENT, "codex:-i"),
+            "agy": (sr.DELIVERY_MODE_PROMPT_PATH, "agy:agent-read"),
+        }[_row["provider"]]
+        sr.validate_evidence_delivery_record(
+            _row["evidence_delivery"],
+            manifest,
+            expected_delivery_mode=mode,
+            expected_transport=transport,
+        )
 
 
 def test_run_batch_resume_requires_valid_gemini_route_provenance(tmp_path, monkeypatch):
@@ -4087,13 +4190,19 @@ def test_run_batch_resume_rejects_choice_edge_set_mismatch(tmp_path, monkeypatch
     sr.run_batch(batch_dir, panel=panel)
 
     consensus = pd.read_csv(batch_dir / "consensus.partial.csv")
+    original_edge_set = str(consensus.loc[0, "edge_set"])
     consensus.loc[0, "edge_set"] = json.dumps([[R1, T2]])
     consensus.to_csv(batch_dir / "consensus.partial.csv", index=False)
     calls["n"] = 0
 
-    sr.run_batch(batch_dir, panel=panel, resume=True)
+    _votes, cons = sr.run_batch(batch_dir, panel=panel, resume=True)
 
-    assert calls["n"] == 3
+    # A hand-edited consensus row cannot launder a selection: the ballots of
+    # record are all still valid, so no seat re-runs (0 invocations) and the
+    # consensus is RECOMPUTED from them, discarding the tampered edge_set.
+    assert calls["n"] == 0
+    assert json.loads(cons.iloc[0]["edge_set"]) == json.loads(original_edge_set)
+    assert json.loads(cons.iloc[0]["edge_set"]) != [[R1, T2]]
 
 
 def test_run_batch_resume_rejects_incomplete_per_group_ballots(tmp_path, monkeypatch):
@@ -4111,13 +4220,24 @@ def test_run_batch_resume_rejects_incomplete_per_group_ballots(tmp_path, monkeyp
     panel = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "agy")]
     sr.run_batch(batch_dir, panel=panel)
     partial = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
-    partial[partial["provider"] != "agy"].to_csv(batch_dir / "votes.partial.csv", index=False)
+    kept = partial[partial["provider"] != "agy"].copy()
+    kept.to_csv(batch_dir / "votes.partial.csv", index=False)
 
     calls["n"] = 0
     votes, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
 
-    assert calls["n"] == 3
+    # Seat-level retry: claude + codex have valid ballots of record and are kept
+    # byte-identical; ONLY the missing agy seat is re-invoked (one call).
+    assert calls["n"] == 1
     assert set(votes["provider"]) == {"claude", "codex", "agy"}
+    for provider in ("claude", "codex"):
+        before = kept[kept["provider"] == provider].iloc[0]
+        after = votes[votes["provider"] == provider].iloc[0]
+        for column in ("choice", "reasoning", "evidence_delivery", "panel_invocation_sha256"):
+            assert str(after[column]) == str(before[column])
+    # The refilled agy seat is drawn a round later -> attempt 2, kept seats stay 1.
+    assert int(votes[votes["provider"] == "agy"].iloc[0]["attempt"]) == 2
+    assert set(votes[votes["provider"] != "agy"]["attempt"].astype(int)) == {1}
 
 
 def test_run_batch_resume_rejects_changed_consensus_policy(tmp_path, monkeypatch):
@@ -4141,9 +4261,142 @@ def test_run_batch_resume_rejects_changed_consensus_policy(tmp_path, monkeypatch
     )
 
     calls["n"] = 0
-    sr.run_batch(batch_dir, panel=panel, resume=True)
+    _votes, cons = sr.run_batch(batch_dir, panel=panel, resume=True)
 
-    assert calls["n"] == 3
+    # A consensus-policy change does not touch panel_invocation_sha256, so every
+    # ballot of record stays valid: no seat re-runs (0 invocations) and only the
+    # consensus row is recomputed and re-stamped under the new policy signature.
+    assert calls["n"] == 0
+    expected_policy = sr.consensus_policy_signature(
+        max_edges=sr.settings.stitch_export_backstop_max_edges,
+        min_voter_confidence=sr.settings.stitch_min_voter_confidence,
+        runtime_contract_sha256=sr.sha256_file(sr.Path(sr.__file__)),
+    )
+    assert str(cons.iloc[0]["consensus_policy_sha256"]) == expected_policy
+
+
+def test_run_batch_seat_fill_keeps_valid_ballots_and_reinvokes_only_missing(tmp_path, monkeypatch):
+    """Seat-level retry: keep the 2 valid seats byte-identical, re-draw only the 3rd.
+
+    Simulates a --retry-timeouts drop: the muse seat's row and the consensus row
+    are removed from the partials, and the surviving claude/codex ballots of
+    record must be kept unchanged while ONLY muse is re-invoked (one call). The
+    consensus is recomputed from the full mixed-attempt ballot set.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    calls = {"n": 0, "providers": []}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "muse"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    panel = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "muse")]
+    sr.run_batch(batch_dir, panel=panel)
+
+    # Drop ONLY the muse ballot and the consensus row (what _drop_timeout_groups
+    # does for a single timed-out seat) — claude/codex survive as ballots of record.
+    votes = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
+    surviving = votes[votes["provider"] != "muse"].copy()
+    surviving.to_csv(batch_dir / "votes.partial.csv", index=False)
+    pd.read_csv(batch_dir / "consensus.partial.csv", dtype={"group_id": str}).iloc[0:0].to_csv(
+        batch_dir / "consensus.partial.csv", index=False
+    )
+
+    calls["n"] = 0
+    out_votes, out_cons = sr.run_batch(batch_dir, panel=panel, resume=True)
+
+    assert calls["n"] == 1  # only muse re-invoked
+    assert set(out_votes["provider"]) == {"claude", "codex", "muse"}
+    # Kept ballots are byte-identical to the surviving rows.
+    for provider in ("claude", "codex"):
+        before = surviving[surviving["provider"] == provider].iloc[0].to_dict()
+        after = out_votes[out_votes["provider"] == provider].iloc[0].to_dict()
+        for column in sr.VOTES_COLUMNS:
+            assert str(after.get(column)) == str(before.get(column)), column
+    # Consensus recomputed over the full ballot set as if drawn together.
+    assert len(out_cons) == 1
+    assert out_cons.iloc[0]["consensus"] == "unanimous"
+    assert out_cons.iloc[0]["routing"] == "auto_accept"
+    assert int(out_cons.iloc[0]["n_votes"]) == 3
+    # The muse ballot carries the same panel_invocation_sha256 as the kept seats.
+    assert set(out_votes["panel_invocation_sha256"].astype(str)) == {
+        str(surviving.iloc[0]["panel_invocation_sha256"])
+    }
+
+
+def test_run_batch_seat_fill_reinvokes_only_the_stale_seat(tmp_path, monkeypatch):
+    """A single seat with a hand-edited invocation hash re-runs alone; peers kept.
+
+    A stale panel_invocation_sha256 on one recorded ballot invalidates only that
+    seat's ballot of record — the other two seats' valid ballots are kept.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    calls = {"n": 0}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    panel = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "agy")]
+    sr.run_batch(batch_dir, panel=panel)
+
+    votes = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
+    codex_before = votes[votes["provider"] == "codex"].iloc[0].to_dict()
+    votes.loc[votes["provider"] == "claude", "panel_invocation_sha256"] = "0" * 64
+    votes.to_csv(batch_dir / "votes.partial.csv", index=False)
+
+    calls["n"] = 0
+    out_votes, _ = sr.run_batch(batch_dir, panel=panel, resume=True)
+
+    assert calls["n"] == 1  # only the stale claude seat re-runs
+    codex_after = out_votes[out_votes["provider"] == "codex"].iloc[0].to_dict()
+    for column in sr.VOTES_COLUMNS:
+        assert str(codex_after.get(column)) == str(codex_before.get(column)), column
+    # The refilled claude seat carries the CURRENT (correct) invocation hash.
+    assert set(out_votes["panel_invocation_sha256"].astype(str)) == {
+        str(codex_before["panel_invocation_sha256"])
+    }
+
+
+def test_run_batch_resume_panel_era_change_salvages_nothing(tmp_path, monkeypatch):
+    """A panel-era change re-mints the invocation hash on EVERY seat -> no salvage.
+
+    Adding a seat changes panel_invocation_sha256 for the whole roster, so none
+    of the recorded ballots is a valid ballot of record for the new panel and the
+    entire group re-runs (the historical all-or-nothing gate for a different era).
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    _write_min_pack(batch_dir, "g1")
+    calls = {"n": 0}
+
+    def fake_invoker(prompt, group_dir, letters, model, timeout, effort=""):
+        calls["n"] += 1
+        return '{"choice": "A", "confidence": 0.9, "reasoning": "ok"}'
+
+    for name in ("claude", "codex", "agy", "muse"):
+        monkeypatch.setitem(sr._INVOKERS, name, fake_invoker)
+    three = [sr.ProviderSpec(name, "m") for name in ("claude", "codex", "agy")]
+    four = [*three, sr.ProviderSpec("muse", "m")]
+    sr.run_batch(batch_dir, panel=three)
+    before = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
+
+    calls["n"] = 0
+    out_votes, _ = sr.run_batch(batch_dir, panel=four, resume=True)
+
+    assert calls["n"] == 4  # nothing salvaged; the whole 4-seat panel re-runs
+    assert set(out_votes["provider"]) == {"claude", "codex", "agy", "muse"}
+    # Every seat carries the NEW roster's invocation hash (none kept from the old).
+    new_hashes = set(out_votes["panel_invocation_sha256"].astype(str))
+    assert new_hashes.isdisjoint(set(before["panel_invocation_sha256"].astype(str)))
 
 
 def test_run_batch_resume_respects_group_selection(tmp_path, monkeypatch):

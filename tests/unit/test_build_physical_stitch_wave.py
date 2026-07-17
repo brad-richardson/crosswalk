@@ -394,8 +394,16 @@ def test_schedule_retry_drops_timeout_partials_and_reinvokes_group(
         calls.append(list(group_ids))
         if group_ids == ["timed-out"]:
             retained = pd.read_csv(batch_dir / "votes.partial.csv")
-            assert "timed-out" not in set(retained["group_id"])
+            # Seat-level drop: ONLY the timed-out codex seat is removed; the
+            # surviving claude/muse ballots of record stay so resume seat-fills
+            # just codex rather than re-drawing the whole panel.
+            timed = retained[retained["group_id"] == "timed-out"]
+            assert set(timed["provider"]) == {spec.name for spec in panel} - {"codex"}
             assert "successful" in set(retained["group_id"])
+            # The affected group's stale consensus row was removed for recompute.
+            cons = pd.read_csv(batch_dir / "consensus.partial.csv")
+            assert "timed-out" not in set(cons["group_id"].astype(str))
+            assert "successful" in set(cons["group_id"].astype(str))
         votes = pd.DataFrame(
             [
                 {
@@ -421,6 +429,51 @@ def test_schedule_retry_drops_timeout_partials_and_reinvokes_group(
     )
 
     assert calls == [["timed-out"], ["successful"], ["timed-out", "successful"]]
+
+
+def test_drop_timeout_partials_keeps_surviving_seats(tmp_path: Path) -> None:
+    """`_drop_timeout_groups_from_partials` removes only timed-out seat rows.
+
+    Surviving seats' ballots of record and untouched groups stay put; the
+    affected group's consensus row is dropped for recompute on resume.
+    """
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    panel = get_panel("v7-candidate")
+    rows = []
+    for group_id in ("timed-out", "clean"):
+        for spec in panel:
+            timed = group_id == "timed-out" and spec.name == "codex"
+            rows.append(
+                {
+                    "group_id": group_id,
+                    "provider": spec.name,
+                    "model": spec.model,
+                    "choice": "ABSTAIN" if timed else "A",
+                    "abstain_reason": "timeout" if timed else "",
+                }
+            )
+    pd.DataFrame(rows).to_csv(batch_dir / "votes.partial.csv", index=False)
+    pd.DataFrame([{"group_id": "timed-out"}, {"group_id": "clean"}]).to_csv(
+        batch_dir / "consensus.partial.csv", index=False
+    )
+
+    dropped = wave_runner._drop_timeout_groups_from_partials({batch_dir})
+
+    assert dropped == {(batch_dir, "timed-out")}
+    votes = pd.read_csv(batch_dir / "votes.partial.csv", dtype={"group_id": str})
+    # No timeout-abstain rows remain anywhere.
+    assert votes[
+        (votes["choice"] == "ABSTAIN") & (votes["abstain_reason"].fillna("") == "timeout")
+    ].empty
+    # The timed-out group keeps every NON-timed-out seat; codex was dropped.
+    timed = votes[votes["group_id"] == "timed-out"]
+    assert set(timed["provider"]) == {spec.name for spec in panel} - {"codex"}
+    # The clean group is fully intact.
+    assert len(votes[votes["group_id"] == "clean"]) == len(panel)
+    # The affected group's consensus row is dropped; the clean one is preserved.
+    cons = pd.read_csv(batch_dir / "consensus.partial.csv", dtype={"group_id": str})
+    assert set(cons["group_id"].astype(str)) == {"clean"}
 
 
 def _schedule_row(index: int, batch_dir: Path, group_id: str) -> dict:

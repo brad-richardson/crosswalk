@@ -1217,6 +1217,32 @@ def test_vote_provenance_strict_mode_links_ballots_consensus_and_menu(tmp_path):
     }
 
 
+def test_vote_provenance_strict_mode_passes_mixed_attempt_group(tmp_path):
+    """A seat-filled (mixed-attempt) group still passes the strict export gates.
+
+    Seat-level retries leave a group whose ballots were drawn in different panel
+    rounds (``attempt`` differs per seat) but which share one
+    panel_invocation_sha256 and one provider each. The fail-closed export gates
+    key on the (provider, model) set and the provenance hashes — never on the
+    attempt round — so a mixed-attempt group exports exactly like a
+    single-draw one.
+    """
+    batch, _group = _make_linked_evidence_batch(tmp_path, "mixed-attempt", "g1")
+    votes_path = batch / "votes.csv"
+    votes = pd.read_csv(votes_path)
+    # Mark agy as filled in a later retry round; claude/codex are first-draw.
+    votes["attempt"] = [1, 1, 2]
+    votes.to_csv(votes_path, index=False)
+
+    n_votes, n_consensus = write_vote_provenance(
+        [batch],
+        DATASET,
+        votes_dir=tmp_path / "votes",
+        require_evidence=True,
+    )
+    assert (n_votes, n_consensus) == (3, 1)
+
+
 def test_vote_provenance_strict_mode_requires_known_gemini_invocation_route(tmp_path):
     from crosswalk.agent_labeling.stitch_runner import GEMINI_ROUTE_OPENROUTER_FLEX
 
