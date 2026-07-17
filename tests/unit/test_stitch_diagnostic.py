@@ -391,6 +391,23 @@ def test_three_way_split_has_no_arbitrary_modal_result(tmp_path: Path, fake_evid
     assert row["modal_exact_human"] is None
 
 
+def test_human_menu_expressible_counts_the_selectable_empty_set() -> None:
+    letter_a = frozenset({("ref-1", "target-1")})
+    letter_b = frozenset({("ref-1", "target-2")})
+    option_sets = {letter_a, letter_b}
+
+    # 1. empty-set (reject-all) label + NONE selectable -> expressible
+    assert diagnostic._human_menu_expressible(frozenset(), option_sets, True) is True
+    # 2. empty-set label + NONE NOT selectable -> inexpressible
+    assert diagnostic._human_menu_expressible(frozenset(), option_sets, False) is False
+    # 3. nonempty label equal to a lettered option -> expressible
+    assert diagnostic._human_menu_expressible(letter_a, option_sets, False) is True
+    # 4. nonempty label absent from the menu -> inexpressible, and NONE never rescues it
+    orphan = frozenset({("ref-9", "target-9")})
+    assert diagnostic._human_menu_expressible(orphan, option_sets, False) is False
+    assert diagnostic._human_menu_expressible(orphan, option_sets, True) is False
+
+
 def test_analysis_defaults_to_development_and_holdout_requires_freeze(
     tmp_path: Path, fake_evidence
 ) -> None:
