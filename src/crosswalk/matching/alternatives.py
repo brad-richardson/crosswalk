@@ -85,6 +85,15 @@ _ALIGNMENT_KEYS = ("gers_start_frac", "gers_end_frac", "local_start_frac", "loca
 # count); the cap then keeps the *most* droppable ones.
 MAX_FLAGGED_SINGLE_DROPS = 4  # max single-edge removals emitted per base set
 MAX_COMBINED_DROP = 3  # max edges removed together in the one combined seed
+
+# Cap on externally-supplied ``seed_edge_sets`` (e.g. consensus-desired edges)
+# injected as options. Unlike the enumerated / exact-pair seeds these arrive from
+# outside the generator and must not be able to push a large group's menu past
+# the panel's max-menu bound (hk/de groups already sit near it): the injection is
+# bounded to this many seeds, smallest-desired-set-first (a tighter set is the
+# likelier true intent and the cheaper option), and further gated by the caller's
+# ``max_total_options`` when supplied.
+MAX_INJECTED_SEEDS = 3
 # An edge's confidence is "low" (a drop signal) if it is below this absolute
 # floor, OR this far below the base set's strongest edge (relative gap).
 LOW_CONF_ABS = 0.85
@@ -98,6 +107,7 @@ def generate_top_k_alternatives(
     k: int = 5,
     include_seed_options: bool = True,
     seed_edge_sets: list[frozenset[tuple[str, str]]] | None = None,
+    max_total_options: int | None = None,
 ) -> list[dict]:
     """Generate top-K assignment alternatives for a match group.
 
@@ -159,7 +169,16 @@ def generate_top_k_alternatives(
             top-K and the whole-group seeds, so a menu cap is never exceeded by a
             set the menu already offers. Injected independently of
             ``include_seed_options`` (the caller decides which sets are worth an
-            option regardless of the auto-seed policy).
+            option regardless of the auto-seed policy). Bounded to
+            ``MAX_INJECTED_SEEDS`` seeds, smallest-set-first, so a large group's
+            menu cannot balloon.
+        max_total_options: Optional hard cap on the total returned menu length,
+            enforced ONLY against the injected ``seed_edge_sets`` (organic and
+            whole-group/exact-pair seeds are never truncated here — the panel's
+            diversity prune, ``prune_options_for_panel``, owns that). When the
+            menu is already at/over this bound, NO consensus seed is injected, so
+            injection can never carry a near-full hk/de menu past the max-menu
+            constant (pass ``settings.stitch_panel_max_options`` here).
 
     Returns:
         List of alternative dicts, each with:
@@ -264,17 +283,29 @@ def generate_top_k_alternatives(
     # the exact-pair seeds above. Each must be a non-empty subset of the group's
     # candidate edges (so it satisfies the same output invariant) and is deduped
     # against everything already offered, so a set the menu already expresses is
-    # never re-seeded and the caps are respected.
+    # never re-seeded. Bounded to MAX_INJECTED_SEEDS, smallest-set-first, and
+    # gated by max_total_options so a near-full menu can never be pushed past the
+    # panel's max-menu bound.
     if seed_edge_sets:
-        for raw in seed_edge_sets:
-            keys = {(str(r), str(t)) for r, t in raw}
-            if not keys or not keys <= valid_keys:
+        injected = 0
+        # Smallest set first (tighter intent, cheaper option); deterministic
+        # tie-break on the sorted pairs so the cap picks stably.
+        ordered = sorted(
+            (frozenset((str(r), str(t)) for r, t in raw) for raw in seed_edge_sets),
+            key=lambda s: (len(s), sorted(s)),
+        )
+        for fkey in ordered:
+            if injected >= MAX_INJECTED_SEEDS:
+                break
+            if max_total_options is not None and len(top_k) >= max_total_options:
+                break
+            if not fkey or not fkey <= valid_keys:
                 continue
-            fkey = frozenset(keys)
             if fkey in seen_keys:
                 continue
             seen_keys.add(fkey)
-            top_k.append(_seed_alt_from_keys(edge_data, ref_ids, sorted(keys)))
+            top_k.append(_seed_alt_from_keys(edge_data, ref_ids, sorted(fkey)))
+            injected += 1
 
     # Assign option indices over the final (organic + seed) list.
     for i, alt in enumerate(top_k):

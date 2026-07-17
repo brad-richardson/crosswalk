@@ -641,6 +641,69 @@ class TestSeedOptions:
         keys = self._full(generate_top_k_alternatives(edges, k=5, seed_edge_sets=[frozenset()]))
         assert frozenset() not in keys
 
+    def test_injected_seeds_bounded_by_max_injected(self):
+        """No more than MAX_INJECTED_SEEDS consensus seeds are injected, even when
+        many distinct valid sets are supplied (menu cannot balloon)."""
+        from crosswalk.matching.alternatives import MAX_INJECTED_SEEDS
+
+        # A wide group: t1 fed by 6 refs (no geom) so many 2-edge subsets are
+        # organically inexpressible and thus genuinely new.
+        edges = [_edge(f"r{i}", "t1", 0.99) for i in range(6)]
+        edges.append(_edge("r0", "t2", 0.99))
+        for e in edges:
+            e["selected"] = True
+        organic = generate_top_k_alternatives(edges, k=3, include_seed_options=True)
+        n_before = len(organic)
+        # Supply more distinct multi-edge-on-t1 sets than the cap allows.
+        supplied = [frozenset({("r0", "t1"), (f"r{i}", "t1")}) for i in range(1, 6)]
+        seeded = generate_top_k_alternatives(
+            edges, k=3, include_seed_options=True, seed_edge_sets=supplied
+        )
+        n_injected = len(seeded) - n_before
+        assert n_injected <= MAX_INJECTED_SEEDS
+
+    def test_injection_respects_max_total_options_on_full_menu(self):
+        """When the menu is already at/over max_total_options, injection adds
+        nothing — a near-full hk/de menu cannot be pushed past the max-menu cap."""
+        edges = [_edge(f"r{i}", "t1", 0.99) for i in range(6)]
+        edges.append(_edge("r0", "t2", 0.99))
+        for e in edges:
+            e["selected"] = True
+        base = generate_top_k_alternatives(edges, k=3, include_seed_options=True)
+        cap = len(base)  # menu already exactly at the cap
+        supplied = [frozenset({("r0", "t1"), ("r1", "t1")})]
+        want = frozenset({("r0", "t1"), ("r1", "t1")})
+        assert want not in self._full(base)  # genuinely new
+        seeded = generate_top_k_alternatives(
+            edges,
+            k=3,
+            include_seed_options=True,
+            seed_edge_sets=supplied,
+            max_total_options=cap,
+        )
+        assert len(seeded) <= cap
+        assert want not in self._full(seeded)  # not injected past the cap
+
+    def test_injection_prefers_smallest_set_under_cap(self):
+        """Under max_total_options=+1 slot, the SMALLEST supplied set wins."""
+        edges = [_edge(f"r{i}", "t1", 0.99) for i in range(6)]
+        edges.append(_edge("r0", "t2", 0.99))
+        for e in edges:
+            e["selected"] = True
+        base = generate_top_k_alternatives(edges, k=3, include_seed_options=True)
+        small = frozenset({("r0", "t1"), ("r1", "t1")})  # 2 edges
+        big = frozenset({("r0", "t1"), ("r1", "t1"), ("r2", "t1"), ("r3", "t1")})  # 4
+        seeded = generate_top_k_alternatives(
+            edges,
+            k=3,
+            include_seed_options=True,
+            seed_edge_sets=[big, small],
+            max_total_options=len(base) + 1,
+        )
+        keys = self._full(seeded)
+        assert small in keys
+        assert big not in keys
+
 
 class TestAlternativeOutputInvariant:
     """Every emitted alternative must be a deduplicated subset of the group edges.

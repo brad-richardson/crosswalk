@@ -185,20 +185,35 @@ def consensus_desired_edge_sets(
 
 
 def label_map_from_group(group: Mapping) -> dict[str, dict[str, str]]:
-    """Build the ``R#/T# -> id`` label map from a ``batch.json`` group.
+    """Build the ``R#/T# -> id`` label map for a group, matching the pack labeler.
 
-    Mirrors ``stitch_export._meta_from_group`` / the ``stitch_evidence`` labeling
-    scheme: ``R{i+1} -> ref_ids[i]``, ``T{i+1} -> target_ids[i]`` in the group's
-    stored id order (falling back to the sorted ids seen on ``edges`` when the
-    explicit id lists are absent). The pack's ``metadata.yaml`` segments remain
-    the authoritative source when available (see
-    ``stitch_diagnostic._label_maps``); this is the convenience path for callers
-    holding only a ``batch.json`` group.
+    Mirrors ``stitch_evidence._seg_labels`` EXACTLY — that is the function that
+    stamped the ``R#/T#`` labels the seat actually saw, so any other ordering
+    would map desired sets to the WRONG source ids silently. The label order is:
+    ``group["ref_ids"]`` / ``group["target_ids"]`` when present, else the
+    **insertion order of the geometry dicts** (``ref_geometries`` /
+    ``target_geometries`` keys) — NOT a sorted order. If neither ids nor
+    geometries are present the corresponding side maps to ``{}`` and
+    :func:`map_desired_to_ids` will treat the desired set as unmappable (returns
+    ``None``) rather than guessing.
+
+    !!! IMPORTANT — historical label maps !!!
+    Call this ONLY with the group whose pack a ballot was voted against. When the
+    future CLI wiring resolves an ARCHIVED ballot, it must map that ballot's
+    ``R#/T#`` through the ballot's OWN originating batch's ``batch.json`` /
+    ``metadata.yaml`` label map (authoritatively ``stitch_diagnostic._label_maps``),
+    NEVER through this helper on the current (drifted) group: source ids survive
+    group-id drift but ``R#/T#`` label positions do NOT, so cross-mapping a
+    historical ballot through a re-labeled current group silently corrupts the
+    edge set. The seam is deliberately id-space and validated against the current
+    candidate universe precisely to keep this property enforceable.
     """
-    ref_ids = group.get("ref_ids") or sorted({str(e["ref_id"]) for e in group.get("edges", [])})
-    tgt_ids = group.get("target_ids") or sorted(
-        {str(e["target_id"]) for e in group.get("edges", [])}
-    )
+    ref_ids = group.get("ref_ids")
+    if ref_ids is None:
+        ref_ids = list(group.get("ref_geometries", {}).keys())
+    tgt_ids = group.get("target_ids")
+    if tgt_ids is None:
+        tgt_ids = list(group.get("target_geometries", {}).keys())
     return {
         "reference": {f"R{i + 1}": str(r) for i, r in enumerate(ref_ids)},
         "target": {f"T{i + 1}": str(t) for i, t in enumerate(tgt_ids)},
@@ -219,7 +234,21 @@ def consensus_seed_edge_sets_for_group(
     review UI use, so the exact-pair seeds are included in ``offered`` and never
     re-seeded), derives the candidate universe from the group's edges, and
     returns the detector's consensus sets — ready to hand back to
-    ``generate_top_k_alternatives(seed_edge_sets=...)``.
+    ``generate_top_k_alternatives(seed_edge_sets=..., max_total_options=...)``
+    (pass ``settings.stitch_panel_max_options`` so injection respects the
+    max-menu bound; the generator additionally caps the count at
+    ``MAX_INJECTED_SEEDS``).
+
+    !!! IMPORTANT — ``label_map`` must be the ballots' OWN pack map !!!
+    ``label_map`` maps ``R#/T#`` for the ballots supplied. Pass the map of the
+    batch the ballots were voted against — for archived ballots that is their
+    originating ``batch.json`` / ``metadata.yaml`` map, resolved per source
+    batch, NOT :func:`label_map_from_group` on the current drifted group (see
+    that function's warning). The detector returns id-space sets validated
+    against this group's current candidate universe, so a stale/cross-mapped
+    label map cannot smuggle in an edge that does not exist here — but it CAN
+    still map to the wrong (yet extant) edge, so supplying the correct map is the
+    caller's responsibility.
     """
     from ..matching.alternatives import generate_top_k_alternatives
     from ..matching.stitch_options import build_stitch_options

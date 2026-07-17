@@ -200,6 +200,36 @@ def test_label_map_from_group_orders_by_stored_ids():
     }
 
 
+def test_label_map_fallback_matches_seg_labels_ordering():
+    """When ref_ids/target_ids are absent, the fallback must mirror
+    stitch_evidence._seg_labels EXACTLY (geometry-dict INSERTION order, not
+    sorted) — otherwise desired R#/T# sets map to the wrong ids silently."""
+    from crosswalk.agent_labeling.stitch_evidence import _seg_labels
+
+    # Insertion order deliberately NOT sorted (z before a) to catch a sorted bug.
+    group = {
+        "ref_geometries": {"ref-z": {}, "ref-a": {}},
+        "target_geometries": {"tgt-9": {}, "tgt-1": {}},
+    }
+    lm = label_map_from_group(group)
+    # Our map: label -> id. _seg_labels returns id -> label; invert to compare.
+    ref_labels, target_labels = _seg_labels(group)
+    assert lm["reference"] == {lbl: rid for rid, lbl in ref_labels.items()}
+    assert lm["target"] == {lbl: tid for tid, lbl in target_labels.items()}
+    # Explicit: insertion order, so R1 == ref-z (a *sorted* fallback would give ref-a).
+    assert lm["reference"]["R1"] == "ref-z"
+    assert lm["target"]["T1"] == "tgt-9"
+
+
+def test_label_map_fallback_empty_side_is_unmappable():
+    """A side with neither ids nor geometries maps to {}, so a desired edge on
+    it is unmappable (None) rather than silently guessed."""
+    group = {"ref_geometries": {"ref-a": {}}}  # no target ids/geoms
+    lm = label_map_from_group(group)
+    assert lm["target"] == {}
+    assert map_desired_to_ids([("R1", "T1")], lm) is None
+
+
 def _wide_group():
     """A group where one target (t1) is fed by 4 refs (>MAX_REF_CHAIN_LEN).
 
