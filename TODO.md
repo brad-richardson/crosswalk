@@ -246,14 +246,15 @@ digest — that warning is expected. New manifests get an embedded
 `manifest_sha256` automatically.
 
 **Sequencing guard (still active):** the separate Codex consistency diagnostic
-is runtime-bound: its sealed holdout must be analyzed with the current
-`stitch_diagnostic.py` and `stitch_runner.py` bytes after the fix hypothesis is
-frozen, but before #446 or the diagnostic-analyzer fix lands. See the tracked
-design in [`research/codex_stitch_diagnostic.md`](research/codex_stitch_diagnostic.md)
-and the local, non-exportable findings at
-`data/agents/stitching/diagnostics/codex_deep_v1/development_readout.md`. With
-the wave complete, PR #446 (era branch) is no longer gated on wave completion —
-it now only awaits the diagnostic holdout read (see resume checklist below).
+was runtime-bound: its sealed holdout had to be analyzed with the current
+`stitch_diagnostic.py`/`stitch_runner.py` bytes after the fix hypothesis was
+frozen, but before #446 or the diagnostic-analyzer fix landed. **DONE 2026-07-17**
+— pre-registered + unsealed + scored (see resume-checklist step 3 and
+`research/codex_deep_v1_{fix_hypothesis,holdout_result}_2026-07-17.md`). See also
+the tracked design [`research/codex_stitch_diagnostic.md`](research/codex_stitch_diagnostic.md)
+and the local, non-exportable readouts at
+`data/agents/stitching/diagnostics/codex_deep_v1/{development,holdout}/`. **PR
+#446 is now fully ungated** — next step is rebase + green CI + squash-merge.
 
 ### FOLLOW-UPS: from the 2026-07-16 external wave audit (separate agent)
 
@@ -273,20 +274,42 @@ complete it is gated only on the diagnostic holdout read described above.
    rubric/runtime.~~ **DONE 2026-07-17** — 65/65 voted; provenance archived to
    `labels/votes/`; the 6 auto-accept label mints are deferred (see the "OTHER
    PIECE" note in the wave section above).
-2. **IN FLIGHT 2026-07-17** — high-effort wave analysis over ballots, feedback,
-   and the five 2x2 controls (Fable + Codex `gpt-5.6-sol` analysts, writing to
-   `research/v7_wave_analysis_{fable,codex}_2026-07-17.md`).
-3. Freeze the narrow diagnostic fix hypothesis, create the required marker,
-   and analyze the sealed holdout using the current #447 runtime. Do this
-   before changing either `stitch_diagnostic.py` or `stitch_runner.py`.
-4. Adversarially review/update #446 against current `main`, get green CI, and
-   squash-merge. It starts provenance era `2026-07-16.1`.
-5. In a new era, fix diagnostic `NONE` expressibility accounting and the
-   truth-backed cycleway uncertainty gate; regenerate packs so #443's exact
-   pair overlays are present; then run the fresh Claude/Codex/Muse panel.
+2. ~~High-effort wave analysis over ballots, feedback, and the five 2x2
+   controls.~~ **DONE 2026-07-17** — see the "Analysis DONE" block in the wave
+   section (`research/v7_wave_analysis_{fable,codex}_2026-07-17.md`).
+3. ~~Freeze the narrow diagnostic fix hypothesis, create the marker, and analyze
+   the sealed holdout using the current #447 runtime.~~ **DONE 2026-07-17.**
+   Pre-registered `research/codex_deep_v1_fix_hypothesis_2026-07-17.md` (fix_id
+   `codex_deep_v1__cycleway_gate_and_none_accounting__2026-07-17`), created the
+   marker, unsealed + scored: **7/7 blind predictions confirmed; both fixes
+   corroborated out-of-sample** — result in
+   `research/codex_deep_v1_holdout_result_2026-07-17.md`. P7 (`18ef284e`
+   factorial invariance, informed) falsified — an anchor-exactness phenomenon in
+   the out-of-scope exact-pair track, touches neither fix. **This lifts #446's
+   last gate.**
+4. **NEXT — #446:** adversarially reviewed 2026-07-17 (no correctness issues; see
+   the review note in the audit-followups status). Rebase onto current `main`
+   (6 behind; auto-merges clean with the wave auto-export change — `git
+   merge-tree` shows 0 conflict markers), confirm green CI, squash-merge. Starts
+   provenance era `2026-07-16.1`.
+5. In a new era, implement the two corroborated diagnostic fixes as SEPARATE PRs
+   (per the diagnostic design's attributability rule):
+   - **Fix B** — analyzer `NONE`-expressibility accounting (deterministic
+     reporting bug; verify the dev 3/3→0/3 flip, all else unchanged).
+   - **Fix A** — truth-backed cycleway/separated-infrastructure uncertainty gate
+     (rubric = new provenance era); add `7175635e` as a non-regression fixture
+     (must NOT flip the correct unanimous cycleway merge to NONE).
+   Then regenerate packs so #443's exact-pair overlays are present, and run the
+   fresh Claude/Codex/Muse panel. NOTE the holdout's draw-level near-misses
+   (`9f56d71d`, `35329743`, `92c0997f`) suggest a FUTURE, separately-registered
+   extension of Fix A to layer/level identity — not part of this fix.
 6. Once v7 is validated by the analysis, mint the 6 deferred auto-accept
    stitching labels (the "OTHER PIECE" command above).
 7. Clean up merged agent worktrees/branches under `.claude/worktrees/`.
+
+Note: the holdout's out-of-scope P9 (audit menu-gap 14/21 = 66.7%, double dev)
+independently strengthens the exact-pair option-generation plan (see "PLAN:
+Exact-pair option generation" below) with fresh out-of-sample support.
 
 Finding-by-finding disposition:
 
