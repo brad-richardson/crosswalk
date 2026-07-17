@@ -849,16 +849,31 @@ def _access_class_defaults(road_class: str | None) -> dict[str, str]:
     return defaults
 
 
+# Access "signals" a single access_restrictions entry contributes to one mode.
+# Unconditional (no when.during/when.recognized scope) vs scoped are tracked
+# separately so precedence can refuse to manufacture a hard separation signal
+# from conditional data (see _resolve_mode_signal).
+_SIGNAL_UNCONDITIONAL = {"allow", "deny", "designate"}
+_SIGNAL_BY_ACCESS_TYPE = {"allowed": "allow", "denied": "deny", "designated": "designate"}
+
+
 def _tagged_access_observations(
     access_restrictions: list | None,
-) -> list[tuple[float, float, str, str, int]]:
-    """Extract tagged ``(start, end, mode, value, priority)`` access observations.
+) -> list[tuple[float, float, str, str]]:
+    """Extract tagged ``(start, end, mode, signal)`` access observations.
 
     Entries carrying ``when.heading`` belong to the direction/oneway channel and
     are skipped here (see :func:`parse_oneway_lr`). For the rest, ``access_type ×
-    when.mode[]`` maps to per-mode values; a null ``when.mode`` is a blanket
-    entry over all modes; a ``when.during`` / ``when.recognized`` (permit / time /
-    private) scope resolves to ``restricted`` regardless of ``access_type``.
+    when.mode[]`` maps to a per-mode *signal*; a null ``when.mode`` is a blanket
+    entry over all modes. Signals:
+
+    - unconditional (no scope) → ``allow`` / ``deny`` / ``designate``
+    - scoped (``when.during`` / ``when.recognized``, i.e. permit/time/private) →
+      ``restrict_deny`` for a scoped denial, else ``restrict_exception`` (a scoped
+      allow/designate carve-out, or an ambiguous scoped entry).
+
+    A single entry that produces no usable signal (unconditional with an
+    unrecognized ``access_type``) is dropped.
     """
     if access_restrictions is None:
         return []
@@ -867,8 +882,8 @@ def _tagged_access_observations(
     if not isinstance(access_restrictions, list):
         return []
 
-    observations: list[tuple[float, float, str, str, int]] = []
-    for index, rule in enumerate(access_restrictions):
+    observations: list[tuple[float, float, str, str]] = []
+    for rule in access_restrictions:
         if not isinstance(rule, dict):
             continue
         when = rule.get("when")
@@ -878,12 +893,15 @@ def _tagged_access_observations(
         if when.get("heading") is not None:
             continue
 
+        mapped = _ACCESS_TYPE_VALUES.get(rule.get("access_type"))
         scoped = when.get("during") is not None or when.get("recognized") is not None
         if scoped:
-            value = "restricted"
+            # A scoped denial stays a (soft) denial; a scoped allow/designate — or
+            # an ambiguous scoped entry — is a carve-out that softens a denial.
+            signal = "restrict_deny" if mapped == "denied" else "restrict_exception"
         else:
-            value = _ACCESS_TYPE_VALUES.get(rule.get("access_type"))
-            if value is None:
+            signal = _SIGNAL_BY_ACCESS_TYPE.get(mapped)
+            if signal is None:
                 continue
 
         modes = when.get("mode")
@@ -903,8 +921,44 @@ def _tagged_access_observations(
         range_tuple = _extract_range_from_rule(rule)
         start, end = range_tuple if range_tuple else (0.0, 1.0)
         for mode in affected:
-            observations.append((start, end, mode, value, index))
+            observations.append((start, end, mode, signal))
     return observations
+
+
+def _resolve_mode_signal(signals: set[str]) -> str | None:
+    """Resolve all tagged signals touching one mode/interval to a single value.
+
+    Precedence (guided by "never manufacture a hard separation signal from
+    ambiguous or conditional data"):
+
+    1. An **unconditional** entry outranks a **scoped** one.
+    2. Among unconditional signals, prefer the *least* separation-signaling
+       reading: an unconditional ``allow`` (or ``designate``) beats an
+       unconditional ``deny`` (defensive — they should not co-occur in real
+       Overture, but if they do we do not surface the denial).
+    3. A mode that is unconditionally ``deny`` **and** also carries a scoped
+       carve-out (``restrict_exception``) is "denied-with-exceptions" → resolves
+       to ``restricted``, not a hard ``denied``. A scoped denial alone
+       (``restrict_deny``) does not soften it.
+    4. With only scoped signals, the mode is ``restricted`` regardless of the
+       scoped access_type.
+
+    Returns ``None`` when no tagged signal applies (the class-default pass then
+    fills the mode).
+    """
+    unconditional = signals & _SIGNAL_UNCONDITIONAL
+    if unconditional:
+        if "allow" in unconditional:
+            return "allowed"
+        if "designate" in unconditional:
+            return "designated"
+        # Only unconditional deny remains; a scoped carve-out softens it.
+        if "restrict_exception" in signals:
+            return "restricted"
+        return "denied"
+    if signals:  # scoped-only (restrict_deny / restrict_exception)
+        return "restricted"
+    return None
 
 
 def parse_access_lr(
@@ -919,9 +973,13 @@ def parse_access_lr(
 
     Tagged observations (explicit data) take precedence; a single class-default
     pass then fills unset modes from :func:`_access_class_defaults` (class
-    defaults never override tags). Modes left unknown are omitted from the map.
-    Applies even when ``access_restrictions`` is absent — a driveable class still
-    yields ``motor_vehicle=allowed`` (class_default).
+    defaults never override tags). When several tagged entries touch the same
+    mode over the same span, :func:`_resolve_mode_signal` decides the value —
+    critically, an unconditional denial with a scoped carve-out resolves to
+    ``restricted``, not a hard ``denied``, so an entry-ordering artifact can
+    never manufacture a spurious tagged separation signal. Modes left unknown are
+    omitted from the map. Applies even when ``access_restrictions`` is absent — a
+    driveable class still yields ``motor_vehicle=allowed`` (class_default).
     """
     class_defaults = _access_class_defaults(road_class)
     observations = _tagged_access_observations(access_restrictions)
@@ -937,21 +995,26 @@ def parse_access_lr(
         return create_trivial_lr(value)
 
     boundaries: set[float] = {0.0, 1.0}
-    for start, end, _, _, _ in observations:
+    for start, end, _, _ in observations:
         boundaries.add(start)
         boundaries.add(end)
     ordered_bounds = sorted(boundaries)
-    ordered_obs = sorted(observations, key=lambda o: o[4])  # earlier entries win
 
     rule_tuples: list[tuple[float, float, dict, int]] = []
     for i in range(len(ordered_bounds) - 1):
         a, b = ordered_bounds[i], ordered_bounds[i + 1]
         if b <= a:
             continue
+        # Gather every tagged signal covering this interval, per mode.
+        signals_by_mode: dict[str, set[str]] = {}
+        for start, end, mode, signal in observations:
+            if start <= a and b <= end:
+                signals_by_mode.setdefault(mode, set()).add(signal)
         per_mode: dict[str, dict[str, str]] = {}
-        for start, end, mode, value, _prio in ordered_obs:
-            if start <= a and b <= end and mode not in per_mode:
-                per_mode[mode] = {"value": value, "source": "tagged"}
+        for mode, signals in signals_by_mode.items():
+            resolved = _resolve_mode_signal(signals)
+            if resolved is not None:
+                per_mode[mode] = {"value": resolved, "source": "tagged"}
         for mode, value in class_defaults.items():
             per_mode.setdefault(mode, {"value": value, "source": "class_default"})
         if per_mode:

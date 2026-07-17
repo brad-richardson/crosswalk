@@ -7,7 +7,7 @@ prompt ``access=`` rendering, and the ``route_network`` header.
 
 from __future__ import annotations
 
-from crosswalk.agent_labeling.stitch_evidence import build_prompt
+from crosswalk.agent_labeling.stitch_evidence import _edge_struct_str, build_prompt
 from crosswalk.fetch.overture import parse_access_lr
 from crosswalk.utils.physical import summarize_access
 
@@ -25,7 +25,8 @@ def _mode_map(lr) -> dict:
 
 
 def test_parse_access_lr_tagged_allowed_and_denied() -> None:
-    # The verified footway shape: motor_vehicle denied, foot allowed.
+    # Clean unconditional shape: motor_vehicle denied, foot allowed (no scoped
+    # carve-out) → hard tagged values survive.
     restrictions = [
         {"access_type": "denied", "when": {"mode": ["motor_vehicle"]}},
         {"access_type": "allowed", "when": {"mode": ["foot"]}},
@@ -35,6 +36,25 @@ def test_parse_access_lr_tagged_allowed_and_denied() -> None:
     assert modes["foot"] == {"value": "allowed", "source": "tagged"}
     # bicycle stays unknown (never guessed) → omitted from the stored map.
     assert "bicycle" not in modes
+
+
+def test_parse_access_lr_blanket_allowed_no_scope() -> None:
+    # when.mode null + no scope → unconditional allow across all modes.
+    restrictions = [{"access_type": "allowed", "when": {}}]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="residential").to_dict_list())
+    for mode in ("motor_vehicle", "bicycle", "foot"):
+        assert modes[mode] == {"value": "allowed", "source": "tagged"}
+
+
+def test_parse_access_lr_single_entry_multiple_modes() -> None:
+    restrictions = [{"access_type": "denied", "when": {"mode": ["bicycle", "foot"]}}]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="motorway").to_dict_list())
+    # Both listed modes take the tagged denial (here it agrees with the motorway
+    # class default, but the source is tagged because the entry named them).
+    assert modes["bicycle"] == {"value": "denied", "source": "tagged"}
+    assert modes["foot"] == {"value": "denied", "source": "tagged"}
+    # motor_vehicle untouched by the entry → class default.
+    assert modes["motor_vehicle"] == {"value": "allowed", "source": "class_default"}
 
 
 def test_parse_access_lr_tagged_designated() -> None:
@@ -78,6 +98,77 @@ def test_parse_access_lr_tagged_overrides_class_default() -> None:
     restrictions = [{"access_type": "denied", "when": {"mode": ["motor_vehicle"]}}]
     modes = _mode_map(parse_access_lr(restrictions, road_class="residential").to_dict_list())
     assert modes["motor_vehicle"] == {"value": "denied", "source": "tagged"}
+
+
+def test_parse_access_lr_denied_then_scoped_allow_exception_is_restricted() -> None:
+    # Unconditional deny + a scoped allowed carve-out (private/delivery access)
+    # is denied-with-exceptions → restricted, NOT a hard tagged denial — even
+    # though the deny is listed FIRST (no entry-ordering artifact).
+    restrictions = [
+        {"access_type": "denied", "when": {"mode": ["motor_vehicle"]}},
+        {
+            "access_type": "allowed",
+            "when": {"mode": ["motor_vehicle"], "recognized": ["as_delivery"]},
+        },
+    ]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="residential").to_dict_list())
+    assert modes["motor_vehicle"] == {"value": "restricted", "source": "tagged"}
+
+
+def test_parse_access_lr_blanket_private_exception_softens_denial() -> None:
+    # The verified 3-entry footway shape: mv denied + foot allowed + a blanket
+    # "allowed when recognized=as_private" carve-out over all modes. The private
+    # carve-out softens the mv denial to restricted; the unconditional foot allow
+    # dominates its own scoped mention; bicycle sees only the scoped carve-out.
+    restrictions = [
+        {"access_type": "denied", "when": {"mode": ["motor_vehicle"]}},
+        {"access_type": "allowed", "when": {"mode": ["foot"]}},
+        {"access_type": "allowed", "when": {"recognized": ["as_private"]}},
+    ]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="footway").to_dict_list())
+    assert modes["motor_vehicle"] == {"value": "restricted", "source": "tagged"}
+    assert modes["foot"] == {"value": "allowed", "source": "tagged"}
+    assert modes["bicycle"] == {"value": "restricted", "source": "tagged"}
+
+
+def test_parse_access_lr_scoped_denial_alone_does_not_soften() -> None:
+    # An unconditional deny plus a *scoped denial* (redundant, not a carve-out)
+    # stays a hard denial — only an allow/ambiguous carve-out softens it.
+    restrictions = [
+        {"access_type": "denied", "when": {"mode": ["motor_vehicle"]}},
+        {
+            "access_type": "denied",
+            "when": {"mode": ["motor_vehicle"], "during": "Mo-Fr 07:00-19:00"},
+        },
+    ]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="residential").to_dict_list())
+    assert modes["motor_vehicle"] == {"value": "denied", "source": "tagged"}
+
+
+def test_parse_access_lr_unconditional_allow_outranks_deny() -> None:
+    # Defensive: if allow and deny co-occur unconditionally, prefer the
+    # less separation-signaling reading (allowed), never surface the denial.
+    restrictions = [
+        {"access_type": "denied", "when": {"mode": ["motor_vehicle"]}},
+        {"access_type": "allowed", "when": {"mode": ["motor_vehicle"]}},
+    ]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="residential").to_dict_list())
+    assert modes["motor_vehicle"] == {"value": "allowed", "source": "tagged"}
+
+
+def test_parse_access_lr_between_subrange_clips() -> None:
+    # A tagged restriction scoped to [0, 0.5] applies there; the remainder falls
+    # back to the class default (two distinct spans).
+    restrictions = [
+        {"access_type": "denied", "when": {"mode": ["motor_vehicle"]}, "between": [0.0, 0.5]}
+    ]
+    lr = parse_access_lr(restrictions, road_class="residential").to_dict_list()
+    assert len(lr) == 2
+    first, second = lr
+    assert first["between"] == [0.0, 0.5]
+    assert first["value"]["motor_vehicle"] == {"value": "denied", "source": "tagged"}
+    assert second["between"] == [0.5, 1.0]
+    assert second["value"]["motor_vehicle"] == {"value": "allowed", "source": "class_default"}
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +287,20 @@ def test_summarize_access_tagged_has_no_degree_mark() -> None:
     block = _access_block("footway", [{"access_type": "allowed", "when": {"mode": ["foot"]}}])
     # foot is tagged (allowed→yes, no °); mv unknown; bicycle unknown.
     assert summarize_access(block) == "mv:? bike:? foot:yes"
+
+
+def test_edge_struct_renders_tagged_access_omits_class_default() -> None:
+    # Edge lines carry a tagged access clause only; class-default-only blocks are
+    # suppressed (already shown on the segment line).
+    edge = {
+        "ref_physical": _access_block(
+            "footway", [{"access_type": "allowed", "when": {"mode": ["foot"]}}]
+        ),
+        "target_physical": _access_block("cycleway"),  # class-default only
+    }
+    struct = _edge_struct_str(edge)
+    assert "R access: mv:? bike:? foot:yes" in struct
+    assert "T access:" not in struct
 
 
 def test_prompt_renders_access_line_and_legend(tmp_path) -> None:
