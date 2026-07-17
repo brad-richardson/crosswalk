@@ -298,16 +298,77 @@ complete it is gated only on the diagnostic holdout read described above.
    holds when v8 votes land. The holdout's draw-level near-misses (`9f56d71d`,
    `35329743`, `92c0997f`) still suggest a FUTURE, separately-registered
    extension of Fix A to layer/level identity — not in v8.
-6. Once **v8** is analyzed and v7/v8 stitching is validated, mint the deferred
-   v7 auto-accept stitching labels (the "OTHER PIECE" command above).
+6. ~~Once **v8** is analyzed and v7/v8 stitching is validated, mint the deferred
+   v7 auto-accept stitching labels.~~ **v8 ANALYZED 2026-07-17** (provenance
+   `122671c`; reports + synthesis `bcf6300`). Wave **NOT blessed** — Fix-A guard
+   `7175635e` regressed + MI-4 over-trigger (see the v8 wave section). Minting is
+   now **curated, human-gated by cross-wave-unanimous choice** (the v8
+   auto_accept flag misfired), so it does NOT wait on a full bless: mint
+   `33a36ca5`, `3f53c7e7`, `7bac1f1d`, `91570f54`, `e0099fb8`, `ee358f5a`;
+   spot-check `6775ade1`; reconcile `8f152b92` low-confidence routing; WITHHOLD
+   `1b90f03b/minimal` (its label is `J`). Next steps in the v8 wave section.
 7. Clean up merged agent worktrees/branches under `.claude/worktrees/`.
 
-### ⭐ READY TO LAUNCH: v8 wave (built + validated 2026-07-17)
+### v8 wave — RUN, ARCHIVED + ANALYZED 2026-07-17 (NOT blessed; curated mint pending)
 
-`physical_context_v8_20260717` is **built and manifest-validated** — a single
-"generation jump" folding every corroborated improvement into one wave (quota is
-the bottleneck, so we mint one v8, not incremental v8/v9). The 65-pack packs
-(50 enriched + 15 factorial, same 8 datasets / same design as v7) embed:
+**ANALYSIS DONE 2026-07-17.** Provenance archived (`122671c`); dual-analyst
+reports + orchestrator synthesis (`bcf6300`) at
+`research/v8_wave_analysis_{context,codex,fable,synthesis}_2026-07-17.md`. Both
+analysts (Codex `gpt-5.6-sol` + Fable), run independently over the archived
+ballots without reading each other, converge:
+
+- **Do NOT bless the composition/rubric era.** The Fix-A non-regression guard
+  `7175635e` flipped v7 unanimous merge A → v8 majority NONE on the *same*
+  evidence pack (rubric-induced, not evidence loss), and the MI-4 cycleway gate
+  over-triggers systemically: `insufficient_evidence` NONEs ~3 → 37, flipping ≥6
+  previously-decided groups (`66e22055`, `a451bf05`, `b33a27f5`, `5faa0b72`,
+  `92c0997f`, `7175635e`). Total NONE rate rose 36.8% → 43.6%.
+- **DO bless the mechanisms.** #451 none_reason/desired_edges: 100% clean capture
+  (0 map failures / 0 degenerate / 0 misfire over 38 `no_exact_option` ballots).
+  #450 exact-pair seeds cut the expressibility-gap NONE share ~72–78% → 44.7% and
+  supplied the winning option in 5 consensus picks (incl. `1b90f03b`→J), but the
+  total NONE rate rose and 38 residual gaps remain (13 one edge away). #446
+  retries eliminated abstains (v7 had 6; v8 has 0, 3 clean retries).
+- **Curated mint — human-gated, by cross-wave-unanimous *choice*, NOT the v8
+  `auto_accept` flag** (the flag misfired this wave: auto-accepted the wrong
+  `1b90f03b/minimal`→A at 0.893 and demoted the correct enriched→J to
+  human_review). Mint `33a36ca5`, `3f53c7e7`, `7bac1f1d`, `91570f54`, `e0099fb8`,
+  `ee358f5a` (unanimous in **both** v7 and v8); spot-check `6775ade1`(E) first;
+  reconcile `8f152b92`(B) low-confidence routing first; **withhold**
+  `1b90f03b/minimal` (its label is `J`). Policy: ablation-variant ballots never
+  mint; run production waves enriched-only; make auto-accept variant-aware.
+
+**Recommended next steps (v9 track) — ORDERED:**
+
+Design note for 1–2: **`docs/plans/2026-07-17-access-mode-channel-and-mi4-soften.md`**
+(MI-4 soften + access/mode channel are **bundled**, validated together on the
+holdout before any rerun; backfill is a re-extract — verified 2026-07-17).
+
+1. **Curated mint of the deferred v7+v8 auto-accepts** (quota-free, unblocked now) —
+   spot-check `6775ade1`, reconcile `8f152b92` low-confidence routing, then mint
+   `33a36ca5`, `3f53c7e7`, `7bac1f1d`, `91570f54`, `e0099fb8`, `ee358f5a`; withhold
+   `1b90f03b/minimal`.
+2. **Variant-aware auto-accept** — enriched-only minting; ablation ballots never
+   mint. Small, self-contained; prevents context-blind unanimity (`1b90f03b/minimal`).
+3. **MI-4 soften (Part A)** — polarity inversion, access/mode + route-overlay
+   signals. Doc+code parity change (`docs/MATCHING_MERGING_RULES.md` +
+   `matching_rubric.py`), `MATCHING_RUBRIC_VERSION` bump. Restructure the wording
+   into 3–4 sentences before shipping.
+4. **Access/mode evidence channel (Part B)** — `access_lr` from Overture
+   `access_restrictions` (never infer denials except the motorway entailment) +
+   per-dataset `target_kind: route_network` flag (Geneva). Backfill = re-extract.
+5. **Pre-register + holdout-validate** the bundle (3+4) with the six-group blind
+   checklist in the design note (`7175635e`/`a451bf05`/`b33a27f5` → merge;
+   `66e22055`/`5faa0b72`/`92c0997f` → NONE), then a **targeted** rerun of only the
+   ≥6 regressed cycleway groups + guard — NOT the full 65 (quota).
+6. **Consensus-`desired_edges` path** — route cross-seat-identical desired sets
+   (`bdbdf792`, `00e8e9fd`, `fb8f359f`) to a one-click confirm / next-wave seed;
+   attacks the 38 residual `no_exact_option` NONEs menu enumeration can't reach.
+
+Original build note (`physical_context_v8_20260717`) — a single "generation jump"
+folding every corroborated improvement into one wave (quota is the bottleneck, so
+we mint one v8, not incremental v8/v9). The 65-pack packs (50 enriched + 15
+factorial, same 8 datasets / same design as v7) embed:
 
 - **Rubric era `2026-07-17+9463c80a0f77`** — MI-4 cycleway/separated-infra
   uncertainty gate (Fix A, holdout-corroborated).
@@ -319,11 +380,12 @@ the bottleneck, so we mint one v8, not incremental v8/v9). The 65-pack packs
 
 Panel unchanged: `claude-opus-4-8`/high + `gpt-5.6-sol`/high + `meta/muse-spark-1.1`/high.
 
-**Launch command** (needs `META_API_KEY` in env + `~/.opencode/bin` on PATH;
-smoke-test Muse first per the v7 runbook; start at `--group-workers 2` for quota
-headroom). The driver **auto-archives vote provenance to `labels/votes/` on clean
-completion** and withholds label minting (v8 is still a nonstandard/candidate
-panel) — nothing is lost:
+**Launch command** (already run 2026-07-17; kept for reference. Needs
+`META_API_KEY` in env + `~/.opencode/bin` on PATH; smoke-test Muse first per the
+v7 runbook; start at `--group-workers 2` for quota headroom). The driver
+**auto-archives vote provenance to `labels/votes/` on clean completion** and
+withholds label minting (v8 is still a nonstandard/candidate panel) — nothing is
+lost:
 
 ```bash
 set -a; . ./.env; set +a
