@@ -68,6 +68,28 @@ MAX_CHAIN_FRONTIER = 64
 # Alignment fraction keys preserved from sidecar edges through to alternatives
 _ALIGNMENT_KEYS = ("gers_start_frac", "gers_end_frac", "local_start_frac", "local_end_frac")
 
+# --- "Base set minus flagged edge(s)" seed bounds ------------------------------
+#
+# Beyond the two whole-group seeds (full candidate set + optimizer selection),
+# the generator also emits a TARGETED, bounded set of "base minus a droppable
+# edge" seeds, so the settled answer "the optimizer set except that one
+# sliver/parallel-sibling/low-confidence edge" is directly expressible instead of
+# only appearing when it happens to rank into the confidence-sorted top-K (the
+# measured expressibility hole: most no-exact-option NONE ballots).
+#
+# The additions are bounded so the menu never balloons into a blind power set
+# (menu bloat + the pixel-identical-image problem): at most
+# ``MAX_FLAGGED_SINGLE_DROPS`` single-edge removals per base, plus one combined
+# removal of the top few flagged edges, all deduped. An edge is a drop candidate
+# only when it carries a real droppability SIGNAL (never flagged blindly by
+# count); the cap then keeps the *most* droppable ones.
+MAX_FLAGGED_SINGLE_DROPS = 4  # max single-edge removals emitted per base set
+MAX_COMBINED_DROP = 3  # max edges removed together in the one combined seed
+# An edge's confidence is "low" (a drop signal) if it is below this absolute
+# floor, OR this far below the base set's strongest edge (relative gap).
+LOW_CONF_ABS = 0.85
+LOW_CONF_REL_MARGIN = 0.10
+
 
 def generate_top_k_alternatives(
     component_edges: list[dict],
@@ -93,14 +115,19 @@ def generate_top_k_alternatives(
     e.g. an M:N group whose correct answer is "accept every candidate edge" (a
     target legitimately spanning >MAX_REF_CHAIN_LEN refs), or a large group whose
     optimizer selection ranks below the confidence-sorted top-K. To close that
-    measured expressibility gap, two whole-group seed alternatives are ALWAYS
+    measured expressibility gap, whole-group seed alternatives are ALWAYS
     appended (deduped) after the organic top-K, so they survive truncation:
-      * the full candidate set (union of all group edges), and
+      * the full candidate set (union of all group edges),
       * the optimizer's selected edge set (edges flagged ``selected`` — a
         known-good assignment even when ``optimizer_assignment`` is empty, which
-        it is for most giant M:N groups).
-    This adds at most two options beyond ``k``; both are single options (not
-    per-edge), so the evidence-pack / UI cost is a bounded +2.
+        it is for most giant M:N groups), and
+      * a TARGETED, bounded set of "base set minus flagged edge(s)" seeds — each
+        base (optimizer selection / full candidate set) with the most-droppable
+        edge(s) removed — so "the optimizer set except that one bad edge" is
+        directly expressible (see ``_seed_alternatives`` / ``_edge_droppability``).
+    The minus-edge seeds are bounded (at most ``MAX_FLAGGED_SINGLE_DROPS`` single
+    removals per base plus one combined removal, all deduped), so the menu never
+    balloons into a blind power set.
 
     Args:
         component_edges: List of edge dicts with ref_id, target_id, confidence,
@@ -116,9 +143,11 @@ def generate_top_k_alternatives(
             target, so only ref-side contiguity is needed, and the N:1 path
             already enumerates the full ref power set).
         k: Number of top organic alternatives to return (before seeds)
-        include_seed_options: When True (default), append the full-candidate-set
-            and optimizer-selected-set seed options after the top-K. Set False
-            to recover the pure top-K-by-confidence behavior.
+        include_seed_options: When True (default), append the seed options after
+            the top-K: the full-candidate-set and optimizer-selected-set
+            whole-group seeds, plus the bounded "base set minus flagged edge(s)"
+            seeds (see ``_seed_alternatives`` / ``_edge_droppability``). Set
+            False to recover the pure top-K-by-confidence behavior.
 
     Returns:
         List of alternative dicts, each with:
@@ -228,20 +257,99 @@ def generate_top_k_alternatives(
     return top_k
 
 
+def _edge_droppability(edge: dict, base_max_conf: float) -> float:
+    """Heuristic "how droppable is this edge" score (``> 0`` => a flag candidate).
+
+    Uses only signals already present on the sidecar edge dict — never geometry
+    or anything the alternatives path doesn't already carry:
+
+    * ``is_sliver`` — a junction sliver (the optimizer's own sliver classifier).
+    * ``pruned`` — an edge the optimizer explicitly pruned.
+    * ``decision == "review"`` — flagged for review rather than accepted.
+    * ``review_reason`` present (e.g. ``parallel_sibling``, ``coverage_conflict``,
+      ``low_confidence_addition``) — a borderline edge the optimizer annotated.
+    * ``selected`` is False — the optimizer did not pick it, so within the FULL
+      candidate set it is, by the optimizer's own reckoning, a natural drop.
+    * low confidence relative to the base's strongest edge (or below an absolute
+      floor) — the classic "weak edge" drop signal.
+
+    Returns ``0.0`` for an edge with no droppability signal, so a base set of
+    uniformly strong, accepted, non-sliver edges flags nothing (no minus-edge
+    seed is emitted for it). The score only RANKS the flagged edges; the caller
+    caps how many are dropped.
+    """
+    conf = float(edge.get("confidence", 0.0) or 0.0)
+    score = 0.0
+    if edge.get("is_sliver"):
+        score += 3.0
+    if edge.get("pruned"):
+        score += 3.0
+    if str(edge.get("decision", "")).strip().lower() == "review":
+        score += 2.0
+    rr = edge.get("review_reason")
+    if rr is not None and str(rr).strip().lower() not in ("", "nan", "none"):
+        score += 2.0
+    # An edge the optimizer did NOT select is the most droppable member of the
+    # full candidate set. Only counts when the flag is present *and* False (a
+    # missing ``selected`` key is not evidence either way).
+    if "selected" in edge and not edge.get("selected"):
+        score += 2.0
+    gap = base_max_conf - conf
+    if conf < LOW_CONF_ABS or gap >= LOW_CONF_REL_MARGIN:
+        # Continuous term so, among low-confidence edges, the weakest ranks
+        # first; ``+1`` guarantees a positive (flagged) score.
+        score += 1.0 + max(0.0, gap)
+    return score
+
+
+def _flagged_edges(
+    base_keys: list[tuple[str, str]],
+    edge_data: dict[tuple[str, str], dict],
+) -> list[tuple[str, str]]:
+    """Ranked, bounded shortlist of the most-droppable edges within a base set.
+
+    Returns at most ``MAX_FLAGGED_SINGLE_DROPS`` keys, most-droppable first
+    (tie-break: lowest confidence, then id, for determinism). The sole edge of a
+    single-edge base is never flagged (dropping it would empty the seed).
+    """
+    if len(base_keys) < 2:
+        return []
+    base_max = max(
+        (float(edge_data.get(k, {}).get("confidence", 0.0) or 0.0) for k in base_keys),
+        default=0.0,
+    )
+    scored: list[tuple[float, float, tuple[str, str]]] = []
+    for k in base_keys:
+        e = edge_data.get(k, {})
+        s = _edge_droppability(e, base_max)
+        if s > 0.0:
+            conf = float(e.get("confidence", 0.0) or 0.0)
+            scored.append((s, conf, k))
+    scored.sort(key=lambda t: (-t[0], t[1], t[2]))
+    return [k for _, _, k in scored[:MAX_FLAGGED_SINGLE_DROPS]]
+
+
 def _seed_alternatives(
     edge_data: dict[tuple[str, str], dict],
     ref_ids: list[str],
     selected_keys: list[tuple[str, str]],
 ) -> list[dict]:
-    """Whole-group seed alternatives: full candidate set + optimizer selection.
+    """Whole-group + "base minus flagged edge(s)" seed alternatives.
 
-    Both are strict subsets of the group's candidate edges (built from
-    ``edge_data``), so they satisfy the same output invariant as the enumerated
-    alternatives. The optimizer-selected seed uses the per-edge ``selected``
-    flag (pre-collected by the caller from the raw input edges), which is
-    populated even for giant M:N groups whose ``optimizer_assignment`` is empty;
-    it is skipped when no edge is flagged or when it coincides with the full set
-    (dedup handles the latter downstream).
+    The whole-group seeds are the full candidate set and the optimizer's
+    selection (edges flagged ``selected`` — populated even for giant M:N groups
+    whose ``optimizer_assignment`` is empty). On top of those, for each base set
+    (optimizer selection and full candidate set) with >= 2 edges, this emits
+    "base minus the most-droppable edge(s)" seeds so a settled answer of the form
+    "the optimizer set except that one bad edge" is directly expressible rather
+    than depending on it ranking into the confidence-sorted top-K — the measured
+    expressibility hole. See :func:`_edge_droppability` for the flagging signals
+    and the module-level bounds for the caps.
+
+    Every emitted seed is a STRICT, non-empty subset of the group's candidate
+    edges (built from ``edge_data``), so it satisfies the same output invariant
+    as the enumerated alternatives. All seeds are deduped against one another
+    here (the caller additionally dedupes them against the organic top-K).
 
     Every seed is tagged ``is_seed: True`` so downstream consumers that score or
     rank the ORGANIC alternatives (e.g. ``select_stitching_batch``'s
@@ -250,6 +358,7 @@ def _seed_alternatives(
     ``max(total_confidence)``, skewing selection.
     """
     seeds: list[dict] = []
+    seen: set[frozenset[tuple[str, str]]] = set()
 
     def _alt(keys: list[tuple[str, str]]) -> dict:
         edges = [_make_edge(edge_data, rid, tid) for rid, tid in keys]
@@ -261,12 +370,38 @@ def _seed_alternatives(
             "is_seed": True,
         }
 
+    def _emit(keys: list[tuple[str, str]]) -> None:
+        fkey = frozenset(keys)
+        if not fkey or fkey in seen:
+            return
+        seen.add(fkey)
+        seeds.append(_alt(list(keys)))
+
     all_keys = list(edge_data.keys())
     if all_keys:
-        seeds.append(_alt(all_keys))
-
+        _emit(all_keys)
     if selected_keys:
-        seeds.append(_alt(selected_keys))
+        _emit(selected_keys)
+
+    # "Base minus flagged edge(s)" seeds. Bases: the optimizer selection (a
+    # correct answer is often the optimizer set minus a stray edge) and the full
+    # candidate set (the correct answer is always a subset of it). Both bases are
+    # deduped by ``_emit``, so when they coincide the removals are generated once.
+    bases: list[list[tuple[str, str]]] = []
+    if len(selected_keys) >= 2:
+        bases.append(selected_keys)
+    if len(all_keys) >= 2:
+        bases.append(all_keys)
+
+    for base in bases:
+        flagged = _flagged_edges(base, edge_data)
+        for fk in flagged:
+            _emit([k for k in base if k != fk])
+        # One combined seed dropping the top few flagged edges together, for the
+        # "optimizer set minus a couple of slivers" answer.
+        if len(flagged) >= 2:
+            drop = set(flagged[:MAX_COMBINED_DROP])
+            _emit([k for k in base if k not in drop])
 
     return seeds
 

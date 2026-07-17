@@ -409,8 +409,12 @@ class TestSeedOptions:
         offered = self._full(generate_top_k_alternatives(edges, k=3))
         assert selected in offered
 
-    def test_seeds_bounded_to_plus_two(self):
-        """Seeds add at most two options beyond the organic top-K."""
+    def test_seeds_bounded(self):
+        """Seeds stay bounded: the two whole-group seeds plus, per base set, at
+        most MAX_FLAGGED_SINGLE_DROPS single-edge removals and one combined
+        removal (a blind power set is explicitly avoided)."""
+        from crosswalk.matching.alternatives import MAX_FLAGGED_SINGLE_DROPS
+
         edges = [
             _edge("r1", "t1", 0.9),
             _edge("r1", "t2", 0.4),
@@ -421,7 +425,83 @@ class TestSeedOptions:
             e["selected"] = True
         organic = generate_top_k_alternatives(edges, k=3, include_seed_options=False)
         seeded = generate_top_k_alternatives(edges, k=3, include_seed_options=True)
-        assert len(seeded) <= len(organic) + 2
+        # 2 whole-group seeds + 2 bases * (N single drops + 1 combined). Here the
+        # full set == optimizer selection, so the two bases dedupe to one.
+        max_seeds = 2 + 2 * (MAX_FLAGGED_SINGLE_DROPS + 1)
+        n_seeds = len([a for a in seeded if a.get("is_seed")])
+        assert n_seeds <= max_seeds
+        assert len(seeded) <= len(organic) + max_seeds
+
+    def test_minus_flagged_edge_seed_emitted(self):
+        """A base set with a clearly weaker edge yields a "base minus that edge"
+        seed, so "optimizer set except the low-confidence edge" is expressible."""
+        edges = [
+            _edge("r1", "t1", 0.99),
+            _edge("r2", "t2", 0.98),
+            _edge("r3", "t3", 0.40),  # weak edge -> flagged as droppable
+        ]
+        for e in edges:
+            e["selected"] = True
+        keys = self._full(generate_top_k_alternatives(edges, k=5))
+        minus_weak = frozenset({("r1", "t1"), ("r2", "t2")})
+        assert minus_weak in keys
+
+    def test_minus_flagged_seeds_are_strict_nonempty_subsets(self):
+        """Every minus-edge seed is a strict, non-empty subset of the base."""
+        edges = [_edge(f"r{i}", f"t{i}", 0.9 - i * 0.15) for i in range(5)]
+        for e in edges:
+            e["selected"] = True
+        full = frozenset((e["ref_id"], e["target_id"]) for e in edges)
+        alts = generate_top_k_alternatives(edges, k=5)
+        seeds = [a for a in alts if a.get("is_seed")]
+        for s in seeds:
+            key = frozenset((e["ref_id"], e["target_id"]) for e in s["edges"])
+            assert key  # non-empty
+            assert key <= full  # subset of the candidate edges
+        minus = [
+            frozenset((e["ref_id"], e["target_id"]) for e in s["edges"])
+            for s in seeds
+            if len(s["edges"]) < len(edges)
+        ]
+        assert minus  # at least one strict-subset (minus-edge) seed
+        assert all(m < full for m in minus)
+
+    def test_minus_flagged_seeds_deduped(self):
+        """Minus-edge seeds do not duplicate each other or the base seeds."""
+        edges = [_edge(f"r{i}", f"t{i}", 0.9 - i * 0.12) for i in range(6)]
+        for e in edges:
+            e["selected"] = True
+        keys = self._full(generate_top_k_alternatives(edges, k=8))
+        assert len(keys) == len(set(keys))
+
+    def test_no_flag_means_no_minus_edge_seed(self):
+        """A base of uniformly strong, accepted, unflagged edges flags nothing,
+        so only the two whole-group seeds are added (no menu bloat)."""
+        edges = [_edge(f"r{i}", f"t{i}", 0.99) for i in range(4)]
+        for e in edges:
+            e["selected"] = True
+        alts = generate_top_k_alternatives(edges, k=8)
+        seeds = [a for a in alts if a.get("is_seed")]
+        # full set == optimizer selection == every organic full assignment, so
+        # after dedup no strict-subset minus-edge seed survives.
+        for s in seeds:
+            key = frozenset((e["ref_id"], e["target_id"]) for e in s["edges"])
+            assert len(key) == len(edges)
+
+    def test_minus_flagged_targets_sliver_edge(self):
+        """The sliver/prune signals flag an edge even at high confidence, so the
+        settled 'optimizer set minus the junction sliver' answer is expressible."""
+        edges = [
+            _edge("r1", "t1", 0.97),
+            _edge("r2", "t2", 0.96),
+            _edge("r3", "t3", 0.95),
+        ]
+        for e in edges:
+            e["selected"] = True
+        edges[2]["is_sliver"] = True  # high conf but a junction sliver
+        keys = self._full(generate_top_k_alternatives(edges, k=5))
+        minus_sliver = frozenset({("r1", "t1"), ("r2", "t2")})
+        assert minus_sliver in keys
 
     def test_seeds_deduped_against_organic(self):
         """A seed equal to an organic option is not added twice."""
@@ -449,7 +529,7 @@ class TestSeedOptions:
         alts = generate_top_k_alternatives(edges, k=5)
         seeds = [a for a in alts if a.get("is_seed")]
         organic = [a for a in alts if not a.get("is_seed")]
-        assert 1 <= len(seeds) <= 2
+        assert seeds  # at least the whole-group seed(s)
         assert organic  # organic alternatives never carry the tag
         full = frozenset((e["ref_id"], e["target_id"]) for e in edges)
         assert any(
