@@ -850,11 +850,31 @@ def _access_class_defaults(road_class: str | None) -> dict[str, str]:
 
 
 # Access "signals" a single access_restrictions entry contributes to one mode.
-# Unconditional (no when.during/when.recognized scope) vs scoped are tracked
-# separately so precedence can refuse to manufacture a hard separation signal
-# from conditional data (see _resolve_mode_signal).
+# Unconditional (mode-only / no scope) vs scoped are tracked separately so
+# precedence can refuse to manufacture a hard separation signal from conditional
+# data (see _resolve_mode_signal).
 _SIGNAL_UNCONDITIONAL = {"allow", "deny", "designate"}
 _SIGNAL_BY_ACCESS_TYPE = {"allowed": "allow", "denied": "deny", "designated": "designate"}
+
+# ``when`` sub-keys handled by other channels (not a scoping dimension here).
+# ``heading`` is the oneway/direction channel; ``mode`` selects affected modes
+# but does NOT by itself make a rule conditional.
+_WHEN_NON_SCOPING_KEYS = frozenset({"heading", "mode"})
+
+
+def _when_key_present(value: Any) -> bool:
+    """Whether a ``when`` sub-key carries a real (non-empty) scope.
+
+    An explicit ``None`` (Overture writes every ``when`` sub-key, most as
+    ``None``) or an empty list is treated as absent.
+    """
+    if value is None:
+        return False
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        return len(value) > 0
+    return True
 
 
 def _tagged_access_observations(
@@ -867,13 +887,24 @@ def _tagged_access_observations(
     when.mode[]`` maps to a per-mode *signal*; a null ``when.mode`` is a blanket
     entry over all modes. Signals:
 
-    - unconditional (no scope) → ``allow`` / ``deny`` / ``designate``
-    - scoped (``when.during`` / ``when.recognized``, i.e. permit/time/private) →
-      ``restrict_deny`` for a scoped denial, else ``restrict_exception`` (a scoped
-      allow/designate carve-out, or an ambiguous scoped entry).
+    - **unconditional** (``allow`` / ``deny`` / ``designate``) only when the
+      rule's *sole* non-null ``when`` sub-key is ``mode``. ANY other non-null
+      ``when`` sub-key — ``during``, ``recognized``, ``using`` (e.g.
+      ``at_destination`` no-through-traffic), ``vehicle`` (weight/height/type
+      dimensions), or anything future — makes the rule **scoped**, so a
+      conditional restriction can never masquerade as an unconditional
+      blanket allow/deny.
+    - **scoped** → ``restrict_deny`` for a scoped denial, else
+      ``restrict_exception`` (a scoped allow/designate carve-out, or an ambiguous
+      scoped entry). Both resolve to ``restricted`` on their own, so a scoped
+      allow can't erase an unconditional denial and a scoped deny can't fabricate
+      a hard tagged denial.
 
-    A single entry that produces no usable signal (unconditional with an
-    unrecognized ``access_type``) is dropped.
+    A ``when.vehicle`` rule scopes on a vehicle dimension (weight/height/type),
+    which can only constrain ``motor_vehicle`` — never foot or bicycle — so it is
+    resolved to ``motor_vehicle`` alone regardless of ``when.mode``. A single
+    entry that produces no usable signal (unconditional with an unrecognized
+    ``access_type``) is dropped.
     """
     if access_restrictions is None:
         return []
@@ -894,7 +925,16 @@ def _tagged_access_observations(
             continue
 
         mapped = _ACCESS_TYPE_VALUES.get(rule.get("access_type"))
-        scoped = when.get("during") is not None or when.get("recognized") is not None
+
+        # A rule is unconditional ONLY when its sole non-null ``when`` sub-key is
+        # ``mode``. Any other present sub-key (during/recognized/using/vehicle or
+        # a future dimension) makes it scoped — defensive against new Overture
+        # scoping dimensions silently parsing as blanket allow/deny.
+        scoped = any(
+            key not in _WHEN_NON_SCOPING_KEYS and _when_key_present(value)
+            for key, value in when.items()
+        )
+        vehicle_scoped = _when_key_present(when.get("vehicle"))
         if scoped:
             # A scoped denial stays a (soft) denial; a scoped allow/designate — or
             # an ambiguous scoped entry — is a carve-out that softens a denial.
@@ -904,17 +944,22 @@ def _tagged_access_observations(
             if signal is None:
                 continue
 
-        modes = when.get("mode")
-        if hasattr(modes, "tolist"):
-            modes = modes.tolist()
-        if modes is None:
-            affected = ACCESS_MODES  # blanket entry → all modes
-        elif isinstance(modes, list):
-            affected = tuple(m for m in modes if m in ACCESS_MODES)
-        elif modes in ACCESS_MODES:
-            affected = (modes,)
+        if vehicle_scoped:
+            # A vehicle-dimension (weight/height/type) restriction constrains only
+            # motorised traffic — it can never deny foot or bicycle.
+            affected: tuple[str, ...] = ("motor_vehicle",)
         else:
-            affected = ()
+            modes = when.get("mode")
+            if hasattr(modes, "tolist"):
+                modes = modes.tolist()
+            if modes is None:
+                affected = ACCESS_MODES  # blanket entry → all modes
+            elif isinstance(modes, list):
+                affected = tuple(m for m in modes if m in ACCESS_MODES)
+            elif modes in ACCESS_MODES:
+                affected = (modes,)
+            else:
+                affected = ()
         if not affected:
             continue
 

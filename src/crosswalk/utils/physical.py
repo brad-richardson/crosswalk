@@ -368,12 +368,24 @@ def summarize_physical(physical: dict[str, Any] | None) -> str:
     return "; ".join(parts)
 
 
-def _resolve_access_modes(rules: list[dict[str, Any]]) -> dict[str, tuple[str, str]]:
-    """Pick the greatest-coverage ``(value, source)`` per mode across the spans.
+def _resolve_access_modes(rules: list[dict[str, Any]]) -> dict[str, tuple[str, str, bool]]:
+    """Pick the summary ``(value, source, partial)`` per mode across the spans.
 
     Access is usually a single segment-wide span, so this collapses to a direct
-    lookup; when a tagged restriction varies along the segment the mode's
-    longest-covered value wins (ties broken by first occurrence).
+    lookup; when a restriction varies along the segment the winning value is
+    chosen as follows:
+
+    - A **tagged** (surveyed) signal always outranks a ``class_default`` one,
+      even at *lower* coverage — a class-default majority (e.g. ``allowed`` over
+      60%) must never mask a real tagged restriction (e.g. a ``denied`` over 40%)
+      and silently drop a separation signal.
+    - Within the winning source tier, the longest-covered value wins (ties broken
+      by first occurrence).
+
+    ``partial`` is ``True`` when the chosen value does not cover the mode's full
+    surveyed extent (so the summary can flag it, mirroring the road-flags
+    ``(partial)`` suffix) — most relevant when a tagged restriction covers only
+    part of a segment whose remainder falls back to a class default.
     """
     acc: dict[str, dict[tuple[str, str], float]] = {}
     for rule in rules:
@@ -383,10 +395,16 @@ def _resolve_access_modes(rules: list[dict[str, Any]]) -> dict[str, tuple[str, s
             key = (entry["value"], entry["source"])
             acc.setdefault(mode, {})
             acc[mode][key] = acc[mode].get(key, 0.0) + length
-    resolved: dict[str, tuple[str, str]] = {}
+    resolved: dict[str, tuple[str, str, bool]] = {}
     for mode, counts in acc.items():
-        best = max(counts.items(), key=lambda kv: kv[1])
-        resolved[mode] = best[0]
+        total = sum(counts.values())
+        # Prefer a tagged signal even at lower coverage so a class-default
+        # majority can't mask a surveyed restriction.
+        tagged = {key: cov for key, cov in counts.items() if key[1] == "tagged"}
+        pool = tagged if tagged else counts
+        (value, source), coverage = max(pool.items(), key=lambda kv: kv[1])
+        partial = coverage < total - 1e-9
+        resolved[mode] = (value, source, partial)
     return resolved
 
 
@@ -404,15 +422,18 @@ def summarize_access(physical: dict[str, Any] | None, *, tagged_only: bool = Fal
     resolved = _resolve_access_modes(normalize_access_lr(physical.get("access_lr")))
     if not resolved:
         return ""
-    if tagged_only and not any(src == "tagged" for _, src in resolved.values()):
+    if tagged_only and not any(src == "tagged" for _, src, _ in resolved.values()):
         return ""
     parts: list[str] = []
     for mode in ACCESS_MODES:
         label = _ACCESS_MODE_LABELS[mode]
         if mode in resolved:
-            value, source = resolved[mode]
+            value, source, partial = resolved[mode]
             suffix = "°" if source == "class_default" else ""
-            parts.append(f"{label}:{_ACCESS_VALUE_LABELS.get(value, value)}{suffix}")
+            partial_suffix = " (partial)" if partial else ""
+            parts.append(
+                f"{label}:{_ACCESS_VALUE_LABELS.get(value, value)}{suffix}{partial_suffix}"
+            )
         else:
             parts.append(f"{label}:?")
     return " ".join(parts)
