@@ -172,6 +172,90 @@ def test_parse_access_lr_between_subrange_clips() -> None:
 
 
 # ---------------------------------------------------------------------------
+# (a2) when.using / when.vehicle scoping (previously mis-parsed as unconditional)
+# ---------------------------------------------------------------------------
+
+
+# The real Overture ``when`` struct writes every sub-key, most as None.
+def _full_when(**present) -> dict:
+    when = {k: None for k in ("during", "heading", "mode", "recognized", "using", "vehicle")}
+    when.update(present)
+    return when
+
+
+def test_parse_access_lr_using_scope_is_restricted_not_unconditional() -> None:
+    # Nordic no-through-traffic carve-out: {allowed, when.using=[at_destination]}.
+    # ``using`` is a scoping dimension → the allow must NOT parse as an
+    # unconditional allow; it resolves to restricted across all modes.
+    restrictions = [{"access_type": "allowed", "when": _full_when(using=["at_destination"])}]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="residential").to_dict_list())
+    for mode in ("motor_vehicle", "bicycle", "foot"):
+        assert modes[mode] == {"value": "restricted", "source": "tagged"}
+
+
+def test_parse_access_lr_using_scope_specific_mode_restricted() -> None:
+    # A using-scoped rule with an explicit mode list restricts only those modes.
+    restrictions = [
+        {
+            "access_type": "allowed",
+            "when": _full_when(mode=["motor_vehicle"], using=["at_destination"]),
+        }
+    ]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="residential").to_dict_list())
+    assert modes["motor_vehicle"] == {"value": "restricted", "source": "tagged"}
+    # bicycle/foot untouched by the entry → residential has no class default.
+    assert "bicycle" not in modes
+    assert "foot" not in modes
+
+
+def test_parse_access_lr_vehicle_scope_denial_is_mv_only_restricted() -> None:
+    # The fefac05e (fi_helsinki) failure mode: a height>4.2m weight/dimension
+    # restriction has when.mode == null. It must NOT fabricate a blanket tagged
+    # denial across all three modes — a vehicle-dimension restriction can only
+    # constrain motor_vehicle, and as a scoped rule resolves to restricted.
+    restrictions = [
+        {
+            "access_type": "denied",
+            "when": _full_when(
+                vehicle=[
+                    {"comparison": "greater_than", "dimension": "height", "unit": "m", "value": 4.2}
+                ]
+            ),
+        }
+    ]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="residential").to_dict_list())
+    assert modes["motor_vehicle"] == {"value": "restricted", "source": "tagged"}
+    # bicycle/foot are never touched by a vehicle-dimension rule.
+    assert "bicycle" not in modes
+    assert "foot" not in modes
+
+
+def test_parse_access_lr_blanket_denied_plus_using_allow_keeps_denial() -> None:
+    # {denied blanket} + {allowed when.using=at_destination}: the scoped allow is
+    # a carve-out, NOT an unconditional allow — so it can't erase the blanket
+    # denial. The denial is preserved as restricted (never fabricated to allowed).
+    restrictions = [
+        {"access_type": "denied", "when": _full_when()},
+        {"access_type": "allowed", "when": _full_when(using=["at_destination"])},
+    ]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="residential").to_dict_list())
+    for mode in ("motor_vehicle", "bicycle", "foot"):
+        assert modes[mode] == {"value": "restricted", "source": "tagged"}
+        assert modes[mode]["value"] != "allowed"
+
+
+def test_parse_access_lr_mode_only_rule_stays_unconditional() -> None:
+    # An unconditional mode-only denial (all sibling when sub-keys explicit None)
+    # is still a hard tagged denial — the genuine cycleway motor_vehicle=denied
+    # separation signal must survive (the 5faa0b72 keep-check shape).
+    restrictions = [{"access_type": "denied", "when": _full_when(mode=["motor_vehicle"])}]
+    modes = _mode_map(parse_access_lr(restrictions, road_class="cycleway").to_dict_list())
+    assert modes["motor_vehicle"] == {"value": "denied", "source": "tagged"}
+    # cycleway class default still fills bicycle.
+    assert modes["bicycle"] == {"value": "designated", "source": "class_default"}
+
+
+# ---------------------------------------------------------------------------
 # (b) class-default pass fills only the allowed inferences, never a denial off
 #     a pedestrian/cycleway/footway class
 # ---------------------------------------------------------------------------
@@ -289,6 +373,24 @@ def test_summarize_access_tagged_has_no_degree_mark() -> None:
     assert summarize_access(block) == "mv:? bike:? foot:yes"
 
 
+def test_summarize_access_tagged_partial_denial_not_masked_by_class_default() -> None:
+    # A tagged mv denial over [0, 0.4] with the remainder falling back to the
+    # driveable class default (allowed over 60%). The greater-coverage class
+    # default must NOT mask the tagged restriction: the surveyed denial surfaces
+    # and is flagged (partial). Before the fix this rendered "mv:yes°".
+    block = _access_block(
+        "residential",
+        [{"access_type": "denied", "when": {"mode": ["motor_vehicle"]}, "between": [0.0, 0.4]}],
+    )
+    assert summarize_access(block) == "mv:no (partial) bike:? foot:?"
+
+
+def test_summarize_access_full_coverage_tagged_not_marked_partial() -> None:
+    # A tagged value covering the whole segment is not flagged (partial).
+    block = _access_block("footway", [{"access_type": "allowed", "when": {"mode": ["foot"]}}])
+    assert "(partial)" not in summarize_access(block)
+
+
 def test_edge_struct_renders_tagged_access_omits_class_default() -> None:
     # Edge lines carry a tagged access clause only; class-default-only blocks are
     # suppressed (already shown on the segment line).
@@ -327,6 +429,29 @@ def test_prompt_omits_access_clause_when_no_mode_known(tmp_path) -> None:
     assert "access='" not in prompt
     # And with no access anywhere, the access legend is suppressed.
     assert "°=class-default" not in prompt
+
+
+def test_prompt_segments_header_mentions_access_when_present(tmp_path) -> None:
+    # secondary/cycleway blocks carry class-default access → header advertises it.
+    metadata = _prompt_metadata(
+        ref_physical=_access_block("secondary"),
+        target_physical=_access_block("cycleway"),
+    )
+    prompt = build_prompt(tmp_path, metadata, {"options": [{"letter": "A"}]})
+    assert "SEGMENTS (name / class / segment-wide access evidence):" in prompt
+
+
+def test_prompt_segments_header_conditional_when_no_access(tmp_path) -> None:
+    # pedestrian blocks carry no access and no physical evidence → the header must
+    # NOT claim "access evidence" (finding 8: header conditional on what's shown).
+    metadata = _prompt_metadata(
+        ref_physical=_access_block("pedestrian"),
+        target_physical=_access_block("pedestrian"),
+    )
+    prompt = build_prompt(tmp_path, metadata, {"options": [{"letter": "A"}]})
+    assert "SEGMENTS (name / class / segment-wide):" in prompt
+    # The old unconditional header claimed evidence that isn't shown here.
+    assert "segment-wide physical + access evidence" not in prompt
 
 
 # ---------------------------------------------------------------------------

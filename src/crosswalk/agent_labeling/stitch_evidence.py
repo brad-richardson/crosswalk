@@ -1124,7 +1124,12 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("")
     all_segments = metadata["segments"]["reference"] + metadata["segments"]["target"]
     has_access = any(summarize_access(s.get("physical")) for s in all_segments)
-    lines.append("SEGMENTS (name / class / segment-wide physical + access evidence):")
+    has_physical = any(summarize_physical(s.get("physical")) for s in all_segments)
+    evidence_kinds = " + ".join(
+        kind for kind, present in (("physical", has_physical), ("access", has_access)) if present
+    )
+    evidence_suffix = f" {evidence_kinds} evidence" if evidence_kinds else ""
+    lines.append(f"SEGMENTS (name / class / segment-wide{evidence_suffix}):")
     if has_access:
         lines.append(
             "  access: °=class-default (implied by road class; never overrides tagged data), "
