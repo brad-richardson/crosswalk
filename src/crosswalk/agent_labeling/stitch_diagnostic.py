@@ -459,8 +459,19 @@ def _load_plan(plan_path: Path) -> dict[str, Any]:
     return plan
 
 
-def validate_diagnostic_plan(plan_path: Path) -> dict[str, Any]:
-    """Revalidate every source/runtime binding before a run or analysis."""
+def validate_diagnostic_plan(plan_path: Path, *, enforce_runtime: bool = True) -> dict[str, Any]:
+    """Revalidate every source/runtime binding before a run or analysis.
+
+    ``enforce_runtime`` re-hashes the *live* diagnostic/stitch-runner runtime and
+    rejects drift. This guard exists to keep ballot **collection** isolated: a run
+    must execute under the exact runtime the plan was built with. It is disabled
+    for pure re-analysis of already-collected results — each frozen result is
+    already provably bound to its collection runtime via its per-result digest and
+    ``invocation_signature_sha256`` (which incorporates the stored
+    ``stitch_runner_sha256``). Analysis-only code in this module is expected to
+    evolve (e.g. reporting bug fixes), so re-hashing this file during analysis
+    would wrongly block re-analysis without adding any integrity guarantee.
+    """
     plan = _load_plan(plan_path)
     marker = Path(plan["output_dir"]) / NO_EXPORT_MARKER
     if not marker.is_file():
@@ -468,7 +479,7 @@ def validate_diagnostic_plan(plan_path: Path) -> dict[str, Any]:
     source = plan["source_manifest"]
     if sha256_file(Path(source["path"])) != source["sha256"]:
         raise ValueError("source wave manifest changed after diagnostic planning")
-    if _runtime_hashes() != plan["runtime"]:
+    if enforce_runtime and _runtime_hashes() != plan["runtime"]:
         raise ValueError("diagnostic or stitch-runner runtime changed; create a new run_id")
 
     provider = _codex_provider(get_panel("v7-candidate"))
@@ -962,6 +973,22 @@ def _jaccard(left: frozenset[tuple[str, str]], right: frozenset[tuple[str, str]]
     return len(left & right) / len(left | right)
 
 
+def _human_menu_expressible(
+    human: frozenset[tuple[str, str]],
+    option_sets: set[frozenset[tuple[str, str]]],
+    none_selectable: bool,
+) -> bool:
+    """Whether a human label's exact edge set is selectable from the option menu.
+
+    A label is expressible iff it matches some lettered option's edge set, or it
+    is the empty (reject-all) set and ``NONE`` is selectable. ``NONE`` expresses
+    ONLY the empty set — it must never mark a nonempty label expressible.
+    """
+    if human in option_sets:
+        return True
+    return not human and none_selectable
+
+
 def _analyze_pack(
     plan: dict[str, Any],
     pack: dict[str, Any],
@@ -994,10 +1021,12 @@ def _analyze_pack(
     )
     audit = results.get("audit")
     evidence_manifest = load_evidence_manifest(Path(pack["group_dir"]), allow_legacy=False)
+    evidence = evidence_manifest["evidence"]
     option_sets = {
         frozenset((str(edge["ref_id"]), str(edge["target_id"])) for edge in option["edges"])
-        for option in evidence_manifest["evidence"]["option_menu"]
+        for option in evidence["option_menu"]
     }
+    none_selectable = "NONE" in set(evidence.get("selectable_choices", []))
     return {
         "pack_key": pack["pack_key"],
         "dataset_id": pack["dataset_id"],
@@ -1019,7 +1048,11 @@ def _analyze_pack(
         ),
         "none_reason": (audit.get("feedback") or {}).get("none_reason") if audit else None,
         "human_label_available": human is not None,
-        "human_menu_expressible": human in option_sets if human is not None else None,
+        "human_menu_expressible": (
+            _human_menu_expressible(human, option_sets, none_selectable)
+            if human is not None
+            else None
+        ),
         "modal_exact_human": modal_edges == human
         if modal_edges is not None and human is not None
         else None,
@@ -1124,7 +1157,7 @@ def analyze_diagnostic(
     fix_frozen_marker: Path | None = None,
 ) -> dict[str, Any]:
     """Create a deterministic aggregate, hiding holdout findings by default."""
-    plan = validate_diagnostic_plan(plan_path)
+    plan = validate_diagnostic_plan(plan_path, enforce_runtime=False)
     cohort = "holdout" if include_holdout else "development"
     frozen = None
     if include_holdout:
