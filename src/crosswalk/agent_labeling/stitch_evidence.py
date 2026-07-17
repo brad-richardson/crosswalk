@@ -41,7 +41,7 @@ from ..matching.sliver import (
     group_segment_lengths_m,
 )
 from ..matching.stitch_options import build_stitch_options
-from ..utils.physical import summarize_physical
+from ..utils.physical import summarize_access, summarize_physical
 from .image_renderer import (
     BACKGROUND_COLOR,
     MIN_IMAGE_SIZE,
@@ -545,8 +545,13 @@ def build_metadata(
     *,
     evidence: dict | None = None,
     include_same_side_coincidence: bool = False,
+    target_kind: str | None = None,
 ) -> dict:
-    """Build the metadata dict describing the group and its options."""
+    """Build the metadata dict describing the group and its options.
+
+    ``target_kind`` (e.g. ``route_network``) is a per-dataset flag surfaced as a
+    one-line prompt header; falls back to the group's own ``target_kind`` field.
+    """
     ref_ids = group.get("ref_ids", list(group.get("ref_geometries", {}).keys()))
     target_ids = group.get("target_ids", list(group.get("target_geometries", {}).keys()))
     ref_labels = {rid: f"R{i + 1}" for i, rid in enumerate(ref_ids)}
@@ -663,9 +668,13 @@ def build_metadata(
         if group.get("n_subproblems"):
             decomposition_meta["n_subproblems"] = group["n_subproblems"]
 
+    resolved_target_kind = target_kind or group.get("target_kind")
+    target_kind_meta = {"target_kind": resolved_target_kind} if resolved_target_kind else {}
+
     metadata = {
         "group_id": group.get("group_id"),
         **decomposition_meta,
+        **target_kind_meta,
         "match_type": group.get("match_type"),
         "n_ref_segments": len(ref_ids),
         "n_target_segments": len(target_ids),
@@ -728,6 +737,15 @@ def _edge_struct_str(e: dict) -> str:
         parts.append(f"R physical: {ref_physical}")
     if target_physical:
         parts.append(f"T physical: {target_physical}")
+    # Edge lines gain an access clause only when a tagged (surveyed) restriction
+    # is present on the aligned span (rare); class-default inferences already
+    # show on the segment line, so they are suppressed here (tagged_only=True).
+    ref_access = summarize_access(e.get("ref_physical"), tagged_only=True)
+    target_access = summarize_access(e.get("target_physical"), tagged_only=True)
+    if ref_access:
+        parts.append(f"R access: {ref_access}")
+    if target_access:
+        parts.append(f"T access: {target_access}")
     return ", ".join(parts)
 
 
@@ -972,12 +990,16 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
     lines.append("  'corr T#' compares targets with targets. R0 and T0 are independent labels and")
     lines.append("  do not assert cross-side identity. Use corridor context only after judging")
     lines.append("  whether the two segments represent the same traveled way.")
+    # Gate on actual bridge/tunnel/layer content — not mere dict truthiness —
+    # since every driveable segment now carries a class-default access_lr block,
+    # which alone must not trigger the physical (bridge/tunnel/layer) guidance.
     has_physical = any(
-        segment.get("physical")
+        summarize_physical(segment.get("physical"))
         for side in metadata.get("segments", {}).values()
         for segment in side
     ) or any(
-        edge.get("ref_physical") or edge.get("target_physical")
+        summarize_physical(edge.get("ref_physical"))
+        or summarize_physical(edge.get("target_physical"))
         for option in metadata.get("options", [])
         for edge in option.get("edges", [])
     )
@@ -1016,6 +1038,11 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
         f"GROUP {metadata['group_id']}  (match_type={metadata['match_type']}, "
         f"{metadata['n_ref_segments']} ref x {metadata['n_target_segments']} target)"
     )
+    if metadata.get("target_kind") == "route_network":
+        lines.append("NOTE: targets in this dataset are signed route/itinerary designations, not")
+        lines.append(
+            "separately-built infrastructure; a route that follows a road matches the road."
+        )
     if metadata.get("parent_group_id"):
         lines.append(
             f"This group is one sub-problem of a larger group ({metadata['parent_group_id']}); "
@@ -1095,17 +1122,31 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
         else:
             lines.append("    edges: (none)")
     lines.append("")
-    lines.append("SEGMENTS (name / class / segment-wide physical evidence):")
+    all_segments = metadata["segments"]["reference"] + metadata["segments"]["target"]
+    has_access = any(summarize_access(s.get("physical")) for s in all_segments)
+    lines.append("SEGMENTS (name / class / segment-wide physical + access evidence):")
+    if has_access:
+        lines.append(
+            "  access: °=class-default (implied by road class; never overrides tagged data), "
+            "?=unknown"
+        )
+        lines.append(
+            "          — access describes who may use the way (mode/role), not physical separation."
+        )
+
+    def _segment_line(s: dict) -> str:
+        physical = summarize_physical(s.get("physical")) or "unknown"
+        access = summarize_access(s.get("physical"))
+        access_clause = f" access='{access}'" if access else ""
+        return (
+            f"  {s['label']}: name='{s['name']}' class='{s['class']}' "
+            f"physical='{physical}'{access_clause}"
+        )
+
     for s in metadata["segments"]["reference"]:
-        physical = summarize_physical(s.get("physical")) or "unknown"
-        lines.append(
-            f"  {s['label']}: name='{s['name']}' class='{s['class']}' physical='{physical}'"
-        )
+        lines.append(_segment_line(s))
     for s in metadata["segments"]["target"]:
-        physical = summarize_physical(s.get("physical")) or "unknown"
-        lines.append(
-            f"  {s['label']}: name='{s['name']}' class='{s['class']}' physical='{physical}'"
-        )
+        lines.append(_segment_line(s))
     lines.append("")
     lines.append("Look at overview.png first, then each option image. Then respond with ONLY a")
     lines.append("single JSON object (no prose, no markdown fence) of the form:")
@@ -1132,6 +1173,7 @@ def generate_group_evidence(
     source_artifacts: dict | None = None,
     batch_generation_source: dict | None = None,
     include_same_side_coincidence: bool = False,
+    target_kind: str | None = None,
 ) -> dict | None:
     """Generate the full evidence pack for one group. Returns the metadata dict.
 
@@ -1194,6 +1236,7 @@ def generate_group_evidence(
         options_ctx,
         evidence=evidence,
         include_same_side_coincidence=include_same_side_coincidence,
+        target_kind=target_kind,
     )
     if prune_info is not None:
         metadata["options_pruned"] = prune_info
@@ -1225,6 +1268,30 @@ def generate_group_evidence(
     return metadata
 
 
+def _resolve_target_kind(batch: dict) -> str | None:
+    """Resolve the dataset's ``target_kind`` flag (e.g. ``route_network``).
+
+    Prefers an explicit value in the batch experiment block, then the per-dataset
+    config's ``matching.target_kind``. Returns ``None`` when unset or unresolvable
+    (missing config never raises — the header simply does not render).
+    """
+    experiment = batch.get("experiment") or {}
+    if experiment.get("target_kind"):
+        return str(experiment["target_kind"])
+    dataset_id = batch.get("dataset_id")
+    if not dataset_id:
+        return None
+    try:
+        from ..datasets.schema import get_dataset_config
+
+        config = get_dataset_config(str(dataset_id))
+    except Exception:
+        return None
+    if config is None or config.matching is None:
+        return None
+    return config.matching.target_kind
+
+
 def generate_stitch_evidence(
     batch: dict,
     output_dir: Path,
@@ -1247,6 +1314,7 @@ def generate_stitch_evidence(
     generated: list[str] = []
     experiment = batch.get("experiment") or {}
     include_same_side_coincidence = bool(experiment.get("same_side_coincidence_visible", False))
+    target_kind = _resolve_target_kind(batch)
     for group in groups:
         gid = group.get("group_id")
         if wanted is not None and gid not in wanted:
@@ -1257,6 +1325,7 @@ def generate_stitch_evidence(
             source_artifacts=batch.get("source_artifacts"),
             batch_generation_source=batch.get("batch_generation_source"),
             include_same_side_coincidence=include_same_side_coincidence,
+            target_kind=target_kind,
         )
         if meta is not None:
             generated.append(gid)

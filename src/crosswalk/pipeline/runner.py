@@ -1244,6 +1244,7 @@ def _export_groups_sidecar(
         return physical_attributes(
             row.get("level_lr") if "level_lr" in frame.columns else None,
             row.get("road_flags_lr") if "road_flags_lr" in frame.columns else None,
+            row.get("access_lr") if "access_lr" in frame.columns else None,
         )
 
     # Serialize geometries as GeoJSON with coordinate rounding (defined once).
