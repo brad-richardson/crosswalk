@@ -17,6 +17,7 @@ from crosswalk.resolver.extract import (
     COMBINED_AUDIT_ATTR,
     COMBINED_STATS_ATTR,
     KEY_COLUMNS,
+    _is_anchored,
     build_edge_table,
     concat_edge_tables,
     load_sidecar_groups,
@@ -70,7 +71,7 @@ def _labels(rows):
     return pd.DataFrame(rows)
 
 
-def _label_row(gid, edges, labeler="brad"):
+def _label_row(gid, edges, labeler="brad", session_id="x"):
     return {
         "group_id": gid,
         "dataset_id": "ds",
@@ -80,7 +81,7 @@ def _label_row(gid, edges, labeler="brad"):
         "num_targets": 1,
         "labeler": labeler,
         "labeled_at": "2026-01-01",
-        "session_id": "x",
+        "session_id": session_id,
     }
 
 
@@ -96,6 +97,41 @@ def test_clean_label_keep_drop():
     assert keep_by_edge["B"] == 0
     # optimizer baseline (selected) kept both -> would be 1 FP against human
     assert df["selected"].all()
+
+
+def test_session_id_and_anchored_provenance_on_edge_rows():
+    """Every emitted edge row carries session_id + derived anchored (no NaN)."""
+    groups = [_group("g1", [_edge("A", "T", 0.99), _edge("B", "T", 0.4)])]
+    # An anchored option-menu / batch-id session.
+    human = _labels([_label_row("hg1", [("A", "T")], session_id="ds_earlysignal1")])
+    df = build_edge_table(groups, human, "ds")
+    assert set(df["session_id"]) == {"ds_earlysignal1"}
+    assert df["anchored"].all()
+
+    # De-anchored sentinel -> anchored=False on every row.
+    human_de = _labels([_label_row("hg1", [("A", "T")], session_id="deanchored_v1")])
+    df_de = build_edge_table(groups, human_de, "ds")
+    assert set(df_de["session_id"]) == {"deanchored_v1"}
+    assert not df_de["anchored"].any()
+
+    # Missing / blank session_id -> normalized to "" and defaults to anchored.
+    human_blank = _labels([_label_row("hg1", [("A", "T")], session_id=float("nan"))])
+    df_blank = build_edge_table(groups, human_blank, "ds")
+    assert set(df_blank["session_id"]) == {""}
+    assert df_blank["anchored"].all()
+
+
+def test_is_anchored_derivation_rule():
+    """De-anchored iff session_id starts with the deanchored sentinel prefix."""
+    # Explicit de-anchored sessions.
+    assert _is_anchored("deanchored_v1") is False
+    assert _is_anchored("DeAnchored_v2") is False  # case-insensitive
+    # Anchored: batch/option-menu ids, human sentinels, missing values.
+    assert _is_anchored("co_bogota_bike_network_earlysignal1") is True
+    assert _is_anchored("") is True
+    assert _is_anchored(None) is True
+    assert _is_anchored(float("nan")) is True
+    assert _is_anchored("manual_review_2026") is True
 
 
 def test_split_provenance_and_include_flag():

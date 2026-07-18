@@ -15,6 +15,7 @@ Honesty constraints (see the prototype writeup):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -363,6 +364,24 @@ def feature_importances(df: pd.DataFrame) -> pd.Series:
     return pd.Series(model.feature_importances_, index=FEATURE_COLUMNS).sort_values(ascending=False)
 
 
+# Panel-labeler string -> rubric era. ``panel_unanimous_vN`` / ``panel_quorum_vN``
+# roll up to ``vN`` (the rubric era that produced the vote); any other labeler
+# (human names) rolls up to ``human``.
+_PANEL_ERA_RE = re.compile(r"^panel_(?:unanimous|quorum)_(v\d+)$")
+
+
+def _labeler_era(labeler) -> str:
+    """Map a labeler string to its coarse rubric era for eval rollups.
+
+    ``panel_unanimous_vN`` / ``panel_quorum_vN`` -> ``vN``; every other labeler
+    (human names) -> ``human``. Lets eval judge whether an early era's share
+    (e.g. v1's pre-access-channel votes) degrades quality, which the flat
+    per-labeler slices cannot show.
+    """
+    m = _PANEL_ERA_RE.match(str(labeler))
+    return m.group(1) if m else "human"
+
+
 def slice_report(df: pd.DataFrame, **cv_kwargs) -> pd.DataFrame:
     """Run CV on the full set and on informative slices; return a tidy table."""
     df = featurize(df) if "conf_rel_max" not in df.columns else df
@@ -385,4 +404,15 @@ def slice_report(df: pd.DataFrame, **cv_kwargs) -> pd.DataFrame:
     if "labeler" in df.columns:
         for lb, sub in df.groupby("labeler"):
             _add(f"labeler={lb}", sub)
+        # Per-era rollup: collapse panel_*_vN labelers to their rubric era so a
+        # dominant early era (e.g. v1's pre-access-channel share) is judgeable.
+        era = df["labeler"].map(_labeler_era)
+        for e, sub in df.groupby(era):
+            _add(f"era={e}", sub)
+    # Anchored vs de-anchored: does hiding the optimizer's option menu (the
+    # unbiased eval slice) change the picture vs the option-anchored majority?
+    if "anchored" in df.columns:
+        anchor_label = df["anchored"].map(lambda a: "anchored" if a else "deanchored")
+        for name, sub in df.groupby(anchor_label):
+            _add(name, sub)
     return pd.DataFrame(rows)

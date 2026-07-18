@@ -95,7 +95,9 @@ EDGE_LABEL_COL = "keep"
 # meaning changes. A per-build column-set hash is recorded alongside it so silent
 # column accretion (e.g. via the candidate-parquet join, see
 # CANDIDATE_EXCLUDE_FROM_JOIN) is detectable in the audit even between bumps.
-RESOLVER_TABLE_SCHEMA_VERSION = 1
+# v2: added ``session_id`` + derived ``anchored`` provenance columns (no change
+#     to training features or labels; slicing/provenance only).
+RESOLVER_TABLE_SCHEMA_VERSION = 2
 
 # Row key = the design's stage-2 feature-parquet join key (§3.2). Kept stable so
 # FeatureStore columns can be merged later without introducing a competing
@@ -107,9 +109,36 @@ KEY_COLUMNS = ("dataset_id", "group_id", "ref_id", "target_id")
 CANDIDATE_EXCLUDE_FROM_JOIN = {
     "human_group_id",
     "labeler",
+    "session_id",
+    "anchored",
     "provenance",
     EDGE_LABEL_COL,
 }
+
+# Session-id prefix that marks a *de-anchored* labeling session. The web
+# /stitching-review "de-anchor" mode hides the optimizer's proposed selection and
+# stamps a fixed sentinel on the resulting label (see
+# ``web/routes/stitching.py``: ``session_id="deanchored_v1"``). Those labels were
+# made without the optimizer's option menu in view, so they are NOT anchored to
+# it. Every other session_id — batch/option-menu panel ids, or missing/blank —
+# is treated as anchored (see :func:`_is_anchored`).
+DEANCHORED_SESSION_PREFIX = "deanchored"
+
+
+def _is_anchored(session_id) -> bool:
+    """Whether the source label was anchored to the optimizer's proposal.
+
+    Returns ``False`` iff the label's ``session_id`` marks a de-anchored session
+    (prefix :data:`DEANCHORED_SESSION_PREFIX` — the unbiased eval slice where the
+    optimizer's option menu was hidden). Unknown / missing / blank session_ids
+    default to ``anchored=True``: option-menu panel waves (~75% of training rows)
+    carry batch-id session_ids and are all anchored, so the conservative default
+    matches the dominant regime, and a genuine de-anchored row is never
+    mislabeled because it always carries the explicit sentinel.
+    """
+    text = _audit_text(session_id).strip().lower()
+    return not text.startswith(DEANCHORED_SESSION_PREFIX)
+
 
 # Structural / provenance columns that exist in both the JSON sidecar row
 # and the parquet; parquet is authoritative when present (runtime parity).
@@ -653,11 +682,18 @@ def _edge_row(
     (or an enriched candidate edge) fills the structural layer.
     """
     key = _edge_key(edge)
+    # Provenance carried straight from the source stitching label (no NaN leak):
+    # ``session_id`` distinguishes anchored option-menu panel votes / batch
+    # sessions from de-anchored ones, and ``anchored`` is its documented boolean
+    # derivation (see :func:`_is_anchored`). Provenance only — NOT model features.
+    session_id = _audit_text(hrow.get("session_id", ""))
     return {
         "dataset_id": dataset_id,
         "group_id": group["group_id"],
         "human_group_id": hgid,
         "labeler": hrow.get("labeler", ""),
+        "session_id": session_id,
+        "anchored": _is_anchored(session_id),
         "provenance": provenance,
         "match_type": group.get("match_type", ""),
         "ref_id": key[0],
