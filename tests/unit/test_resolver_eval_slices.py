@@ -22,9 +22,16 @@ def test_labeler_era_maps_panel_versions_and_humans():
     assert _labeler_era("panel_unanimous_v1") == "v1"
     assert _labeler_era("panel_unanimous_v7") == "v7"
     assert _labeler_era("panel_quorum_v3") == "v3"
+    # Panel-config variants (stitch_export none/decomposed families) are still
+    # era-vN panel votes, not humans.
+    assert _labeler_era("panel_unanimous_none_v3") == "v3"
+    assert _labeler_era("panel_unanimous_decomposed_v7") == "v7"
+    assert _labeler_era("panel_quorum_none_v5") == "v5"
+    assert _labeler_era("panel_quorum_decomposed_v6") == "v6"
     # Human labelers and anything else roll up to "human".
     assert _labeler_era("brad") == "human"
     assert _labeler_era("panel_unanimous") == "human"  # no version suffix
+    assert _labeler_era("panel_unanimous_none") == "human"  # variant, no version
     assert _labeler_era("agent_batch_v2") == "human"  # not a panel labeler
     assert _labeler_era("") == "human"
 

@@ -364,18 +364,24 @@ def feature_importances(df: pd.DataFrame) -> pd.Series:
     return pd.Series(model.feature_importances_, index=FEATURE_COLUMNS).sort_values(ascending=False)
 
 
-# Panel-labeler string -> rubric era. ``panel_unanimous_vN`` / ``panel_quorum_vN``
-# roll up to ``vN`` (the rubric era that produced the vote); any other labeler
-# (human names) rolls up to ``human``.
-_PANEL_ERA_RE = re.compile(r"^panel_(?:unanimous|quorum)_(v\d+)$")
+# Panel-labeler string -> rubric era. Any ``panel_(unanimous|quorum)[...]_vN``
+# labeler rolls up to ``vN`` (the rubric era that produced the vote); any other
+# labeler (human names) rolls up to ``human``. The optional middle qualifier
+# captures the panel-config variants stamped by ``agent_labeling/stitch_export``
+# — ``panel_unanimous_none_vN`` / ``panel_unanimous_decomposed_vN`` and their
+# ``panel_quorum_*`` counterparts — which are all still era-vN panel votes, not
+# humans; a stricter ``_vN$``-only match would misfile them into ``human`` and
+# undercount those eras.
+_PANEL_ERA_RE = re.compile(r"^panel_(?:unanimous|quorum)(?:_[a-z]+)*_(v\d+)$")
 
 
 def _labeler_era(labeler) -> str:
     """Map a labeler string to its coarse rubric era for eval rollups.
 
-    ``panel_unanimous_vN`` / ``panel_quorum_vN`` -> ``vN``; every other labeler
-    (human names) -> ``human``. Lets eval judge whether an early era's share
-    (e.g. v1's pre-access-channel votes) degrades quality, which the flat
+    Any ``panel_(unanimous|quorum)[_qualifier...]_vN`` labeler -> ``vN`` (this
+    includes the ``_none_``/``_decomposed_`` panel-config variants); every other
+    labeler (human names) -> ``human``. Lets eval judge whether an early era's
+    share (e.g. v1's pre-access-channel votes) degrades quality, which the flat
     per-labeler slices cannot show.
     """
     m = _PANEL_ERA_RE.match(str(labeler))
