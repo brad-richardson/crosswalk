@@ -1993,20 +1993,54 @@ def test_pre_rubric_v7_roster_is_era_less(tmp_path):
     assert batch_panel_era(batch) is None
 
 
-def test_current_rubric_v7_candidate_has_own_era_but_remains_nonstandard(tmp_path):
+def test_current_rubric_v7_batch_is_blessed_and_standard(tmp_path):
+    """The 2026-07-18 bless: v7 + canonical rubric passes WITHOUT any override."""
     from crosswalk.agent_labeling.stitch_export import (
         PANEL_VOTERS_V7,
+        STANDARD_PANEL_VOTERS_CURRENT_RUBRIC,
         batch_panel_era,
         nonstandard_panel_batches,
     )
 
-    v7 = tmp_path / "batch_v7_candidate"
+    v7 = tmp_path / "batch_v7"
     _write_votes_csv(v7, _V7_VOTERS)
     _stamp_matching_rubric(v7)
     assert frozenset(_V7_VOTERS) == PANEL_VOTERS_V7
+    assert STANDARD_PANEL_VOTERS_CURRENT_RUBRIC["v7"] == PANEL_VOTERS_V7
     assert batch_panel_era(v7) == "v7"
-    assert nonstandard_panel_batches([v7]) == {"batch_v7_candidate": set(_V7_VOTERS)}
+    assert nonstandard_panel_batches([v7]) == {}
     assert nonstandard_panel_batches([v7], expected=PANEL_VOTERS_V7) == {}
+
+
+def test_current_rubric_near_miss_composition_still_refuses(tmp_path):
+    """Blessing keys on exact (provider, model) pairs: the v5-quad codex model
+    (terra) swapped into the v7 roster is NOT the blessed sol trio."""
+    from crosswalk.agent_labeling.stitch_export import (
+        batch_panel_era,
+        nonstandard_panel_batches,
+    )
+
+    near = tmp_path / "batch_v7_terra_near_miss"
+    near_voters = [
+        ("claude", "claude-opus-4-8"),
+        ("codex", "gpt-5.6-terra"),
+        ("muse", "meta/muse-spark-1.1"),
+    ]
+    _write_votes_csv(near, near_voters)
+    _stamp_matching_rubric(near)
+    # terra+muse trio IS the v6 candidate roster: stampable, still nonstandard.
+    assert batch_panel_era(near) == "v6"
+    assert nonstandard_panel_batches([near]) == {"batch_v7_terra_near_miss": set(near_voters)}
+
+
+def test_current_rubric_v5_quad_remains_flagged_after_v7_bless(tmp_path):
+    """The v7 bless must not loosen the gate for other current-rubric rosters."""
+    from crosswalk.agent_labeling.stitch_export import nonstandard_panel_batches
+
+    v5_current = tmp_path / "batch_v5_current_rubric"
+    _write_votes_csv(v5_current, _V5_VOTERS)
+    _stamp_matching_rubric(v5_current)
+    assert nonstandard_panel_batches([v5_current]) == {"batch_v5_current_rubric": set(_V5_VOTERS)}
 
 
 def test_current_rubric_with_v5_roster_does_not_reuse_historical_era(tmp_path):
@@ -2167,7 +2201,7 @@ def test_explicitly_approved_v6_candidate_export_uses_v6_labeler(tmp_path, label
     assert list(stored["labeler"]) == [PANEL_LABELER_V6]
 
 
-def test_explicitly_approved_v7_candidate_export_uses_v7_labeler(tmp_path, labels_dir):
+def test_blessed_v7_export_uses_v7_labeler(tmp_path, labels_dir):
     from crosswalk.agent_labeling.stitch_export import PANEL_LABELER_V7, batch_panel_era
 
     batch = make_batch(

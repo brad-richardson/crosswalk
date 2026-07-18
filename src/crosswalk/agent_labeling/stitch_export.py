@@ -10,9 +10,13 @@ panel on pre-enrichment packs; v3 that composition on #302-enriched packs; v4
 the 2026-07-09 bless — Opus 4.8 / gpt-5.6-terra / Kimi K2.6 (the codex model was
 swapped gpt-5.6-sol -> gpt-5.6-terra in place on 2026-07-10, no era bump, as v4
 had minted no committed rows); v5 the 2026-07-10 quad bless — the v4 trio PLUS
-muse/Muse Spark 1.1, paired with the quorum consensus rule. The tag is bumped
+muse/Muse Spark 1.1, paired with the quorum consensus rule; v7 the 2026-07-18
+bless — the lean high-effort Opus 4.8 / gpt-5.6-sol / Muse Spark 1.1 trio on
+canonical-rubric packs, validated across the v9 arc (see
+``research/bulk_wave_plan_2026-07.md``). The tag is bumped
 whenever the panel composition OR its pack inputs change, and each batch is
-stamped with ITS OWN era's tag — see :data:`STANDARD_PANEL_VOTERS`).
+stamped with ITS OWN era's tag — see :data:`STANDARD_PANEL_VOTERS` and
+:data:`STANDARD_PANEL_VOTERS_CURRENT_RUBRIC`).
 
 One directly voted panel verdict class is promoted:
 
@@ -199,10 +203,15 @@ PANEL_QUORUM_NONE_LABELER_V6 = "panel_quorum_none_v6"
 PANEL_DECOMPOSED_LABELER_V6 = "panel_unanimous_decomposed_v6"
 PANEL_QUORUM_DECOMPOSED_LABELER_V6 = "panel_quorum_decomposed_v6"
 
-# v7-candidate tags. V7 is a distinct generation rather than an in-place v6
-# edit: it changes Codex Terra -> Sol and records high effort across the lean
-# Claude/Codex/Muse panel. It remains nonstandard until the canonical-rubric
-# replay is manually reviewed and explicitly promoted.
+# v7 tags. V7 is a distinct generation rather than an in-place v6 edit: it
+# changes Codex Terra -> Sol and records high effort across the lean
+# Claude/Codex/Muse panel. Introduced as a candidate for the canonical-rubric
+# replay; PROMOTED to blessed on 2026-07-18 after the v9 arc validated the
+# composition (targeted rerun scored 5/6 against adjudicated ground truth,
+# human review ratified the merges — see research/v9_rerun_adjudication.md and
+# research/bulk_wave_plan_2026-07.md). Unlike v3-v5, v7's era identity is
+# coupled to the CURRENT canonical rubric (see
+# :data:`STANDARD_PANEL_VOTERS_CURRENT_RUBRIC`).
 PANEL_LABELER_V7 = "panel_unanimous_v7"
 PANEL_QUORUM_LABELER_V7 = "panel_quorum_v7"
 PANEL_NONE_LABELER_V7 = "panel_unanimous_none_v7"
@@ -291,12 +300,31 @@ STANDARD_PANEL_VOTERS: dict[str, frozenset[tuple[str, str]]] = {
     "v5": PANEL_VOTERS_V5,
 }
 
+#: Blessed compositions whose era identity is coupled to the CURRENT canonical
+#: rubric (v3-v5 above are legacy-prompt eras and validate only with a legacy
+#: rubric profile). A batch here passes the export gate ONLY when its packs are
+#: stamped with the current ``MATCHING_RUBRIC_VERSION`` — a future rubric bump
+#: therefore un-blesses these compositions until an explicit re-bless (the same
+#: provenance decision discipline as every era transition in this file).
+#:
+#: * v7 (blessed 2026-07-18): the lean high-effort trio. Committed-provenance
+#:   constraint verified at bless time: every committed ``labels/votes`` row
+#:   from the v7/v9-arc batches (au_sydney, fi_helsinki, ch_geneva) carries
+#:   exactly these three (provider, model) pairs, and the committed
+#:   ``panel_unanimous_v7`` stitching labels were minted from this composition
+#:   via explicit operator override — blessing re-stamps them identically on
+#:   re-export, rewriting nothing.
+STANDARD_PANEL_VOTERS_CURRENT_RUBRIC: dict[str, frozenset[tuple[str, str]]] = {
+    "v7": PANEL_VOTERS_V7,
+}
+
 # Known candidate compositions paired with the current matching rubric resolve
 # to their own labeler generation but do NOT pass nonstandard_panel_batches.
 # This separates "we know how to stamp it" from "it passed calibration".
+# (v7 graduated from this map to STANDARD_PANEL_VOTERS_CURRENT_RUBRIC on
+# 2026-07-18.)
 CANDIDATE_ERA_VOTERS: dict[frozenset[tuple[str, str]], str] = {
     PANEL_VOTERS_V6: "v6",
-    PANEL_VOTERS_V7: "v7",
 }
 
 #: STAMPING-ONLY historical compositions -> labeler era. These compositions
@@ -485,10 +513,15 @@ def batch_panel_era(batch_dir: Path) -> str | None:
         return None
     rubric_versions = _batch_matching_rubric_versions(batch_dir)
     current_rubric = rubric_versions == frozenset({MATCHING_RUBRIC_VERSION})
-    # Candidate v6/v7 tags are defined by both their lean voter composition and
-    # the refined canonical rubric. Pre-rubric canaries with either roster are
-    # deliberately era-less and cannot be exported under the new meaning.
-    candidate_era = CANDIDATE_ERA_VOTERS.get(frozenset(voters))
+    # Blessed current-rubric eras (v7+) and candidate tags (v6) are both
+    # defined by their lean voter composition AND the refined canonical rubric.
+    # Pre-rubric canaries with either roster are deliberately era-less and
+    # cannot be exported under the new meaning.
+    frozen_voters = frozenset(voters)
+    for era, blessed in STANDARD_PANEL_VOTERS_CURRENT_RUBRIC.items():
+        if frozen_voters == blessed:
+            return era if current_rubric else None
+    candidate_era = CANDIDATE_ERA_VOTERS.get(frozen_voters)
     if candidate_era is not None:
         return candidate_era if current_rubric else None
     # v3-v5 are historical prompt eras. Any non-legacy rubric profile (current,
@@ -510,12 +543,14 @@ def nonstandard_panel_batches(
 
     Reads each batch's ``votes.csv`` (provider, model) pairs and flags any batch
     whose voter set is not a blessed composition. With the default
-    ``expected=None``, a batch passes when it exactly matches ANY era's blessed
-    set (:data:`STANDARD_PANEL_VOTERS`): historical v3 batches (claude+codex+agy
-    with their v3 models) stay standard instead of being retroactively flagged,
-    and v4 batches validate against the v4 set. Current/unknown/invalid rubric
-    profiles remain candidates and are flagged until a new production process
-    is blessed.
+    ``expected=None``, a batch passes when it exactly matches an era's blessed
+    set FOR its rubric profile: legacy-prompt batches validate against
+    :data:`STANDARD_PANEL_VOTERS` (historical v3 batches stay standard instead
+    of being retroactively flagged, v4 against the v4 set), and
+    canonical-rubric batches validate against
+    :data:`STANDARD_PANEL_VOTERS_CURRENT_RUBRIC` (v7, blessed 2026-07-18).
+    Any other current-rubric composition (including the v5 quad) and all
+    unknown/invalid rubric profiles remain flagged candidates until blessed.
     Pass an explicit ``expected`` frozenset of (provider, model) pairs to pin
     and explicitly accept a single composition.
 
@@ -528,9 +563,6 @@ def nonstandard_panel_batches(
     missing/unreadable ``votes.csv`` are skipped (the CLI already hard-requires
     ``consensus.csv``; provenance for such batches is best-effort).
     """
-    accepted = (
-        [frozenset(expected)] if expected is not None else list(STANDARD_PANEL_VOTERS.values())
-    )
     offending: dict[str, set[tuple[str, str]]] = {}
     for bd in batch_dirs:
         voters = _batch_voters(bd)
@@ -539,10 +571,26 @@ def nonstandard_panel_batches(
         rubric_versions = _batch_matching_rubric_versions(bd)
         legacy_rubric = rubric_versions == frozenset({""})
         current_rubric = rubric_versions == frozenset({MATCHING_RUBRIC_VERSION})
-        rubric_blocked = (not legacy_rubric and not current_rubric) or (
-            expected is None and current_rubric
+        if expected is not None:
+            # Explicit pinning accepts the pinned composition under either
+            # valid rubric profile; mixed/invalid provenance always flags.
+            rubric_blocked = not legacy_rubric and not current_rubric
+            if rubric_blocked or voters != frozenset(expected):
+                offending[Path(bd).name] = voters
+            continue
+        # Default gate: a batch is standard when its composition is blessed FOR
+        # its rubric profile — legacy-prompt batches against the v3-v5 sets,
+        # canonical-rubric batches against the current-rubric blessed sets
+        # (v7+, since the 2026-07-18 bless). A current-rubric batch with any
+        # other composition (including the v5 quad) remains a flagged
+        # candidate until blessed.
+        standard = (
+            legacy_rubric and any(voters == blessed for blessed in STANDARD_PANEL_VOTERS.values())
+        ) or (
+            current_rubric
+            and any(voters == blessed for blessed in STANDARD_PANEL_VOTERS_CURRENT_RUBRIC.values())
         )
-        if rubric_blocked or not any(voters == blessed for blessed in accepted):
+        if not standard:
             offending[Path(bd).name] = voters
     return offending
 
