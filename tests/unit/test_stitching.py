@@ -2768,6 +2768,41 @@ class TestBuildStitchOptions:
         # submits exactly that edge set
         assert ctx["preseed_edges"] == ctx["options"][0]["edges"]
 
+    def test_lateral_offset_evidence_passes_through_to_option_edges(self):
+        """Per-edge lateral-offset fields on the sidecar edge reach the option edge.
+
+        The offset trio is MI-4's primary physical-separation trigger; it must
+        survive the sidecar-edge -> option-edge hop so evidence packs can render
+        it. Missing/omitted keys degrade gracefully (never fabricated).
+        """
+        from crosswalk.web.routes.stitching import _build_stitch_options
+
+        edges = [
+            {
+                "ref_id": "r1",
+                "target_id": "t1",
+                "confidence": 0.9,
+                "lateral_offset_m": 1.704,
+                "lateral_offset_p95_m": 2.851,
+                "offset_over_expected_halfwidth": 0.44,
+            },
+            _edge("r2", "t2", 0.85),  # no offset fields at all
+        ]
+        ctx = _build_stitch_options(
+            self._mn_group(
+                edges=edges,
+                optimizer_assignment=[
+                    {"ref_id": "r1", "target_id": "t1", "confidence": 0.9},
+                    {"ref_id": "r2", "target_id": "t2", "confidence": 0.85},
+                ],
+            )
+        )
+        by_pair = {(e["ref_id"], e["target_id"]): e for e in ctx["options"][0]["edges"]}
+        assert by_pair[("r1", "t1")]["lateral_offset_m"] == 1.704
+        assert by_pair[("r1", "t1")]["lateral_offset_p95_m"] == 2.851
+        assert by_pair[("r1", "t1")]["offset_over_expected_halfwidth"] == 0.44
+        assert "lateral_offset_m" not in by_pair[("r2", "t2")]
+
     def test_missing_optimizer_assignment_falls_back(self):
         """Old-format group without optimizer_assignment -> no pre-seed."""
         from crosswalk.web.routes.stitching import _build_stitch_options

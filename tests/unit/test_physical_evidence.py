@@ -6,7 +6,7 @@ import geopandas as gpd
 import pandas as pd
 from shapely import LineString
 
-from crosswalk.agent_labeling.stitch_evidence import build_prompt
+from crosswalk.agent_labeling.stitch_evidence import _edge_offset_str, build_prompt
 from crosswalk.matching.types import MatchDecision, MatchResult
 from crosswalk.pipeline.runner import _export_groups_sidecar
 from crosswalk.utils.physical import (
@@ -203,14 +203,20 @@ def test_physical_summary_preserves_covered_and_indoor_flags() -> None:
     assert physical_is_informative(physical) is True
 
 
-def _mr(ref: str, target: str, target_idx: int, ref_range: tuple[float, float]) -> MatchResult:
+def _mr(
+    ref: str,
+    target: str,
+    target_idx: int,
+    ref_range: tuple[float, float],
+    extra_features: dict | None = None,
+) -> MatchResult:
     return MatchResult(
         ref_id=ref,
         target_id=target,
         decision=MatchDecision.MATCH,
         confidence=0.95,
         score_breakdown={},
-        features={"group_id": "physical-group"},
+        features={"group_id": "physical-group", **(extra_features or {})},
         ref_idx=0,
         target_idx=target_idx,
         gers_start_frac=ref_range[0],
@@ -291,3 +297,127 @@ def test_groups_sidecar_preserves_segment_rules_and_clips_edge_evidence(tmp_path
     assert elevated["target_physical"]["level_lr"][0]["value"] == 0
     assert "candidate_graph_bridge" in elevated
     assert "is_bridge" not in elevated
+
+
+_OFFSET_LEGEND_MARKER = "'off≈Xm' is the measured lateral offset"
+
+
+def _offset_prompt_metadata(edge_offset: dict) -> dict:
+    """Minimal build_prompt metadata with configurable per-edge offset fields."""
+    return {
+        "group_id": "g1",
+        "match_type": "1:1",
+        "n_ref_segments": 1,
+        "n_target_segments": 1,
+        "optimizer_letter": "A",
+        "structure": {},
+        "same_side_coincidence": {},
+        "segments": {
+            "reference": [{"label": "R1", "id": "r1", "name": "", "class": "", "physical": {}}],
+            "target": [{"label": "T1", "id": "t1", "name": "", "class": "", "physical": {}}],
+        },
+        "options": [
+            {
+                "letter": "A",
+                "is_optimizer": True,
+                "edge_count": 1,
+                "total_confidence": 0.9,
+                "mean_confidence": 0.9,
+                "edges": [{"edge": "R1->T1", "confidence": 0.9, **edge_offset}],
+            }
+        ],
+    }
+
+
+def test_edge_offset_str_full_trio() -> None:
+    token = _edge_offset_str(
+        {
+            "lateral_offset_m": 1.704,
+            "lateral_offset_p95_m": 2.851,
+            "offset_over_expected_halfwidth": 0.440,
+        }
+    )
+    assert token == "off≈1.7m (p95 2.9, 0.44×halfw)"
+
+
+def test_edge_offset_str_primary_only() -> None:
+    # Only the primary offset present: no parenthetical, still rendered.
+    assert _edge_offset_str({"lateral_offset_m": 3.2}) == "off≈3.2m"
+
+
+def test_edge_offset_str_absent_renders_nothing() -> None:
+    # Absence reads as absence — the pack never fabricates an "unmeasured" token.
+    assert _edge_offset_str({}) == ""
+    assert _edge_offset_str({"lateral_offset_p95_m": 2.9}) == ""
+
+
+def test_prompt_renders_offset_token_and_legend_when_present(tmp_path) -> None:
+    metadata = _offset_prompt_metadata(
+        {
+            "lateral_offset_m": 1.704,
+            "lateral_offset_p95_m": 2.851,
+            "offset_over_expected_halfwidth": 0.440,
+        }
+    )
+    prompt = build_prompt(tmp_path, metadata, {"options": [{"letter": "A"}]})
+    assert "off≈1.7m (p95 2.9, 0.44×halfw)" in prompt
+    assert _OFFSET_LEGEND_MARKER in prompt
+
+
+def test_prompt_omits_offset_token_and_legend_when_absent(tmp_path) -> None:
+    metadata = _offset_prompt_metadata({})
+    prompt = build_prompt(tmp_path, metadata, {"options": [{"letter": "A"}]})
+    assert "off≈" not in prompt
+    assert _OFFSET_LEGEND_MARKER not in prompt
+
+
+def test_groups_sidecar_carries_finite_lateral_offset_evidence(tmp_path) -> None:
+    ref = gpd.GeoDataFrame(
+        {"id": ["r1"]},
+        geometry=[LineString([(0, 0), (100, 0)])],
+        crs="EPSG:3857",
+    )
+    target = gpd.GeoDataFrame(
+        {"id": ["t1", "t2"]},
+        geometry=[LineString([(60, 1), (90, 1)]), LineString([(10, 1), (40, 1)])],
+        crs="EPSG:3857",
+    )
+    # t1 has a full finite offset trio; t2 has a NaN primary offset (unmeasured).
+    results = [
+        _mr(
+            "r1",
+            "t1",
+            0,
+            (0.6, 0.9),
+            extra_features={
+                "lateral_offset_m": 1.7042,
+                "lateral_offset_p95_m": 2.8514,
+                "offset_over_expected_halfwidth": 0.4401,
+            },
+        ),
+        _mr(
+            "r1",
+            "t2",
+            1,
+            (0.1, 0.4),
+            extra_features={"lateral_offset_m": float("nan")},
+        ),
+    ]
+    path = _export_groups_sidecar(
+        results=results,
+        optimized=results,
+        output_path=tmp_path / "bridge.parquet",
+        reference=ref,
+        target=target,
+        min_confidence=0.5,
+        reference_proj=ref,
+        target_proj=target,
+    )
+    group = json.loads(path.read_text())["groups"][0]
+    offset_edge = next(edge for edge in group["edges"] if edge["target_id"] == "t1")
+    assert offset_edge["lateral_offset_m"] == 1.704
+    assert offset_edge["lateral_offset_p95_m"] == 2.851
+    assert offset_edge["offset_over_expected_halfwidth"] == 0.44
+    # NaN primary offset is omitted rather than serialized.
+    unmeasured_edge = next(edge for edge in group["edges"] if edge["target_id"] == "t2")
+    assert "lateral_offset_m" not in unmeasured_edge
