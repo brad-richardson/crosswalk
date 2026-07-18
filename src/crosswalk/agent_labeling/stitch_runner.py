@@ -366,8 +366,10 @@ PANEL_V7_CANDIDATE = [
 # swaps agy for the opencode/Qwen voter so a wave can proceed 3-wide. NOTE:
 # panel composition is part of export-label provenance — stitch-export keys its
 # gate on (provider, model) pairs, so labels from any non-blessed composition
-# (no-agy, v3-candidate, v4-candidate, meta-candidate, and the v6/v7 candidates)
-# are refused without --allow-nonstandard-panel.
+# (no-agy, v3-candidate, v4-candidate, meta-candidate, and the v6 candidate)
+# are refused without --allow-nonstandard-panel. v7-candidate was blessed on
+# 2026-07-18 (stitch_export.STANDARD_PANEL_VOTERS_CURRENT_RUBRIC) and exports
+# cleanly on canonical-rubric packs.
 PANELS: dict[str, list[ProviderSpec]] = {
     "default": DEFAULT_PANEL,
     "v5": DEFAULT_PANEL,
