@@ -87,6 +87,49 @@ def parse_desired_edges(cell: object) -> list[tuple[str, str]]:
     return out
 
 
+def parse_seed_edges_map(obj: object) -> dict[str, list[frozenset[EdgeKey]]]:
+    """Parse a ``{group_id: [edge_set, ...]}`` seed spec into id-space frozensets.
+
+    This is the file format for the ``crosswalk agent stitch-batch
+    --seed-edges-file`` option: a JSON object mapping each ``group_id`` to a LIST
+    of edge sets to inject as option-menu seeds (``generate_top_k_alternatives``'s
+    ``seed_edge_sets``). Each edge set is a list of ``[ref_id, target_id]`` SOURCE
+    id pairs (or ``{"ref_id","target_id"}`` dicts) — already-resolved ids, NOT
+    ``R#/T#`` display labels, so the file is drift-safe (source ids survive
+    group-id drift; ``R#/T#`` positions do not — see
+    :func:`label_map_from_group`). Supplying already-mapped ids is exactly what a
+    future automated resolver built on :func:`consensus_seed_edge_sets_for_group`
+    would hand the pack build; this file lets an operator feed the same seam by
+    hand (e.g. a consensus-desired set from a prior ``no_exact_option`` panel).
+
+    A group's value MUST be a list of edge sets, so a single desired set is
+    ``[[[ref, tgt], ...]]``. Mirrors :func:`parse_desired_edges` for robustness:
+    a malformed group value or a malformed/empty edge set contributes nothing
+    rather than raising, per-group sets are deduped preserving order, and a group
+    left with no valid set is omitted entirely.
+    """
+    out: dict[str, list[frozenset[EdgeKey]]] = {}
+    if not isinstance(obj, Mapping):
+        return out
+    for gid, sets in obj.items():
+        key = _text(gid)
+        if not key or not isinstance(sets, list):
+            continue
+        parsed: list[frozenset[EdgeKey]] = []
+        seen: set[frozenset[EdgeKey]] = set()
+        for one in sets:
+            pairs = parse_desired_edges(one)
+            if not pairs:
+                continue
+            fs = frozenset((str(r), str(t)) for r, t in pairs)
+            if fs and fs not in seen:
+                seen.add(fs)
+                parsed.append(fs)
+        if parsed:
+            out[key] = parsed
+    return out
+
+
 def map_desired_to_ids(
     desired: Iterable[tuple[str, str]],
     label_map: Mapping[str, Mapping[str, str]],
