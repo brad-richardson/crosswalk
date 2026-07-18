@@ -50,3 +50,11 @@ quality_fingerprint:
   total_segments: 2055
   name_coverage_ratio: 1.0
   class_coverage_ratio: 1.0
+# Holds this dataset out of agent-panel voting (crosswalk agent stitch-batch
+# refuses pack generation; override with --override-hold). Does NOT gate the
+# human review queue or publishing. See cli/agent.py stitch-batch panel-hold gate
+# and datasets/schema.py::dataset_panel_hold.
+panel_hold:
+  reason: 'route/itinerary overlay data (signed routes tracing other roads), not
+    digitized infrastructure — panel votes on it are noise; maintainer decision'
+  since: '2026-07-18'

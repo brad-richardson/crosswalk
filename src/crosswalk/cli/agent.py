@@ -963,6 +963,15 @@ def generate_stitch_batch(
         "Injection is bounded (MAX_INJECTED_SEEDS, smallest-set-first) and skips "
         "any set already offered or outside the group's candidate universe.",
     ),
+    override_hold: bool = typer.Option(
+        False,
+        "--override-hold",
+        help="Proceed even when the dataset carries a panel_hold (agent-panel "
+        "voting hold). Held datasets have targets unsuitable for panel votes "
+        "(e.g. route/itinerary overlays tracing other roads — votes are noise); "
+        "use this only for a deliberate calibration wave. Prints a yellow "
+        "acknowledgment and continues.",
+    ),
 ):
     """Generate evidence packs for agent stitching-group labeling.
 
@@ -991,6 +1000,7 @@ def generate_stitch_batch(
     )
     from ..agent_labeling.stitch_provenance import artifact_descriptor
     from ..config import settings
+    from ..datasets.schema import dataset_panel_hold
     from ..filenames import (
         PROJECT_ROOT,
         bridge_filename,
@@ -1004,6 +1014,31 @@ def generate_stitch_batch(
         select_stitching_batch,
     )
     from ..provenance import source_commit_provenance
+
+    # Panel-hold gate: a dataset may declare a ``panel_hold:`` block marking its
+    # targets as unsuitable for agent-panel voting (e.g. route/itinerary overlays
+    # that trace other roads — panel votes are noise that burns quota). Refuse
+    # pack generation for a held dataset unless --override-hold is passed for a
+    # deliberate calibration wave. This gates the AGENT PANEL only: the human
+    # review queue (`crosswalk data stitch-batch`) and publishing (quality_hold)
+    # are unaffected.
+    panel_hold = dataset_panel_hold(dataset)
+    if panel_hold:
+        since = f" (since {panel_hold['since']})" if panel_hold.get("since") else ""
+        if override_hold:
+            console.print(
+                f"[yellow]--override-hold: proceeding despite panel_hold on "
+                f"{dataset}{since} — {panel_hold['reason']}[/yellow]"
+            )
+        else:
+            console.print(f"[red]{dataset} is held from agent-panel voting{since}:[/red]")
+            console.print(f"[red]  {panel_hold['reason']}[/red]")
+            console.print(
+                "[yellow]Panel votes on it are noise. Pass --override-hold for a "
+                "deliberate calibration wave, or remove the panel_hold block from "
+                f"datasets/{dataset}.yaml.[/yellow]"
+            )
+            raise typer.Exit(1)
 
     # Validate --decompose-max-edges against the export backstop (#367 Mode B).
     # A budget ABOVE the backstop is a silent mini-void: sub-problems sized

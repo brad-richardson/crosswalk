@@ -211,6 +211,24 @@ class QualityHoldConfig(BaseModel):
     since: str | None = None  # ISO date the hold was placed
 
 
+class PanelHoldConfig(BaseModel):
+    """Persisted agent-panel voting hold — excludes the dataset from panel waves.
+
+    Declares that the dataset's targets are unsuitable for agent-panel stitching
+    votes (e.g. route/itinerary overlays that trace other roads rather than
+    digitized infrastructure), so panel votes on them are noise that burns quota.
+    ``crosswalk agent stitch-batch`` refuses evidence-pack generation for a held
+    dataset (override with ``--override-hold`` for a deliberate calibration wave).
+
+    Orthogonal to ``quality_hold``: this gates AGENT-PANEL VOTING only, NOT
+    publishing (``quality_hold`` / factory) and NOT the human review queue
+    (``crosswalk data stitch-batch``).
+    """
+
+    reason: str  # Human-readable reason the dataset is unsuitable for panel voting
+    since: str | None = None  # ISO date the hold was placed
+
+
 class DatasetConfig(BaseModel):
     """Complete unified dataset configuration.
 
@@ -242,6 +260,9 @@ class DatasetConfig(BaseModel):
 
     # Quality hold (blocks publishing until removed; see factory/publish.py)
     quality_hold: QualityHoldConfig | None = None
+
+    # Panel hold (excludes from agent-panel voting; see cli/agent.py stitch-batch)
+    panel_hold: PanelHoldConfig | None = None
 
     # Additional metadata
     notes: str | None = None
@@ -543,6 +564,45 @@ def get_dataset_config(name: str) -> DatasetConfig | None:
     if not config_path.exists():
         return None
     return load_dataset_config(config_path)
+
+
+def dataset_panel_hold(name: str, datasets_dir: Path | None = None) -> dict[str, Any] | None:
+    """Declarative agent-panel voting hold from the dataset YAML (``panel_hold:``).
+
+    Returns ``{"reason": str, "since": str | None}`` when the dataset declares a
+    hold, else ``None``. Enforced by ``crosswalk agent stitch-batch``, which
+    refuses evidence-pack generation for a held dataset (override with
+    ``--override-hold``). Does NOT gate the human review queue
+    (``crosswalk data stitch-batch``) or publishing (see ``quality_hold``).
+
+    Deliberately a raw ``yaml.safe_load`` — mirroring
+    ``factory.publish.dataset_quality_hold`` — so it stays robust to a malformed
+    ``panel_hold`` block that would otherwise fail full pydantic validation.
+    Fail-safe: ANY truthy ``panel_hold`` value holds the dataset from panel
+    voting, even a malformed one, so a wave never burns quota on known-noise
+    targets on a parsing technicality.
+    """
+    if datasets_dir is None:
+        datasets_dir = get_datasets_dir()
+    yaml_path = datasets_dir / f"{name}.yaml"
+    if not yaml_path.exists():
+        return None
+    try:
+        data = yaml.safe_load(yaml_path.read_text())
+    except Exception:
+        return None
+    hold = data.get("panel_hold") if isinstance(data, dict) else None
+    if not hold:
+        return None
+    if not isinstance(hold, dict):
+        return {"reason": "unspecified (malformed panel_hold block)", "since": None}
+    reason = hold.get("reason")
+    since = hold.get("since")
+    return {
+        "reason": str(reason) if reason else "unspecified",
+        # yaml parses an unquoted date to datetime.date — normalize to ISO string.
+        "since": str(since) if since else None,
+    }
 
 
 def update_last_fetch(
