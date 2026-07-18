@@ -113,6 +113,10 @@ _STRUCT_KEYS = (
     "selected_elsewhere",
     "ref_physical",
     "target_physical",
+    # Per-edge lateral-offset evidence (MI-4 physical-separation trigger).
+    "lateral_offset_m",
+    "lateral_offset_p95_m",
+    "offset_over_expected_halfwidth",
 )
 
 # Group-level #267 structural summary fields (surfaced compactly, missing omitted).
@@ -715,6 +719,31 @@ def build_metadata(
     return metadata
 
 
+def _edge_offset_str(e: dict) -> str:
+    """Compact per-edge lateral-offset evidence token, or '' when unmeasured.
+
+    Renders the measured lateral offset between the two aligned centerlines —
+    ``lateral_offset_m`` — with its 95th-percentile sample and offset-over-
+    expected-half-width ratio in parentheses when present, e.g.
+    ``off≈1.7m (p95 2.9, 0.44×halfw)``. Absence prints nothing (an unmeasured
+    offset already reads as absence; the pack never fabricates "unmeasured").
+    """
+    off = e.get("lateral_offset_m")
+    if off is None:
+        return ""
+    parts = [f"off≈{float(off):.1f}m"]
+    sub: list[str] = []
+    p95 = e.get("lateral_offset_p95_m")
+    if p95 is not None:
+        sub.append(f"p95 {float(p95):.1f}")
+    ratio = e.get("offset_over_expected_halfwidth")
+    if ratio is not None:
+        sub.append(f"{float(ratio):.2f}×halfw")
+    if sub:
+        parts.append("(" + ", ".join(sub) + ")")
+    return " ".join(parts)
+
+
 def _edge_struct_str(e: dict) -> str:
     """Compact per-edge graph + aligned physical evidence line.
 
@@ -1016,6 +1045,22 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
             "  road flags are positive observations, so an absent flag is not proof that the"
         )
         lines.append("  provider surveyed that attribute.")
+    has_offset = any(
+        edge.get("lateral_offset_m") is not None
+        for option in metadata.get("options", [])
+        for edge in option.get("edges", [])
+    )
+    if has_offset:
+        lines.append("- 'off≈Xm' is the measured lateral offset between the two segments' aligned")
+        lines.append("  centerlines (p95 = 95th-percentile sampled offset; ×halfw = that offset")
+        lines.append("  relative to the expected roadway half-width). A clear lateral offset is")
+        lines.append("  positive evidence the two features may be physically separate carriageways")
+        lines.append("  or parallel facilities per MI-4, not the same pavement; a small offset is")
+        lines.append(
+            "  consistent with GPS/digitization noise on the same way. Absence of an offset"
+        )
+        lines.append("  value is not evidence of separation — MI-4's same-pavement reading stands")
+        lines.append("  unless a positive separation signal is present.")
     if metadata.get("same_side_coincidence"):
         lines.append(
             "- 'Same-side coincidence' is geometry-derived ambiguity: two R segments or two"
@@ -1092,6 +1137,9 @@ def build_prompt(group_dir: Path, metadata: dict, options_ctx: dict) -> str:
                 extra.append(f"tgt_aln={e['target_aligned_frac']}")
             if e.get("overlap_m") is not None:
                 extra.append(f"overlap~{e['overlap_m']}m")
+            offset_s = _edge_offset_str(e)
+            if offset_s:
+                extra.append(offset_s)
             etag = e.get("tag")
             if etag == "SLIVER":
                 extra.append("SLIVER(low-span/low-absolute-overlap warning)")

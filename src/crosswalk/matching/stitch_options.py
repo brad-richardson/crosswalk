@@ -32,6 +32,10 @@ _STRUCT_KEYS = (
     "corridor_tgt",
     "ref_physical",
     "target_physical",
+    # Per-edge lateral-offset evidence (MI-4 physical-separation trigger).
+    "lateral_offset_m",
+    "lateral_offset_p95_m",
+    "offset_over_expected_halfwidth",
 )
 
 # Decision provenance is audit context, not an input to option construction.

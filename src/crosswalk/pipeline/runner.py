@@ -394,6 +394,16 @@ ALIGNMENT_FRAC_PRECISION = 7
 
 CANDIDATE_SIDECAR_SCHEMA_VERSION = "1.1"
 
+# Per-edge lateral-offset evidence surfaced on the group sidecar edge so agent
+# stitching evidence packs can render it (MI-4's primary physical-separation
+# trigger). These are already computed as candidate features; the sidecar just
+# carries the finite subset through so the pack builder never recomputes geometry.
+_EDGE_OFFSET_KEYS = (
+    "lateral_offset_m",
+    "lateral_offset_p95_m",
+    "offset_over_expected_halfwidth",
+)
+
 
 def _is_nan(val) -> bool:
     """Check if a value is NaN (works for float, numpy, pandas NA)."""
@@ -1326,6 +1336,19 @@ def _export_groups_sidecar(
             edge["ref_physical"] = ref_physical
         if target_physical:
             edge["target_physical"] = target_physical
+        # Per-edge lateral-offset evidence (MI-4's primary physical-separation
+        # trigger). Pulled from the already-scored candidate features on ``r`` —
+        # no geometry is recomputed. Only finite values are attached; a missing or
+        # NaN offset is simply omitted (absence reads as absence downstream).
+        edge_features = getattr(r, "features", None) or {}
+        for offset_key in _EDGE_OFFSET_KEYS:
+            raw = edge_features.get(offset_key)
+            if raw is None or _is_nan(raw):
+                continue
+            value = float(raw)
+            if value in (float("inf"), float("-inf")):
+                continue
+            edge[offset_key] = round(value, 3)
         if pair in group_owned_pruned:
             edge["pruned"] = True
         if pair in group_assignment_decisions:
