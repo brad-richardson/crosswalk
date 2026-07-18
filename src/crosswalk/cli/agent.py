@@ -952,6 +952,17 @@ def generate_stitch_batch(
         help="Sub-problem edge budget for --decompose "
         "(0 = settings.stitch_export_backstop_max_edges, the panel's export envelope).",
     ),
+    seed_edges_file: Path = typer.Option(
+        None,
+        "--seed-edges-file",
+        help="JSON file mapping group_id -> list of edge sets to inject as "
+        "option-menu seeds (generate_top_k_alternatives seed_edge_sets). Each "
+        "edge set is a list of [ref_id, target_id] SOURCE-id pairs (drift-safe; "
+        "NOT R#/T# display labels). Use it to re-offer a consensus-desired set a "
+        "prior no_exact_option panel wanted but no option expressed (#457). "
+        "Injection is bounded (MAX_INJECTED_SEEDS, smallest-set-first) and skips "
+        "any set already offered or outside the group's candidate universe.",
+    ),
 ):
     """Generate evidence packs for agent stitching-group labeling.
 
@@ -1043,6 +1054,54 @@ def generate_stitch_batch(
     }
     batch_generation_source = {"source_commit": source_commit_provenance(PROJECT_ROOT)}
 
+    # Optional consensus-desired / operator-supplied option-menu seeds (#457).
+    # A {group_id: [edge_set, ...]} JSON map of SOURCE-id pairs, injected into
+    # generate_top_k_alternatives(seed_edge_sets=...) per group so a set a prior
+    # no_exact_option panel wanted is directly expressible on the re-vote. Ids
+    # (not R#/T# labels) are drift-safe, and the generator validates each set
+    # against the group's candidate universe, so a stale entry cannot smuggle in
+    # an edge that does not exist in the current group. NOT capped by
+    # max_total_options here: these groups are below the option-prune trigger
+    # (stitch_panel_prune_min_distinct_edges), so their unpruned menus already
+    # exceed stitch_panel_max_options and that cap would block injection outright;
+    # MAX_INJECTED_SEEDS still bounds how many are added.
+    seed_map: dict[str, list] = {}
+    if seed_edges_file:
+        from ..agent_labeling.consensus_desired import (
+            parse_seed_edges_map,
+            seed_map_provenance,
+        )
+
+        # Fail loud+actionable on an unreadable / malformed seed file rather than
+        # letting a bare OSError / JSONDecodeError traceback escape the CLI.
+        try:
+            raw_seed = json.loads(seed_edges_file.read_text())
+        except OSError as exc:
+            console.print(f"[red]--seed-edges-file: cannot read {seed_edges_file}: {exc}[/red]")
+            raise typer.Exit(1) from None
+        except json.JSONDecodeError as exc:
+            console.print(
+                f"[red]--seed-edges-file: {seed_edges_file} is not valid JSON "
+                f"(expected a {{group_id: [edge_set, ...]}} object): {exc}[/red]"
+            )
+            raise typer.Exit(1) from None
+        seed_map = parse_seed_edges_map(raw_seed)
+        n_sets = sum(len(v) for v in seed_map.values())
+        console.print(
+            f"[blue]Seed edges: {n_sets} set(s) across {len(seed_map)} group(s) "
+            f"from {seed_edges_file}[/blue]"
+        )
+        # Provenance: stamp the seeded sets into the batch generation source so a
+        # seeded menu is attributable at scoring time (batch_generation_source is
+        # copied verbatim into every evidence pack and integrity-checked against
+        # the batch — see stitch_provenance). Recorded only when something was
+        # actually parsed, so a no-flag / no-op run stays byte-identical.
+        if seed_map:
+            batch_generation_source["seed_edges"] = {
+                "file": str(seed_edges_file),
+                "groups": seed_map_provenance(seed_map),
+            }
+
     # Determine requested group_ids.
     requested: list[str] | None = None
     if group_ids:
@@ -1099,6 +1158,7 @@ def generate_stitch_batch(
                 ref_geoms=g.get("ref_geometries", {}),
                 target_geoms=g.get("target_geometries", {}),
                 k=k_alternatives,
+                seed_edge_sets=seed_map.get(str(g.get("group_id"))),
             )
         # Pre-vote reviewed exclusion. Production waves must not spend votes
         # re-adjudicating settled ground truth: exact-id-reviewed groups AND
@@ -1267,6 +1327,7 @@ def generate_stitch_batch(
                 ref_geoms=g.get("ref_geometries", {}),
                 target_geoms=g.get("target_geometries", {}),
                 k=k_alternatives,
+                seed_edge_sets=seed_map.get(str(g.get("group_id"))),
             )
     console.print(f"[blue]Filling spatial context for {len(packable)} groups...[/blue]")
     from .data import _fill_spatial_context
