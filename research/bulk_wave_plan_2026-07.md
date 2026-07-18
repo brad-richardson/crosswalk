@@ -103,10 +103,11 @@ post-#459 seeding) are the review mode that actually feeds the resolver.
 |---|---|
 | #460 offset evidence merged | ✅ d6dadf9 |
 | #459 seed wiring merged | ✅ 82a9d93 |
-| #461 panel_hold (Geneva) merged | ⏳ review chain running |
-| Bless v7-candidate composition | ⏳ PR in flight (this decision: 2026-07-18) |
-| Resolver ingestion audit (does minted influx count toward flip condition?) | ⏳ re-running |
-| Codex quota recovered | ⏳ Brad's call |
+| #461 panel_hold (Geneva) merged | ✅ 93412e9 |
+| Bless v7-candidate composition | ✅ #462 → 1054138 (exactly one gate cell changed; stamping byte-identical) |
+| Resolver ingestion audit | ✅ done — findings folded in above |
+| #463 anchoring provenance + era slices merged | ✅ 2f69c68 (review also fixed era-regex misclassifying `_none_`/`_decomposed_` variants as human) |
+| Codex quota recovered | ⏳ Brad's call — **sole remaining gate** |
 
 ## Post-wave sequence
 
