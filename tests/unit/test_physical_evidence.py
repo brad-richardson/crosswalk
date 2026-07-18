@@ -345,6 +345,21 @@ def test_edge_offset_str_primary_only() -> None:
     assert _edge_offset_str({"lateral_offset_m": 3.2}) == "off≈3.2m"
 
 
+def test_edge_offset_str_renders_zero_values() -> None:
+    # Regression guard: a measured 0.0 offset is present evidence and must render;
+    # it must never be dropped as falsy. Gating is key-presence / ``is None``, not
+    # truthiness, so a future refactor to ``if not off`` would fail here.
+    assert _edge_offset_str({"lateral_offset_m": 0.0}) == "off≈0.0m"
+    token = _edge_offset_str(
+        {
+            "lateral_offset_m": 0.0,
+            "lateral_offset_p95_m": 0.0,
+            "offset_over_expected_halfwidth": 0.0,
+        }
+    )
+    assert token == "off≈0.0m (p95 0.0, 0.00×halfw)"
+
+
 def test_edge_offset_str_absent_renders_nothing() -> None:
     # Absence reads as absence — the pack never fabricates an "unmeasured" token.
     assert _edge_offset_str({}) == ""
