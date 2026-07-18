@@ -1067,14 +1067,40 @@ def generate_stitch_batch(
     # MAX_INJECTED_SEEDS still bounds how many are added.
     seed_map: dict[str, list] = {}
     if seed_edges_file:
-        from ..agent_labeling.consensus_desired import parse_seed_edges_map
+        from ..agent_labeling.consensus_desired import (
+            parse_seed_edges_map,
+            seed_map_provenance,
+        )
 
-        seed_map = parse_seed_edges_map(json.loads(seed_edges_file.read_text()))
+        # Fail loud+actionable on an unreadable / malformed seed file rather than
+        # letting a bare OSError / JSONDecodeError traceback escape the CLI.
+        try:
+            raw_seed = json.loads(seed_edges_file.read_text())
+        except OSError as exc:
+            console.print(f"[red]--seed-edges-file: cannot read {seed_edges_file}: {exc}[/red]")
+            raise typer.Exit(1) from None
+        except json.JSONDecodeError as exc:
+            console.print(
+                f"[red]--seed-edges-file: {seed_edges_file} is not valid JSON "
+                f"(expected a {{group_id: [edge_set, ...]}} object): {exc}[/red]"
+            )
+            raise typer.Exit(1) from None
+        seed_map = parse_seed_edges_map(raw_seed)
         n_sets = sum(len(v) for v in seed_map.values())
         console.print(
             f"[blue]Seed edges: {n_sets} set(s) across {len(seed_map)} group(s) "
             f"from {seed_edges_file}[/blue]"
         )
+        # Provenance: stamp the seeded sets into the batch generation source so a
+        # seeded menu is attributable at scoring time (batch_generation_source is
+        # copied verbatim into every evidence pack and integrity-checked against
+        # the batch — see stitch_provenance). Recorded only when something was
+        # actually parsed, so a no-flag / no-op run stays byte-identical.
+        if seed_map:
+            batch_generation_source["seed_edges"] = {
+                "file": str(seed_edges_file),
+                "groups": seed_map_provenance(seed_map),
+            }
 
     # Determine requested group_ids.
     requested: list[str] | None = None

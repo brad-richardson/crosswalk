@@ -130,6 +130,27 @@ def parse_seed_edges_map(obj: object) -> dict[str, list[frozenset[EdgeKey]]]:
     return out
 
 
+def seed_map_provenance(
+    seed_map: Mapping[str, list[frozenset[EdgeKey]]],
+) -> dict[str, list[list[list[str]]]]:
+    """JSON-safe rendering of a parsed seed map for batch provenance.
+
+    :func:`parse_seed_edges_map` returns ``frozenset``s, which ``json.dumps``
+    cannot serialize; this renders each group's sets as a deterministic list of
+    sorted ``[ref_id, target_id]`` pair lists so a seeded batch can record WHICH
+    consensus-desired sets it was seeded with. That record is what lets later
+    voter-accuracy scoring tell a vote cast on a HAND-SEEDED menu apart from a
+    vote on a purely organic one (a seat credited for picking a set the operator
+    injected must not be scored as if it found it unaided). It captures the
+    SUPPLIED intent, not the per-group post-validation injection outcome (a set
+    outside a group's candidate universe, or for a group not in the wave, is
+    still recorded here but silently skipped by the generator).
+    """
+    return {
+        gid: [[list(pair) for pair in sorted(s)] for s in sets] for gid, sets in seed_map.items()
+    }
+
+
 def map_desired_to_ids(
     desired: Iterable[tuple[str, str]],
     label_map: Mapping[str, Mapping[str, str]],

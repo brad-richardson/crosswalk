@@ -9,6 +9,8 @@ degenerate / unmappable desired sets are skipped.
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 from crosswalk.agent_labeling.consensus_desired import (
@@ -18,6 +20,7 @@ from crosswalk.agent_labeling.consensus_desired import (
     map_desired_to_ids,
     parse_desired_edges,
     parse_seed_edges_map,
+    seed_map_provenance,
 )
 from crosswalk.matching.alternatives import generate_top_k_alternatives
 from crosswalk.matching.stitch_options import build_stitch_options
@@ -102,6 +105,19 @@ def test_parse_seed_edges_map_skips_malformed_and_empty():
 def test_parse_seed_edges_map_non_mapping_yields_empty():
     assert parse_seed_edges_map([["a", "1"]]) == {}
     assert parse_seed_edges_map(None) == {}
+
+
+def test_seed_map_provenance_is_json_safe_and_deterministic():
+    seed_map = parse_seed_edges_map({"g": [[["b", "2"], ["a", "1"]], [["c", "3"]]]})
+    prov = seed_map_provenance(seed_map)
+    # frozensets rendered as sorted lists of [ref, target] pair lists.
+    assert prov == {"g": [[["a", "1"], ["b", "2"]], [["c", "3"]]]}
+    # Must survive a json round-trip (it is embedded in batch_generation_source).
+    assert json.loads(json.dumps(prov)) == prov
+
+
+def test_seed_map_provenance_empty():
+    assert seed_map_provenance({}) == {}
 
 
 def test_map_desired_to_ids_maps_all():
