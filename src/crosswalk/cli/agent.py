@@ -1474,7 +1474,8 @@ def run_stitch_panel(
         "'v6-flex-calibration' isolate the two Gemini routes on the same logical "
         "fourth seat for experimental parity testing. 'v7-candidate' is the "
         "canonical-rubric high-effort Claude + Codex/gpt-5.6-sol + Muse replay "
-        "panel; it remains nonstandard pending manual review.",
+        "panel; it was blessed 2026-07-18 and exports cleanly on "
+        "canonical-rubric packs (no --allow-nonstandard-panel needed).",
     ),
     opencode_model: str = typer.Option(
         None,
@@ -1997,8 +1998,10 @@ def export_stitch_panel(
             "Export even when a batch's votes.csv (provider, model) voter set "
             "matches no blessed panel composition (v5: claude+codex/gpt-5.6-terra"
             "+kimi/Kimi+muse/Muse Spark; v4: that trio without muse; v3: "
-            "claude+codex/gpt-5.5+agy). The known v6 and v7 candidates also "
-            "require this flag until calibration promotes them. Labels are "
+            "claude+codex/gpt-5.5+agy; v7: claude+codex/gpt-5.6-sol+muse/Muse "
+            "Spark on canonical-rubric packs, blessed 2026-07-18). The known v6 "
+            "candidate still requires this flag until calibration promotes it. "
+            "Labels are "
             "still stamped with the panel_* labelers, so only use this "
             "after an explicit provenance decision. A composition with no known "
             "era additionally needs --stamp-era to say WHICH labeler generation "
