@@ -64,6 +64,39 @@ Blessing v7-candidate is **forward-looking only**:
 - **Freeze rule:** all pack/config/rubric changes land BEFORE launch; nothing
   merges mid-wave (see stitch_runner wave-freeze precedent).
 
+## Resolver-audit findings that shape the wave (2026-07-18 round-4 readiness)
+
+Fresh grouped-CV at today's volume (189 groups / 931 edge rows / 18 datasets vs
+the July-12 canonical 147/821/13): learned F1 0.880 vs production 0.891
+(Δ −0.011), learned group-exact 0.704 vs 0.688 (Δ +0.016). **Still NO-GO —
+volume growth alone is not closing the F1 gap** (both scores fell as harder
+cross-mode groups entered; the gap held).
+
+Ingestion audit: panel labels already flow into resolver training and are
+**75% of training rows** (703 of 931; era mix v1=447, v3=171, v5=32, v7=47).
+Empty/NONE rows handled correctly. Three fixes/decisions before a wave influx
+counts toward a credible GO:
+
+1. **Anchoring provenance is not preserved** — `session_id`/`deanchored_v1`
+   never reaches edge rows, so anchored-vs-deanchored cannot be sliced and the
+   round-2/3 overfit-to-optimizer confounder strengthens with every anchored
+   wave. Fix: carry an `anchored` flag through extract.py's edge-row builder
+   (~line 655) and slice it in evaluate.py. (PR in flight.)
+2. **Per-era eval rollup** before deciding whether v1's 64% share needs
+   gating — one groupby on the existing labeler slices. (Same PR.)
+3. **Negatives skew:** unanimous merges mint mostly positives (510 pos /
+   193 neg in panel rows) while the learned model's weakness is precision.
+   Wave targets that create explicit negatives — options excluding candidate
+   edges, and confirmed-NONE groups — are worth disproportionately more than
+   easy unanimous merges. Tier sampling should not be pure breadth.
+
+**Review-workflow implication:** set-semantics labels (membership
+confirmations — Brad's preferred quick mode, 81 groups including the
+2026-07-18 session) contribute **zero** resolver training rows: extract
+consumes only clean/split/empty mappings; `rec["set"]` has no consumer. Until
+a set-label ingestion rule is designed, pair-exact selections (much easier
+post-#459 seeding) are the review mode that actually feeds the resolver.
+
 ## Preconditions
 
 | item | status |
