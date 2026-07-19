@@ -4568,6 +4568,54 @@ class TestContextPillDistinction:
             self._stop(patches)
 
 
+class TestCandidateEdgesClientPayload:
+    """Every render mode must carry the FULL candidate union in the dedicated
+    ``candidate_edges_client`` payload: exact-identity adjudication requires
+    dispositions over edges UNION rejected_edges, but the ordinary-mode
+    ``#group-edges`` payload only holds the optimizer-selected subset. Without
+    this, an ordinary-queue "Exact edges" submit would 400 on any group with
+    rejected candidates (~79% of sidecar groups)."""
+
+    def _group(self):
+        return {
+            "group_id": "gcand",
+            "match_type": "M:N",
+            "ref_ids": ["r1", "r2"],
+            "target_ids": ["t1", "t2"],
+            "edges": [_edge("r1", "t1", 0.9)],
+            "rejected_edges": [_edge("r2", "t2", 0.42)],
+        }
+
+    @staticmethod
+    def _keys(edges):
+        return {(e["ref_id"], e["target_id"]) for e in edges}
+
+    def test_ordinary_mode_carries_full_candidate_union(self):
+        from crosswalk.web.routes.stitching import _render_group
+
+        _, ctx = _render_group(self._group(), "ds", deanchored=False)
+        assert self._keys(ctx["candidate_edges_client"]) == {("r1", "t1"), ("r2", "t2")}
+        # Ordinary mode keeps #group-edges on the optimizer-selected subset.
+        assert self._keys(ctx["client_edges"]) == {("r1", "t1")}
+
+    def test_candidate_payload_matches_server_validation_universe(self):
+        from crosswalk.web.routes.stitching import _group_candidate_edges, _render_group
+
+        group = self._group()
+        _, ctx = _render_group(group, "ds", deanchored=False)
+        assert self._keys(ctx["candidate_edges_client"]) == self._keys(
+            _group_candidate_edges(group)
+        )
+
+    def test_deanchored_and_pairwise_payloads_agree(self):
+        from crosswalk.web.routes.stitching import _render_group
+
+        for kwargs in ({"deanchored": True}, {"deanchored": False, "pairwise_revisit": True}):
+            _, ctx = _render_group(self._group(), "ds", **kwargs)
+            assert self._keys(ctx["client_edges"]) == {("r1", "t1"), ("r2", "t2")}
+            assert self._keys(ctx["candidate_edges_client"]) == self._keys(ctx["client_edges"])
+
+
 class TestRejectedPairSubmit:
     """The manual-path inconsistency guard draws from selected edges UNION the
     rejected candidates, so a reviewer who pairs two segments whose only shared

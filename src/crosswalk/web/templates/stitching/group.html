@@ -13,6 +13,11 @@
      and alignment fracs so the client can render coverage gaps + sliver counts) -->
 <script type="application/json" id="group-edges">{{ (client_edges if client_edges is defined else group.edges) | tojson }}</script>
 
+<!-- Full candidate union (selected + rejected) for exact-edge adjudication:
+     the server requires dispositions over every candidate, which in ordinary
+     mode is a superset of the #group-edges payload above. -->
+<script type="application/json" id="group-candidate-edges">{{ (candidate_edges_client if candidate_edges_client is defined else (client_edges if client_edges is defined else group.edges)) | tojson }}</script>
+
 <!-- Context segment IDs (start hidden on map). Capped to the nearest N per side
      in the web layer for large groups — see _cap_context_ids in stitching.py. -->
 <script type="application/json" id="group-context-ids">{{ (context_ids if context_ids is defined else (group.get("context_ref_ids", []) + group.get("context_target_ids", []))) | tojson }}</script>

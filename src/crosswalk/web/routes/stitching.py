@@ -651,8 +651,13 @@ def _render_group(
     ctx = _build_group_context(group, dataset=dataset)
     ctx["deanchored"] = deanchored
     ctx["pairwise_revisit"] = pairwise_revisit
+    # Every render mode carries the full candidate union in a dedicated payload:
+    # exact-identity adjudication must cover edges ∪ rejected_edges (the server
+    # rejects partial universes), and ordinary mode's #group-edges only holds the
+    # optimizer-selected subset.
+    annotated = _annotate_candidate_edges(group)
+    ctx["candidate_edges_client"] = annotated
     if deanchored or pairwise_revisit:
-        annotated = _annotate_candidate_edges(group)
         ctx["client_edges"] = annotated
         # Keep the server-rendered sliver count consistent with the widened
         # candidate payload (the live indicator recomputes client-side anyway).

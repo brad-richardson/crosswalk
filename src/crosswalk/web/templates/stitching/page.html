@@ -61,7 +61,9 @@
         // pre-seeded assignment in the live confidence / Review summary.
         applyStitchTab();
         refreshSelectionUI();
-        maybeOpenPairwiseRevisit();
+        // NOTE: the pairwise auto-open must NOT happen here — the later
+        // htmx:afterRequest reset handler would immediately hide the panel.
+        // It fires at the end of that handler instead.
     });
 
     // Reflect the pre-seeded assignment for the initially-rendered group
@@ -175,6 +177,12 @@
         window.__pendingIssueRequest = null;
         var flag = document.getElementById('confirm-reject-all');
         if (flag) flag.value = '';
+        // A stale exact_identity scope with no dispositions would 400 every
+        // later ordinary submit (e.g. Exact edges -> Cancel -> pick an option).
+        var scope = document.getElementById('adjudication-scope');
+        if (scope) scope.value = '';
+        var dispositions = document.getElementById('edge-dispositions');
+        if (dispositions) dispositions.value = '';
     }
 
     // Reset the confirmation state whenever a fresh group card swaps in.
@@ -194,6 +202,15 @@
             panel.style.display = 'none';
             if (actions) actions.style.display = '';
         }
+        // A rejected submit never swaps, so without feedback the reviewer's
+        // per-edge work would vanish silently. Surface the failure.
+        if (evt.detail.failed || (evt.detail.xhr && evt.detail.xhr.status >= 400)) {
+            alert('Save failed (' + (evt.detail.xhr ? evt.detail.xhr.status : '?') + '): ' +
+                (evt.detail.xhr ? evt.detail.xhr.responseText : 'no response'));
+        }
+        // Runs AFTER the reset above so the reopened identity panel keeps its
+        // state — the afterSwap auto-open was clobbered by this handler.
+        maybeOpenPairwiseRevisit();
     });
 
     // Short, human-scannable id (keeps the tail which carries the local suffix).
@@ -207,7 +224,7 @@
     //   - manual mode: the active ref×target cross-product over the candidate
     //     union, used only as supporting evidence for the SET confirmation.
     function collectConfirmPairs(isOption, includeAllCandidates) {
-        var edges = parseGroupEdges();
+        var edges = includeAllCandidates ? parseCandidateEdges() : parseGroupEdges();
         var byKey = {};
         for (var i = 0; i < edges.length; i++) {
             byKey[edges[i].ref_id + '\u0000' + edges[i].target_id] = edges[i];
@@ -471,7 +488,7 @@
         var actions = document.getElementById('card-actions');
         if (panel) panel.style.display = 'none';
         if (actions) actions.style.display = '';
-        window.__pendingIssueRequest = null;
+        resetPairConfirmState();
     }
 
     // Confirm & record. Two paths:
@@ -645,6 +662,15 @@
         var el = document.getElementById('group-edges');
         if (!el) return [];
         try { return JSON.parse(el.textContent) || []; } catch (e) { return []; }
+    }
+
+    // Full candidate union (selected + rejected) — the universe exact-identity
+    // adjudication must cover. Falls back to #group-edges for older fragments.
+    function parseCandidateEdges() {
+        var el = document.getElementById('group-candidate-edges');
+        if (!el) return parseGroupEdges();
+        try { return JSON.parse(el.textContent) || parseGroupEdges(); }
+        catch (e) { return parseGroupEdges(); }
     }
 
     // Parse #selected-edges into a nested {ref:{target:true}} set, or null when
