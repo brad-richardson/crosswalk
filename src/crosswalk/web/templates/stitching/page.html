@@ -61,9 +61,9 @@
         // pre-seeded assignment in the live confidence / Review summary.
         applyStitchTab();
         refreshSelectionUI();
-        // NOTE: the pairwise auto-open must NOT happen here — the later
-        // htmx:afterRequest reset handler would immediately hide the panel.
-        // It fires at the end of that handler instead.
+        // NOTE: the pairwise auto-open must NOT happen here — the reset
+        // listener below (registered later, so it runs after this one) would
+        // clobber the panel state. It opens there, after its reset.
     });
 
     // Reflect the pre-seeded assignment for the initially-rendered group
@@ -185,8 +185,16 @@
         if (dispositions) dispositions.value = '';
     }
 
-    // Reset the confirmation state whenever a fresh group card swaps in.
-    document.addEventListener('htmx:afterSwap', resetPairConfirmState);
+    // Reset the confirmation state whenever a fresh group card swaps in, THEN
+    // auto-open the identity panel in the pairwise queue. Both must live in
+    // this one listener: ordering within a listener is guaranteed, and the
+    // afterRequest handler below never fires for a successful save (the swap
+    // removes #select-form, so htmx re-triggers with detail.elt rewritten to
+    // the surviving parent and the id guard early-returns).
+    document.addEventListener('htmx:afterSwap', function () {
+        resetPairConfirmState();
+        maybeOpenPairwiseRevisit();
+    });
 
     // afterRequest fires even when the response is an ERROR (no swap). Without
     // this, a confirmed submit that 400s would leave __stitchConfirmedSubmit
@@ -208,8 +216,8 @@
             alert('Save failed (' + (evt.detail.xhr ? evt.detail.xhr.status : '?') + '): ' +
                 (evt.detail.xhr ? evt.detail.xhr.responseText : 'no response'));
         }
-        // Runs AFTER the reset above so the reopened identity panel keeps its
-        // state — the afterSwap auto-open was clobbered by this handler.
+        // 4xx-retry reopen only: a FAILED request doesn't swap, so the
+        // afterSwap listener never runs and this handler still sees the form.
         maybeOpenPairwiseRevisit();
     });
 
