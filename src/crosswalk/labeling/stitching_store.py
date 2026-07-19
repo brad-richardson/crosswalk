@@ -27,6 +27,15 @@ DEFAULT_STITCHING_DIR = Path("labels/stitching")
 LABEL_SEMANTICS_PAIR = "pair"
 LABEL_SEMANTICS_SET = "set"
 
+# Optional second axis for reviews that distinguish physical pair identity from
+# graph-resolution membership.  ``selected_edges`` remains the resolver truth;
+# ``edge_dispositions`` records whether each reviewed candidate is the same
+# physical feature even when graph constraints caused it to be dropped.
+ADJUDICATION_SCOPE_MEMBERSHIP = "membership"
+ADJUDICATION_SCOPE_EXACT_RESOLUTION = "exact_resolution"
+ADJUDICATION_SCOPE_EXACT_IDENTITY = "exact_identity"
+ADJUDICATION_SCOPE_REJECT_ALL = "reject_all"
+
 STITCHING_LABEL_COLUMNS = [
     "group_id",
     "dataset_id",
@@ -46,8 +55,13 @@ STITCHING_LABEL_COLUMNS = [
     # Free-text reviewer note (optional). Captures edge-level / geometric intent
     # that the flattened set/pair label cannot express (e.g. "same feature but
     # split/merges don't line up at the merge point", "missing a couple ref
-    # edges"). Kept last for backwards-compatible column order.
+    # edges").
     "notes",
+    # Review contract + per-edge dual labels.  Each disposition is
+    # {ref_id, target_id, resolution: keep|drop, identity: match|no_match|unsure}.
+    # Empty on legacy, membership-only, and ordinary option-ratification rows.
+    "adjudication_scope",
+    "edge_dispositions",
 ]
 
 # Columns added after the original schema; older CSVs lack them. Loaders fill
@@ -57,6 +71,8 @@ _SCHEMA_DEFAULTS = {
     "ref_ids": "",
     "target_ids": "",
     "notes": "",
+    "adjudication_scope": "",
+    "edge_dispositions": "",
 }
 
 # Read the CSV with NA-token coercion OFF. The free-text ``notes`` column can
@@ -89,7 +105,13 @@ def _ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
     df["label_semantics"] = sem.where(
         sem.isin([LABEL_SEMANTICS_PAIR, LABEL_SEMANTICS_SET]), LABEL_SEMANTICS_PAIR
     ).astype(str)
-    for col in ("ref_ids", "target_ids", "notes"):
+    for col in (
+        "ref_ids",
+        "target_ids",
+        "notes",
+        "adjudication_scope",
+        "edge_dispositions",
+    ):
         df[col] = df[col].astype("string").fillna("").astype(str)
     # Preserve column order.
     return df[[c for c in STITCHING_LABEL_COLUMNS if c in df.columns]]
@@ -190,6 +212,8 @@ class StitchingLabelStore:
         ref_ids: list[str] | None = None,
         target_ids: list[str] | None = None,
         notes: str = "",
+        adjudication_scope: str = "",
+        edge_dispositions: list[dict] | None = None,
     ) -> None:
         """Add a stitching review label.
 
@@ -213,6 +237,11 @@ class StitchingLabelStore:
             target_ids: Set-label target membership (ignored for pair rows).
             notes: Optional free-text reviewer note (edge-level / geometric
                 intent the flattened label can't express). Empty by default.
+            adjudication_scope: How much was adjudicated: ``membership``,
+                ``exact_resolution``, ``exact_identity``, or ``reject_all``.
+                Empty preserves the historical/unknown scope on old callers.
+            edge_dispositions: Optional dual identity/resolution decisions for
+                reviewed candidate edges. Stored as deterministic JSON.
         """
         new_row = {
             "group_id": str(group_id),
@@ -228,6 +257,17 @@ class StitchingLabelStore:
             "ref_ids": json.dumps(sorted(ref_ids)) if ref_ids else "",
             "target_ids": json.dumps(sorted(target_ids)) if target_ids else "",
             "notes": str(notes or ""),
+            "adjudication_scope": str(adjudication_scope or ""),
+            "edge_dispositions": (
+                json.dumps(
+                    sorted(
+                        edge_dispositions,
+                        key=lambda e: (str(e.get("ref_id", "")), str(e.get("target_id", ""))),
+                    )
+                )
+                if edge_dispositions
+                else ""
+            ),
         }
 
         # Remove existing label for this group (re-review replaces)

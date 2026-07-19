@@ -41,6 +41,8 @@
             {% for ds in datasets %}
             {% if ds == '__all__' %}
             <option value="__all__" {% if dataset == '__all__' %}selected{% endif %}>&#x1F30D; All datasets (combined)</option>
+            {% elif ds == '__pairwise__' %}
+            <option value="__pairwise__" {% if dataset == '__pairwise__' %}selected{% endif %}>&#x1F517; Revisit my stitch pairs</option>
             {% else %}
             <option value="{{ ds }}" {% if ds == dataset %}selected{% endif %}>{% if request.state.dataset_label_counts.get(ds, 0) >= request.state.min_labels_per_dataset %}&#x2705;{% endif %}{% if request.state.dataset_stitching_counts.get(ds, 0) >= request.state.min_stitching_labels %}&#x2705;{% endif %} {{ ds }}</option>
             {% endif %}

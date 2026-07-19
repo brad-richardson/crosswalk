@@ -366,6 +366,9 @@ There is **no imputation**. NaN feature values are passed through unchanged to X
 | `labeled_at`, `session_id` | Provenance (`session_id = deanchored_v1` marks de-anchored reviews) |
 | `label_semantics` | `pair` (default) or `set` |
 | `ref_ids`, `target_ids` | Set-label membership as JSON id arrays (empty for pair rows) |
+| `notes` | Optional reviewer note |
+| `adjudication_scope` | `membership`, `exact_resolution`, `exact_identity`, or `reject_all` |
+| `edge_dispositions` | JSON per-candidate decisions: resolution `keep`/`drop` plus identity `match`/`no_match`/`unsure` |
 
 **Pair vs set semantics.** A **pair** label's `selected_edges` is the authoritative
 per-pair truth the reviewer endorsed — used for explicit option-card
@@ -376,6 +379,16 @@ adjudication impractical). Manual and de-anchored submits therefore record a set
 label — membership in `ref_ids`/`target_ids`, `selected_edges` empty — rather
 than expanding the active pill cross-product into pairs the reviewer never
 adjudicated.
+
+The ordinary UI remains intentionally lightweight. Reviewers can opt into an
+**exact-edge** confirmation step, which records both the resolver decision
+(keep/drop) and the pair matcher's physical-identity decision for each displayed
+candidate. `crosswalk data stitch-pairwise-revisit --labeler <name>` builds the
+special `__pairwise__` queue from that reviewer's prior, still-current decisions
+and preselects their former resolution so this information can be backfilled
+quickly. A dropped resolver edge is not implicitly a pairwise `no_match`: it can
+still represent the same physical feature but be redundant in the global
+resolution, so identity is always recorded separately.
 
 Loaders default a missing/blank `label_semantics` to `pair` (NaN-safe), so CSVs
 predating these columns read as ordinary pair labels; the columns migrate lazily

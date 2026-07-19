@@ -13,6 +13,11 @@
      and alignment fracs so the client can render coverage gaps + sliver counts) -->
 <script type="application/json" id="group-edges">{{ (client_edges if client_edges is defined else group.edges) | tojson }}</script>
 
+<!-- Full candidate union (selected + rejected) for exact-edge adjudication:
+     the server requires dispositions over every candidate, which in ordinary
+     mode is a superset of the #group-edges payload above. -->
+<script type="application/json" id="group-candidate-edges">{{ (candidate_edges_client if candidate_edges_client is defined else (client_edges if client_edges is defined else group.edges)) | tojson }}</script>
+
 <!-- Context segment IDs (start hidden on map). Capped to the nearest N per side
      in the web layer for large groups — see _cap_context_ids in stitching.py. -->
 <script type="application/json" id="group-context-ids">{{ (context_ids if context_ids is defined else (group.get("context_ref_ids", []) + group.get("context_target_ids", []))) | tojson }}</script>
@@ -28,6 +33,7 @@
 <div class="info-card map-overlay group-card" id="group-card"
      data-group-index="{{ group_index }}"
      data-group-id="{{ group.group_id }}"
+     data-pairwise-revisit="{{ '1' if pairwise_revisit is defined and pairwise_revisit else '0' }}"
      data-stale="{{ '1' if group.get('stale_grouping') else '0' }}">
 
     <!-- ===== Meta ribbon: always visible, one calm line ===== -->
@@ -67,6 +73,13 @@
     </div>
 
     <div class="stitch-panels" id="stitch-panels">
+
+    {% if pairwise_revisit is defined and pairwise_revisit %}
+    <div class="prior-label-notice" role="status">
+        Pairwise upgrade — your prior decision is preselected. Confirm stitch
+        keep/drop and mark physical identity; then the next decision opens automatically.
+    </div>
+    {% endif %}
 
     {% if group.get('stale_grouping') %}
     <!-- Stale-proposal notice: this queue entry's group no longer exists in the
@@ -379,8 +392,8 @@
     </div><!-- /stitch-panels -->
 
     <!-- Confirmation panel (inline, htmx-friendly — no native dialog).
-         Manual/de-anchored review confirms SET membership; a stale explicit
-         option confirms its exact stored pairs. -->
+         Manual/de-anchored review starts with fast SET membership and can be
+         upgraded in place to exact identity + resolution decisions. -->
     <div class="pair-confirm-panel" id="pair-confirm-panel" role="group"
          aria-label="Confirm pairs to record" style="display:none; margin-top: 8px;">
         <div class="pair-confirm-header" id="pair-confirm-header"
@@ -432,6 +445,11 @@
             <!-- Exact edge set of an unmodified picked option; cleared on manual edit -->
             <input type="hidden" name="selected_edges" id="selected-edges"
                    value='{% if preseed_edges is defined and preseed_edges %}{{ preseed_edges | tojson }}{% endif %}'>
+            <!-- Optional dual-label payload. A dropped stitch edge can still be
+                 an identity match, so pair-model truth is never inferred from
+                 selected_edges complement. -->
+            <input type="hidden" name="adjudication_scope" id="adjudication-scope" value="">
+            <input type="hidden" name="edge_dispositions" id="edge-dispositions" value="">
             <!-- Carries the review mode across the HTMX swap chain so the next
                  group stays de-anchored and its label is stamped accordingly. -->
             <input type="hidden" name="deanchored" value="{{ 1 if deanchored else 0 }}">
@@ -454,5 +472,11 @@
                 Skip
             </button>
         </form>
+
+        <button type="button" class="btn-skip-stitch"
+                onclick="openExactPairAdjudication()"
+                title="Record both stitch resolution and physical pair identity">
+            Exact edges
+        </button>
     </div>
 </div>

@@ -28,6 +28,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from crosswalk.config import FEATURE_COLUMNS as PAIR_MATCH_FEATURE_COLUMNS
 from crosswalk.resolver.evaluate import _eval_from_predictions, _make_model, _prf
 from crosswalk.resolver.features import FEATURE_COLUMNS, featurize, group_key_columns, group_keys
 
@@ -42,6 +43,42 @@ EXTENDED_FEATURE_COLUMNS: list[str] = FEATURE_COLUMNS + [
     "ref_span_overlap_higher",
     "tgt_span_overlap_higher",
 ]
+
+# Candidate-parquet pair feature families for resolver residual ablations.  The
+# families are cumulative in the CLI: geometry/coverage, then topology and
+# representation structure (``nonsemantic``), then names/classes (``all``).
+# Keeping semantic features last makes cross-dataset brittleness measurable.
+PAIR_GEOMETRY_FEATURE_COLUMNS: list[str] = (
+    PAIR_MATCH_FEATURE_COLUMNS[:9]
+    + PAIR_MATCH_FEATURE_COLUMNS[20:26]
+    + PAIR_MATCH_FEATURE_COLUMNS[48:53]
+    + PAIR_MATCH_FEATURE_COLUMNS[58:77]
+)
+PAIR_TOPOLOGY_FEATURE_COLUMNS: list[str] = (
+    PAIR_MATCH_FEATURE_COLUMNS[26:48]
+    + PAIR_MATCH_FEATURE_COLUMNS[53:58]
+    + PAIR_MATCH_FEATURE_COLUMNS[77:83]
+)
+PAIR_SEMANTIC_FEATURE_COLUMNS: list[str] = PAIR_MATCH_FEATURE_COLUMNS[9:20]
+RESOLVER_PAIR_FEATURE_FAMILIES: dict[str, list[str]] = {
+    "none": [],
+    "geometry": PAIR_GEOMETRY_FEATURE_COLUMNS,
+    "nonsemantic": list(
+        dict.fromkeys(PAIR_GEOMETRY_FEATURE_COLUMNS + PAIR_TOPOLOGY_FEATURE_COLUMNS)
+    ),
+    "all": list(PAIR_MATCH_FEATURE_COLUMNS),
+}
+
+
+def resolver_feature_columns(*, extended: bool = True, pair_family: str = "none") -> list[str]:
+    """Return a deduplicated resolver + optional pair-feature manifest."""
+    if pair_family not in RESOLVER_PAIR_FEATURE_FAMILIES:
+        raise ValueError(
+            f"unknown pair feature family {pair_family!r}; expected "
+            f"{sorted(RESOLVER_PAIR_FEATURE_FAMILIES)}"
+        )
+    base = EXTENDED_FEATURE_COLUMNS if extended else FEATURE_COLUMNS
+    return list(dict.fromkeys(base + RESOLVER_PAIR_FEATURE_FAMILIES[pair_family]))
 
 
 def _span_overlap(a0: float, a1: float, b0: float, b1: float) -> float:

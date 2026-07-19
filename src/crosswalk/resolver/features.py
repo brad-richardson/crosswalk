@@ -1,8 +1,10 @@
 """Feature engineering for the per-edge keep/drop resolver prototype.
 
-All features derive from the sidecar (per-edge confidence + structural layer +
-alignment fractions) and cheap within-group aggregates. No pairwise-feature
-parquet dependency (coverage is ~5% for group edges) and no geometry recompute.
+The default feature contract derives from the sidecar (per-edge confidence +
+structural layer + alignment fractions) and cheap within-group aggregates.
+Candidate-parquet pairwise families can now be added explicitly by the research
+CLI; they remain opt-in so the production comparison and legacy artifacts keep
+their original 33-feature contract.
 
 The strongest single signal is edge confidence *relative to its group* — a
 dropped edge is typically the low-confidence competitor for a shared target/ref
@@ -15,8 +17,8 @@ import numpy as np
 import pandas as pd
 
 # Version string for the resolver's feature contract. This is INDEPENDENT of
-# ``crosswalk.config.FEATURE_VERSION`` (which versions the 78 pairwise matcher
-# features the resolver does not use). Bump whenever a resolver feature's NAME
+# ``crosswalk.config.FEATURE_VERSION`` (which versions the pairwise matcher's
+# candidate features). Bump whenever a resolver feature's NAME
 # SET *or* SEMANTICS change — i.e. any edit to ``FEATURE_COLUMNS`` below, to the
 # ``featurize`` derivations, or to how ``resolver/extract.py`` populates a raw
 # column a feature reads from. A saved resolver model stamps this value and
