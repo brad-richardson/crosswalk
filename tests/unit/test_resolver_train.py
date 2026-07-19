@@ -429,6 +429,182 @@ def test_edge_soft_labels_do_not_invent_none_vote_negatives():
     assert edge_soft_labels(groups, votes, dataset_id="ds").empty
 
 
+def test_edge_soft_labels_use_complete_displayed_evidence():
+    from crosswalk.resolver.votes import edge_soft_labels
+
+    groups = [
+        _group(
+            "g1",
+            [_edge("A", "T", 0.9)],
+            candidate_edges=[
+                {"ref_id": "A", "target_id": "T"},
+                {"ref_id": "B", "target_id": "T"},
+                {"ref_id": "C", "target_id": "T"},
+            ],
+        )
+    ]
+    votes = pd.DataFrame(
+        [
+            {
+                "dataset_id": "ds",
+                "group_id": "old",
+                "provider": "claude",
+                "edge_set": json.dumps([["A", "T"]]),
+                "evidence_id": "ev",
+                "none_reason": "",
+            },
+            {
+                "dataset_id": "ds",
+                "group_id": "old",
+                "provider": "codex",
+                "edge_set": json.dumps([["A", "T"], ["B", "T"]]),
+                "evidence_id": "ev",
+                "none_reason": "",
+            },
+        ]
+    )
+    evidence = pd.DataFrame(
+        [
+            {
+                "dataset_id": "ds",
+                "group_id": "old",
+                "evidence_id": "ev",
+                "evidence": json.dumps(
+                    {
+                        "displayed_edges": [
+                            {"ref_id": "A", "target_id": "T"},
+                            {"ref_id": "B", "target_id": "T"},
+                            {"ref_id": "C", "target_id": "T"},
+                        ]
+                    }
+                ),
+            }
+        ]
+    )
+
+    soft = edge_soft_labels(groups, votes, dataset_id="ds", evidence_df=evidence)
+
+    by_ref = soft.set_index("ref_id")
+    assert set(by_ref.index) == {"A", "B", "C"}
+    assert by_ref.loc["A", "soft_keep"] == pytest.approx(1.0)
+    assert by_ref.loc["B", "soft_keep"] == pytest.approx(1 / 3)
+    assert by_ref.loc["C", "soft_keep"] == pytest.approx(0.0)
+    assert set(soft["evidence_complete"]) == {1}
+
+
+def test_complete_evidence_maps_and_emits_unanimous_reject_all():
+    from crosswalk.resolver.votes import edge_soft_labels
+
+    groups = [
+        _group(
+            "current",
+            [_edge("A", "T", 0.9)],
+            candidate_edges=[
+                {"ref_id": "A", "target_id": "T"},
+                {"ref_id": "B", "target_id": "T"},
+            ],
+        )
+    ]
+    votes = pd.DataFrame(
+        [
+            {
+                "dataset_id": "ds",
+                "group_id": "old",
+                "provider": provider,
+                "edge_set": "[]",
+                "evidence_id": "ev-none",
+                "none_reason": "all_edges_no_match",
+            }
+            for provider in ("claude", "codex")
+        ]
+    )
+    evidence = pd.DataFrame(
+        [
+            {
+                "dataset_id": "ds",
+                "group_id": "old",
+                "evidence_id": "ev-none",
+                "evidence": json.dumps(
+                    {
+                        "displayed_edges": [
+                            {"ref_id": "A", "target_id": "T"},
+                            {"ref_id": "B", "target_id": "T"},
+                        ]
+                    }
+                ),
+            }
+        ]
+    )
+
+    soft = edge_soft_labels(groups, votes, dataset_id="ds", evidence_df=evidence)
+
+    assert set(soft["ref_id"]) == {"A", "B"}
+    assert set(soft["soft_keep"]) == {0.0}
+    assert set(soft["unanimous"]) == {0}
+
+
+def test_no_exact_option_uses_its_historical_label_map():
+    from crosswalk.resolver.votes import edge_soft_labels
+
+    groups = [
+        _group(
+            "current",
+            [_edge("A", "T", 0.9)],
+            candidate_edges=[
+                {"ref_id": "A", "target_id": "T"},
+                {"ref_id": "B", "target_id": "T"},
+            ],
+        )
+    ]
+    votes = pd.DataFrame(
+        [
+            {
+                "dataset_id": "ds",
+                "group_id": "old",
+                "provider": "claude",
+                "edge_set": "[]",
+                "evidence_id": "ev-desired",
+                "none_reason": "no_exact_option",
+                "desired_edges": json.dumps([["R2", "T1"]]),
+            }
+        ]
+    )
+    evidence = pd.DataFrame(
+        [
+            {
+                "dataset_id": "ds",
+                "group_id": "old",
+                "evidence_id": "ev-desired",
+                "evidence": json.dumps(
+                    {
+                        "displayed_edges": [
+                            {"ref_id": "A", "target_id": "T"},
+                            {"ref_id": "B", "target_id": "T"},
+                        ]
+                    }
+                ),
+            }
+        ]
+    )
+    label_maps = {
+        "ev-desired": {
+            "reference": {"R1": "A", "R2": "B"},
+            "target": {"T1": "T"},
+        }
+    }
+
+    soft = edge_soft_labels(
+        groups,
+        votes,
+        dataset_id="ds",
+        evidence_df=evidence,
+        label_maps=label_maps,
+    ).set_index("ref_id")
+
+    assert soft.loc["A", "soft_keep"] == 0.0
+    assert soft.loc["B", "soft_keep"] == 1.0
+
+
 def test_evaluate_all_runs_on_small_table():
     from crosswalk.resolver.extract import build_edge_table
     from crosswalk.resolver.features import FEATURE_COLUMNS, featurize

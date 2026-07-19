@@ -1241,6 +1241,89 @@ def get_unreviewed_stitch_groups(dataset_id: str, groups: list[dict]) -> list[di
     return out
 
 
+def get_pairwise_revisit_groups(dataset_id: str, groups: list[dict]) -> list[dict]:
+    """Return prior exact-id decisions that still lack edge-identity truth.
+
+    This deliberately limits the fast upgrade queue to labels whose group id is
+    still current.  Replacing one of those rows is a safe in-place upgrade.
+    Drifted/split/merged labels require reconciliation and must not be silently
+    duplicated under a new group id by this streamlined workflow.
+    """
+    import json
+
+    from ..labeling.stitching_store import (
+        ADJUDICATION_SCOPE_EXACT_IDENTITY,
+        StitchingLabelStore,
+    )
+
+    groups_by_ds: dict[str, list[dict]] = {}
+    for group in groups:
+        groups_by_ds.setdefault(group.get("dataset_id") or dataset_id, []).append(group)
+
+    labels_by_key: dict[tuple[str, str], dict] = {}
+    for ds, ds_groups in groups_by_ds.items():
+        current_ids = {str(group.get("group_id")) for group in ds_groups}
+        frame = StitchingLabelStore(ds).load(ds)
+        if frame.empty:
+            continue
+        for _, row in frame.iterrows():
+            gid = str(row.get("group_id"))
+            if gid not in current_ids:
+                continue
+            if (
+                str(row.get("adjudication_scope") or "") == ADJUDICATION_SCOPE_EXACT_IDENTITY
+                and str(row.get("edge_dispositions") or "").strip()
+            ):
+                continue
+            labels_by_key[(ds, gid)] = row.to_dict()
+
+    def _json_list(raw) -> list:
+        if raw is None or isinstance(raw, float) or not str(raw).strip():
+            return []
+        try:
+            value = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            return []
+        return value if isinstance(value, list) else []
+
+    out: list[dict] = []
+    for group in groups:
+        ds = group.get("dataset_id") or dataset_id
+        row = labels_by_key.get((ds, str(group.get("group_id"))))
+        if row is None:
+            continue
+        selected = _json_list(row.get("selected_edges"))
+        if str(row.get("label_semantics") or "pair") == "set":
+            kept_refs = [str(value) for value in _json_list(row.get("ref_ids"))]
+            kept_targets = [str(value) for value in _json_list(row.get("target_ids"))]
+        else:
+            kept_refs = sorted({str(edge.get("ref_id")) for edge in selected if edge.get("ref_id")})
+            kept_targets = sorted(
+                {str(edge.get("target_id")) for edge in selected if edge.get("target_id")}
+            )
+        current_refs = {str(value) for value in group.get("ref_ids", [])}
+        current_targets = {str(value) for value in group.get("target_ids", [])}
+        upgraded = dict(group)
+        upgraded["prior_label"] = {
+            "prior_group_id": str(row.get("group_id")),
+            "labeler": str(row.get("labeler") or ""),
+            "labeled_at": str(row.get("labeled_at") or ""),
+            "label_semantics": str(row.get("label_semantics") or "pair"),
+            "covered_ref_ids": sorted(current_refs & set(kept_refs)),
+            "new_ref_ids": sorted(current_refs - set(kept_refs)),
+            "covered_target_ids": sorted(current_targets & set(kept_targets)),
+            "new_target_ids": sorted(current_targets - set(kept_targets)),
+            "n_covered_refs": len(current_refs & set(kept_refs)),
+            "n_total_refs": len(current_refs),
+            "n_covered_targets": len(current_targets & set(kept_targets)),
+            "n_total_targets": len(current_targets),
+            "selected_edges": selected,
+            "notes": str(row.get("notes") or ""),
+        }
+        out.append(upgraded)
+    return out
+
+
 def record_stitching_label(
     dataset_id: str,
     group_id: str,
@@ -1253,6 +1336,8 @@ def record_stitching_label(
     ref_ids: list[str] | None = None,
     target_ids: list[str] | None = None,
     notes: str = "",
+    adjudication_scope: str = "",
+    edge_dispositions: list[dict] | None = None,
 ) -> None:
     """Record a stitching review label.
 
@@ -1272,6 +1357,8 @@ def record_stitching_label(
         ref_ids: Set-label reference membership (ignored for pair rows).
         target_ids: Set-label target membership (ignored for pair rows).
         notes: Optional free-text reviewer note (empty by default).
+        adjudication_scope: Review scope stored with the label.
+        edge_dispositions: Optional per-candidate identity/resolution decisions.
     """
     from ..labeling.stitching_store import StitchingLabelStore
 
@@ -1292,4 +1379,6 @@ def record_stitching_label(
         ref_ids=ref_ids,
         target_ids=target_ids,
         notes=notes,
+        adjudication_scope=adjudication_scope,
+        edge_dispositions=edge_dispositions,
     )

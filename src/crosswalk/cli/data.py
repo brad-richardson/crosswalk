@@ -2567,7 +2567,12 @@ def stitch_batch_all(
     from datetime import UTC, datetime
 
     from ..datasets.loader import DatasetLoader
-    from ..filenames import PROJECT_ROOT, STITCH_ALL_QUEUE, stitch_batch_path
+    from ..filenames import (
+        PROJECT_ROOT,
+        STITCH_ALL_QUEUE,
+        STITCH_PAIRWISE_QUEUE,
+        stitch_batch_path,
+    )
 
     output_dir = PROJECT_ROOT / "data" / "output"
 
@@ -2631,7 +2636,7 @@ def stitch_batch_all(
     if cache_dir.exists():
         for batch_file in sorted(cache_dir.glob("*_batch.json")):
             ds_name = batch_file.stem.replace("_batch", "")
-            if ds_name == STITCH_ALL_QUEUE:
+            if ds_name in {STITCH_ALL_QUEUE, STITCH_PAIRWISE_QUEUE}:
                 continue
             try:
                 batch = json.loads(batch_file.read_text())
@@ -2683,6 +2688,206 @@ def stitch_batch_all(
             "[yellow]Combined queue is empty — no per-dataset batches with groups. "
             "Generate some with 'crosswalk data stitch-batch --all' first.[/yellow]"
         )
+
+
+@data_app.command("stitch-pairwise-revisit")
+def stitch_pairwise_revisit(
+    labeler: str = typer.Option(
+        "brad",
+        "--labeler",
+        help="Only revisit decisions by this reviewer (default: brad; use '' for all)",
+    ),
+):
+    """Build a fast queue that upgrades prior stitch decisions to pair truth.
+
+    Only exact-current group ids are included.  That lets the UI replace the
+    existing row in place after confirmation; drifted/split/merged historical
+    labels are reported and left untouched for deliberate reconciliation.
+    """
+    import json
+    from datetime import UTC, datetime
+
+    from ..datasets.loader import DatasetLoader
+    from ..filenames import (
+        PROJECT_ROOT,
+        STITCH_PAIRWISE_QUEUE,
+        bridge_filename,
+        groups_sidecar_path,
+        stitch_batch_path,
+    )
+    from ..labeling.stitching_store import (
+        ADJUDICATION_SCOPE_EXACT_IDENTITY,
+        StitchingLabelStore,
+    )
+
+    real_datasets = set(DatasetLoader().list_available())
+    output_dir = PROJECT_ROOT / "data" / "output"
+    queue: list[dict] = []
+    summary: list[tuple[str, int, int]] = []
+
+    labels_root = PROJECT_ROOT / "labels" / "stitching"
+    for partition in sorted(labels_root.glob("dataset=*"), key=lambda path: path.name):
+        dataset_id = partition.name.removeprefix("dataset=")
+        if dataset_id not in real_datasets:
+            continue
+        sidecar_path = groups_sidecar_path(output_dir / bridge_filename(dataset_id))
+        if not sidecar_path.exists():
+            summary.append((dataset_id, 0, -1))
+            continue
+        try:
+            groups = json.loads(sidecar_path.read_text()).get("groups", [])
+        except (json.JSONDecodeError, OSError) as exc:
+            console.print(f"  [red]Skipping {dataset_id}: {exc}[/red]")
+            continue
+        by_id = {str(group.get("group_id")): group for group in groups}
+        labels = StitchingLabelStore(dataset_id).load(dataset_id)
+        added = 0
+        drifted = 0
+        for _, row in labels.sort_values("labeled_at", kind="stable").iterrows():
+            if labeler and str(row.get("labeler") or "") != labeler:
+                continue
+            gid = str(row.get("group_id"))
+            group = by_id.get(gid)
+            if group is None:
+                drifted += 1
+                continue
+            if (
+                str(row.get("adjudication_scope") or "") == ADJUDICATION_SCOPE_EXACT_IDENTITY
+                and str(row.get("edge_dispositions") or "").strip()
+            ):
+                continue
+            queued = dict(group)
+            queued["dataset_id"] = dataset_id
+            queue.append(queued)
+            added += 1
+        summary.append((dataset_id, added, drifted))
+
+    payload = {
+        "dataset_id": STITCH_PAIRWISE_QUEUE,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "batch_size": len(queue),
+        "queue_kind": "pairwise_revisit_v1",
+        "groups": queue,
+    }
+    path = stitch_batch_path(STITCH_PAIRWISE_QUEUE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2))
+
+    console.print(
+        f"[green]Wrote pairwise revisit queue of {len(queue)} exact-current prior "
+        f"decisions to {path}[/green]"
+    )
+    for dataset_id, added, drifted in summary:
+        if added or drifted:
+            missing = "missing sidecar" if drifted == -1 else f"{drifted} drifted/unmapped"
+            console.print(f"  {dataset_id}: {added} queued; {missing}")
+
+
+@data_app.command("stitch-pair-bridge")
+def stitch_pair_bridge(
+    output_dir: Path = typer.Option(
+        Path("data/cache/stitch_pair_bridge"),
+        "--output",
+        "-o",
+        help="Preview root for derived pair labels, features, and audit JSON",
+    ),
+):
+    """Materialize safe stitch-derived pair labels for matcher experiments.
+
+    The output is intentionally separate from ``labels/human`` and
+    ``labels/agent``.  It can be inspected and weighted experimentally without
+    changing production pair training inputs.  Explicit identity decisions are
+    strong labels; legacy selected stitch edges are weak positives; excluded
+    stitch edges never become pair negatives implicitly.
+    """
+    import importlib
+    import json
+
+    import pandas as pd
+
+    from ..config import FEATURE_COLUMNS
+    from ..filenames import PROJECT_ROOT, bridge_filename, groups_sidecar_path
+    from ..labeling.label_store import LabelStore
+    from ..labeling.stitch_pair_bridge import (
+        candidate_features_for_pairs,
+        derive_stitch_pair_labels,
+        filter_against_human_truth,
+    )
+    from ..labeling.stitching_store import StitchingLabelStore
+
+    # Keep the research resolver out of normal CLI module import paths (the
+    # production import guard enforces this boundary).
+    resolver_extract = importlib.import_module("crosswalk.resolver.extract")
+    discover_candidates_parquet = resolver_extract.discover_candidates_parquet
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    human = LabelStore.load_human_labels(PROJECT_ROOT / "labels" / "human")
+    audit: dict[str, dict] = {}
+
+    for partition in sorted(
+        (PROJECT_ROOT / "labels" / "stitching").glob("dataset=*"),
+        key=lambda path: path.name,
+    ):
+        dataset_id = partition.name.removeprefix("dataset=")
+        stitching = StitchingLabelStore(dataset_id).load(dataset_id)
+        derived, derive_stats = derive_stitch_pair_labels(stitching, dataset_id)
+        human_ds = human[human["dataset"].astype(str) == dataset_id] if not human.empty else human
+        derived, human_stats = filter_against_human_truth(derived, human_ds)
+
+        groups_path = groups_sidecar_path(
+            PROJECT_ROOT / "data" / "output" / bridge_filename(dataset_id)
+        )
+        candidates_path = discover_candidates_parquet(groups_path)
+        missing_features: list[tuple[str, str]] = []
+        feature_rows = pd.DataFrame()
+        if candidates_path is not None and not derived.empty:
+            candidates = pd.read_parquet(
+                candidates_path,
+                columns=["ref_id", "target_id", *FEATURE_COLUMNS],
+            )
+            feature_rows, missing_features = candidate_features_for_pairs(
+                candidates,
+                zip(derived["gers_id"], derived["target_id"], strict=False),
+            )
+
+        ds_out = output_dir / f"dataset={dataset_id}"
+        ds_out.mkdir(parents=True, exist_ok=True)
+        derived.to_csv(ds_out / "data.csv", index=False)
+        if not feature_rows.empty:
+            feature_rows.to_parquet(ds_out / "features.parquet", index=False)
+
+        audit[dataset_id] = {
+            **derive_stats,
+            **human_stats,
+            "derived_after_human_filter": len(derived),
+            "candidate_features_found": len(feature_rows),
+            "candidate_features_missing": len(missing_features),
+            "candidates_path": str(candidates_path or ""),
+        }
+        console.print(
+            f"  {dataset_id}: {len(derived)} derived pair labels; "
+            f"{len(feature_rows)} feature rows; {len(missing_features)} missing"
+        )
+
+    totals = {
+        key: sum(int(values.get(key, 0)) for values in audit.values())
+        for key in (
+            "explicit_identity",
+            "weak_selected_positive",
+            "unsure_skipped",
+            "conflicting_pairs",
+            "human_redundant",
+            "human_conflicts",
+            "derived_after_human_filter",
+            "candidate_features_found",
+            "candidate_features_missing",
+        )
+    }
+    payload = {"schema_version": 1, "totals": totals, "datasets": audit}
+    (output_dir / "audit.json").write_text(json.dumps(payload, indent=2, sort_keys=True))
+    console.print(f"[green]Wrote audited stitch→pair preview to {output_dir}[/green]")
+    console.print(totals)
 
 
 @data_app.command("stitch-refresh-queue")

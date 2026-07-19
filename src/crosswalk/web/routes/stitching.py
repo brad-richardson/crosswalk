@@ -11,11 +11,19 @@ from shapely.ops import substring, unary_union
 from ...filenames import (
     PROJECT_ROOT,
     STITCH_ALL_QUEUE,
+    STITCH_PAIRWISE_QUEUE,
     bridge_filename,
     groups_sidecar_path,
     stitch_batch_path,
 )
-from ...labeling.stitching_store import LABEL_SEMANTICS_PAIR, LABEL_SEMANTICS_SET
+from ...labeling.stitching_store import (
+    ADJUDICATION_SCOPE_EXACT_IDENTITY,
+    ADJUDICATION_SCOPE_EXACT_RESOLUTION,
+    ADJUDICATION_SCOPE_MEMBERSHIP,
+    ADJUDICATION_SCOPE_REJECT_ALL,
+    LABEL_SEMANTICS_PAIR,
+    LABEL_SEMANTICS_SET,
+)
 from ...matching.alternatives import _shorten_id
 from ...matching.sliver import (
     annotate_group_sliver_flags,
@@ -26,6 +34,7 @@ from ...matching.stitch_options import build_stitch_options as _build_stitch_opt
 from ...utils.physical import summarize_physical
 from ..jinja import templates
 from ..services import (
+    get_pairwise_revisit_groups,
     get_unreviewed_stitch_groups,
     list_datasets,
     load_stitch_batch,
@@ -53,7 +62,7 @@ def _validate_dataset(dataset: str) -> bool:
     """
     if not dataset:
         return False
-    if dataset == STITCH_ALL_QUEUE:
+    if dataset in {STITCH_ALL_QUEUE, STITCH_PAIRWISE_QUEUE}:
         return True
     return dataset in list_datasets()
 
@@ -609,7 +618,9 @@ def _build_group_context(group: dict, dataset: str = "") -> dict:
     }
 
 
-def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, dict]:
+def _render_group(
+    group: dict, dataset: str, deanchored: bool, pairwise_revisit: bool = False
+) -> tuple[dict, dict]:
     """Build the (geojson, template-context) pair for a group render.
 
     Centralizes the de-anchored overrides so every render path (initial page,
@@ -639,7 +650,8 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
     geojson = _build_group_geojson(group, deanchored=deanchored)
     ctx = _build_group_context(group, dataset=dataset)
     ctx["deanchored"] = deanchored
-    if deanchored:
+    ctx["pairwise_revisit"] = pairwise_revisit
+    if deanchored or pairwise_revisit:
         annotated = _annotate_candidate_edges(group)
         ctx["client_edges"] = annotated
         # Keep the server-rendered sliver count consistent with the widened
@@ -648,10 +660,11 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
         # Fully selected: None => the template marks every rendered pill active,
         # and an empty inactive list keeps every group segment visible on the map.
         # No exact option is pre-picked, so this is a SET-membership selection.
-        ctx["preseed_active_refs"] = None
-        ctx["preseed_active_targets"] = None
-        ctx["preseed_edges"] = []
-        ctx["preseed_inactive_ids"] = []
+        if deanchored:
+            ctx["preseed_active_refs"] = None
+            ctx["preseed_active_targets"] = None
+            ctx["preseed_edges"] = []
+            ctx["preseed_inactive_ids"] = []
 
     prior = group.get("prior_label")
     if prior:
@@ -667,9 +680,9 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
         ctx["prior_label"] = prior
         ctx["preseed_active_refs"] = [r for r in ref_ids if str(r) in covered_refs]
         ctx["preseed_active_targets"] = [t for t in target_ids if str(t) in covered_targets]
-        # Membership prefill, not a pair-level assertion: leave the exact-edge
-        # field empty so an untouched submit records a SET label of the pills.
-        ctx["preseed_edges"] = []
+        # Preserve a prior exact pair set when available; set-semantics rows use
+        # the membership pills and therefore keep this empty.
+        ctx["preseed_edges"] = prior.get("selected_edges", [])
         new_ids = [r for r in ref_ids if str(r) not in covered_refs] + [
             t for t in target_ids if str(t) not in covered_targets
         ]
@@ -681,6 +694,13 @@ def _render_group(group: dict, dataset: str, deanchored: bool) -> tuple[dict, di
         # back to empty for a prior label that had no note.
         ctx["prior_note"] = prior.get("notes", "")
     return geojson, ctx
+
+
+def _queue_groups(dataset: str, groups: list[dict]) -> list[dict]:
+    """Select the ordinary unreviewed queue or the pairwise-upgrade queue."""
+    if dataset == STITCH_PAIRWISE_QUEUE:
+        return get_pairwise_revisit_groups(dataset, groups)
+    return get_unreviewed_stitch_groups(dataset, groups)
 
 
 @router.get("/stitching-review", response_class=HTMLResponse)
@@ -703,6 +723,8 @@ async def stitching_review(
     datasets = list_datasets()
     if stitch_batch_path(STITCH_ALL_QUEUE).exists():
         datasets = [STITCH_ALL_QUEUE, *datasets]
+    if stitch_batch_path(STITCH_PAIRWISE_QUEUE).exists():
+        datasets = [STITCH_PAIRWISE_QUEUE, *datasets]
 
     if not dataset:
         return templates.TemplateResponse(
@@ -754,7 +776,7 @@ async def stitching_review(
     # coherent with the list actually being paged. Deep links by group_id are the
     # exception: they address the FULL batch (they intentionally target reviewed
     # groups for re-adjudication) and report batch position / batch total.
-    groups = get_unreviewed_stitch_groups(dataset, all_groups)
+    groups = _queue_groups(dataset, all_groups)
 
     if group_id:
         # Deep link: render the requested group (even if already reviewed)
@@ -774,7 +796,10 @@ async def stitching_review(
             return HTMLResponse("Group not found in batch", status_code=404)
         deep_group = all_groups[deep_index]
         geojson, group_ctx = _render_group(
-            deep_group, _group_dataset(deep_group, dataset), deanchored
+            deep_group,
+            _group_dataset(deep_group, dataset),
+            deanchored,
+            dataset == STITCH_PAIRWISE_QUEUE,
         )
         return templates.TemplateResponse(
             request,
@@ -811,7 +836,12 @@ async def stitching_review(
         )
 
     group = groups[0]
-    geojson, group_ctx = _render_group(group, _group_dataset(group, dataset), deanchored)
+    geojson, group_ctx = _render_group(
+        group,
+        _group_dataset(group, dataset),
+        deanchored,
+        dataset == STITCH_PAIRWISE_QUEUE,
+    )
 
     return templates.TemplateResponse(
         request,
@@ -876,7 +906,7 @@ async def stitching_group(
                 group, display_index, display_total = g, i, batch_total
                 break
     if group is None:
-        groups = get_unreviewed_stitch_groups(dataset, all_groups)
+        groups = _queue_groups(dataset, all_groups)
         display_total = len(groups)
         if 0 <= group_index < len(groups):
             group = groups[group_index]
@@ -889,7 +919,12 @@ async def stitching_group(
             {"request": request, "dataset": dataset, "all_reviewed": True},
         )
 
-    geojson, group_ctx = _render_group(group, _group_dataset(group, dataset), deanchored)
+    geojson, group_ctx = _render_group(
+        group,
+        _group_dataset(group, dataset),
+        deanchored,
+        dataset == STITCH_PAIRWISE_QUEUE,
+    )
 
     return templates.TemplateResponse(
         request,
@@ -958,6 +993,56 @@ def _parse_explicit_edges(raw: str, group: dict) -> list[dict] | None:
     return cleaned
 
 
+def _parse_edge_dispositions(raw: str, group: dict) -> list[dict]:
+    """Validate dual identity/resolution decisions from exact review mode.
+
+    The list may cover any subset only at the transport layer, but the current
+    UI deliberately sends the full candidate universe.  Keeping validation
+    independent of UI shape makes stale/forged candidate ids impossible while
+    allowing future targeted identity queues to review a smaller subset.
+    """
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError) as e:
+        raise ValueError("edge_dispositions is not valid JSON") from e
+    if not isinstance(parsed, list):
+        raise ValueError("edge_dispositions must be a list")
+
+    candidate_edges = {
+        (str(e["ref_id"]), str(e["target_id"])) for e in _group_candidate_edges(group)
+    }
+    identities = {"match", "no_match", "unsure"}
+    resolutions = {"keep", "drop"}
+    seen: set[tuple[str, str]] = set()
+    cleaned: list[dict] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise ValueError("edge_dispositions contains a malformed item")
+        key = (str(item.get("ref_id", "")), str(item.get("target_id", "")))
+        identity = str(item.get("identity", ""))
+        resolution = str(item.get("resolution", ""))
+        if key not in candidate_edges:
+            raise ValueError(f"edge_dispositions contains a non-group edge: {key}")
+        if key in seen:
+            raise ValueError(f"edge_dispositions contains a duplicate edge: {key}")
+        if identity not in identities or resolution not in resolutions:
+            raise ValueError("edge_dispositions contains an invalid identity/resolution")
+        if resolution == "keep" and identity != "match":
+            raise ValueError("a kept edge must have identity=match")
+        seen.add(key)
+        cleaned.append(
+            {
+                "ref_id": key[0],
+                "target_id": key[1],
+                "resolution": resolution,
+                "identity": identity,
+            }
+        )
+    return sorted(cleaned, key=lambda e: (e["ref_id"], e["target_id"]))
+
+
 @router.post("/stitching-review/select", response_class=HTMLResponse)
 async def stitching_select(
     request: Request,
@@ -968,6 +1053,8 @@ async def stitching_select(
     included_refs: str = Form(""),
     included_targets: str = Form(""),
     selected_edges: str = Form(""),
+    adjudication_scope: str = Form(""),
+    edge_dispositions: str = Form(""),
     exclude_slivers: str = Form(""),
     deanchored: bool = Form(False),
     confirm_reject_all: str = Form(""),
@@ -1010,7 +1097,9 @@ async def stitching_select(
         # in the combined queue would otherwise corrupt a labels/.../dataset=
         # __all__/ partition no consumer reads. Never fires for a stamped group.
         owner_dataset = _group_dataset(group, dataset)
-        if owner_dataset == STITCH_ALL_QUEUE or not _validate_dataset(owner_dataset):
+        if owner_dataset in {STITCH_ALL_QUEUE, STITCH_PAIRWISE_QUEUE} or not _validate_dataset(
+            owner_dataset
+        ):
             logger.error(
                 "Refusing stitching label for group %s: unresolved owning dataset %r",
                 group_id,
@@ -1019,16 +1108,76 @@ async def stitching_select(
             return HTMLResponse("Unresolved group dataset", status_code=400)
         try:
             explicit_edges = _parse_explicit_edges(selected_edges, group)
+            dispositions = _parse_edge_dispositions(edge_dispositions, group)
         except ValueError as e:
             # Detail can embed client-supplied ids — log it, never reflect it
             logger.warning(f"Rejected selected_edges for group {group_id}: {e}")
             return HTMLResponse("Invalid selected_edges", status_code=400)
 
+        identity_adjudication = adjudication_scope == ADJUDICATION_SCOPE_EXACT_IDENTITY
+        if dispositions and not identity_adjudication:
+            logger.warning(
+                "Rejected edge dispositions without exact-identity scope for group %s",
+                group_id,
+            )
+            return HTMLResponse("Invalid edge dispositions", status_code=400)
+        if identity_adjudication and not dispositions:
+            logger.warning("Rejected empty exact-identity adjudication for group %s", group_id)
+            return HTMLResponse("Exact identity review requires edge dispositions", status_code=400)
+
         # Storage variables resolved by the two paths below.
         label_semantics = LABEL_SEMANTICS_PAIR
+        stored_scope = ADJUDICATION_SCOPE_EXACT_RESOLUTION
         ref_members: list[str] | None = None
         target_members: list[str] | None = None
-        if explicit_edges is not None:
+        if identity_adjudication:
+            # Exact dual-label review.  The resolution=keep subset MUST equal
+            # selected_edges; identity=match on a dropped edge is intentionally
+            # valid (same physical feature, excluded only by graph context).
+            # Exact scope means the whole displayed candidate universe was
+            # adjudicated; ``unsure`` exists specifically so reviewers never
+            # need to omit an edge to avoid inventing identity truth.
+            candidate_keys = {
+                (str(edge["ref_id"]), str(edge["target_id"]))
+                for edge in _group_candidate_edges(group)
+            }
+            disposition_keys = {(edge["ref_id"], edge["target_id"]) for edge in dispositions}
+            if disposition_keys != candidate_keys:
+                logger.warning(
+                    "Rejected partial exact-identity submit for group %s: %d/%d candidates",
+                    group_id,
+                    len(disposition_keys),
+                    len(candidate_keys),
+                )
+                return HTMLResponse(
+                    "Exact identity review requires every candidate", status_code=400
+                )
+            disposition_keeps = [
+                {"ref_id": e["ref_id"], "target_id": e["target_id"]}
+                for e in dispositions
+                if e["resolution"] == "keep"
+            ]
+            submitted = {(e["ref_id"], e["target_id"]) for e in (explicit_edges or [])}
+            expected = {(e["ref_id"], e["target_id"]) for e in disposition_keeps}
+            if submitted != expected:
+                logger.warning(
+                    "Rejected inconsistent exact-identity submit for group %s: "
+                    "selected_edges and disposition keeps differ",
+                    group_id,
+                )
+                return HTMLResponse("Inconsistent edge dispositions", status_code=400)
+            if not disposition_keeps and confirm_reject_all.strip().lower() not in {
+                "true",
+                "1",
+                "on",
+                "yes",
+            }:
+                return HTMLResponse("Reject-all selection requires confirmation", status_code=400)
+            final_edges = disposition_keeps
+            num_refs = len({e["ref_id"] for e in dispositions})
+            num_targets = len({e["target_id"] for e in dispositions})
+            stored_scope = ADJUDICATION_SCOPE_EXACT_IDENTITY
+        elif explicit_edges is not None:
             # Exact option edge set (option-card ratification, incl. stale) —
             # this endorses a SPECIFIC listed edge set, so it keeps PAIR
             # semantics and is stored verbatim.
@@ -1092,6 +1241,7 @@ async def stitching_select(
                 # sliver exclusion no longer applies (no pairs are stored). The
                 # membership is exactly the active pills the reviewer chose.
                 label_semantics = LABEL_SEMANTICS_SET
+                stored_scope = ADJUDICATION_SCOPE_MEMBERSHIP
                 ref_members = sorted(ref_set)
                 target_members = sorted(target_set)
                 final_edges = []
@@ -1103,6 +1253,7 @@ async def stitching_select(
                 final_edges = []
                 num_refs = 0
                 num_targets = 0
+                stored_scope = ADJUDICATION_SCOPE_REJECT_ALL
 
         record_stitching_label(
             # Route to the group's OWNING dataset partition — for the combined
@@ -1119,6 +1270,8 @@ async def stitching_select(
             # Free-text reviewer note; trimmed and length-capped so a stray paste
             # can't bloat the CSV row.
             notes=notes.strip()[:2000],
+            adjudication_scope=stored_scope,
+            edge_dispositions=dispositions or None,
             # Stamp de-anchored reviews so the eval can slice an unbiased set of
             # labels elicited without the optimizer's pre-seeded proposal. No new
             # CSV column — reuses the existing session_id provenance field.
@@ -1129,7 +1282,7 @@ async def stitching_select(
     # just-labeled group has dropped out. Serving groups[0] (the earliest
     # remaining unreviewed group) can neither repeat the group we just recorded
     # nor skip an unreviewed one. Counter is queue-relative (first of N remaining).
-    groups = get_unreviewed_stitch_groups(dataset, all_groups)
+    groups = _queue_groups(dataset, all_groups)
 
     if not groups:
         return templates.TemplateResponse(
@@ -1139,7 +1292,12 @@ async def stitching_select(
         )
 
     group = groups[0]
-    geojson, group_ctx = _render_group(group, _group_dataset(group, dataset), deanchored)
+    geojson, group_ctx = _render_group(
+        group,
+        _group_dataset(group, dataset),
+        deanchored,
+        dataset == STITCH_PAIRWISE_QUEUE,
+    )
 
     return templates.TemplateResponse(
         request,
@@ -1183,7 +1341,7 @@ async def stitching_skip(
     # Skip walks ONLY the unreviewed queue (recomputed per request) so it never
     # lands on a completed group. Counter is queue-relative (position within the
     # unreviewed list / total unreviewed).
-    groups = get_unreviewed_stitch_groups(dataset, all_groups)
+    groups = _queue_groups(dataset, all_groups)
 
     if not groups:
         return templates.TemplateResponse(
@@ -1206,7 +1364,12 @@ async def stitching_skip(
                 break
 
     group = groups[next_index]
-    geojson, group_ctx = _render_group(group, _group_dataset(group, dataset), deanchored)
+    geojson, group_ctx = _render_group(
+        group,
+        _group_dataset(group, dataset),
+        deanchored,
+        dataset == STITCH_PAIRWISE_QUEUE,
+    )
 
     return templates.TemplateResponse(
         request,

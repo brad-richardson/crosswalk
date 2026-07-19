@@ -2232,9 +2232,9 @@ def register_commands(app: typer.Typer) -> None:
             help="Output path for the experimental resolver artifact",
         ),
         batches_root: Path = typer.Option(
-            Path("data/agents/stitching/batches"),
+            Path("labels/votes"),
             "--batches-root",
-            help="Panel batches root containing */votes.csv",
+            help="Durable panel-vote root containing dataset=*/votes.csv + evidence.csv",
         ),
         with_votes: bool = typer.Option(
             False,
@@ -2245,6 +2245,11 @@ def register_commands(app: typer.Typer) -> None:
             True,
             "--with-extended/--no-extended",
             help="Use the extended resolver feature set (default: on).",
+        ),
+        pair_features: str = typer.Option(
+            "none",
+            "--pair-features",
+            help="Candidate-parquet pair feature family: none|geometry|nonsemantic|all",
         ),
         selector: str = typer.Option(
             "ef1",
@@ -2318,6 +2323,11 @@ def register_commands(app: typer.Typer) -> None:
         if not 0.0 <= label_smoothing < 1.0:
             console.print("[red]--label-smoothing must be in [0, 1)[/red]")
             raise typer.Exit(1)
+        if pair_features not in {"none", "geometry", "nonsemantic", "all"}:
+            console.print(
+                "[red]--pair-features must be one of: none, geometry, nonsemantic, all[/red]"
+            )
+            raise typer.Exit(1)
 
         import importlib
 
@@ -2326,10 +2336,10 @@ def register_commands(app: typer.Typer) -> None:
         resolver_round2 = importlib.import_module("crosswalk.resolver.round2")
         resolver_extract = importlib.import_module("crosswalk.resolver.extract")
 
-        BASE_FEAT_COLS = resolver_features.FEATURE_COLUMNS
-        EXT_FEAT_COLS = resolver_round2.EXTENDED_FEATURE_COLUMNS
-
-        feature_cols = list(EXT_FEAT_COLS if with_extended else BASE_FEAT_COLS)
+        feature_cols = resolver_round2.resolver_feature_columns(
+            extended=with_extended,
+            pair_family=pair_features,
+        )
 
         specs = resolver_train._discover_specs(
             data_root=data_root,
@@ -2481,6 +2491,7 @@ def register_commands(app: typer.Typer) -> None:
             "selector": selector,
             "with_extended": with_extended,
             "with_votes": with_votes,
+            "pair_features": pair_features,
             "include_split": include_split,
             "clean_only": clean_only,
             "float_soft": float_soft,

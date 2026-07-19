@@ -2482,6 +2482,43 @@ class TestStitchingLabelStore:
         assert by_gid.loc["gnote", "notes"] == "same feature but merge points don't line up"
         assert by_gid.loc["gplain", "notes"] == ""
 
+    def test_exact_identity_dispositions_round_trip(self, store):
+        """Dual pair identity/resolution truth survives CSV persistence."""
+        dispositions = [
+            {
+                "ref_id": "r2",
+                "target_id": "t1",
+                "resolution": "drop",
+                "identity": "match",
+            },
+            {
+                "ref_id": "r1",
+                "target_id": "t1",
+                "resolution": "keep",
+                "identity": "match",
+            },
+        ]
+        store.add(
+            group_id="gidentity",
+            selected_edges=[{"ref_id": "r1", "target_id": "t1"}],
+            match_type="M:N",
+            num_refs=2,
+            num_targets=1,
+            labeler="brad",
+            session_id="pairwise-revisit",
+            adjudication_scope="exact_identity",
+            edge_dispositions=dispositions,
+        )
+
+        from crosswalk.labeling.stitching_store import StitchingLabelStore
+
+        row = StitchingLabelStore("test_dataset", labels_dir=store.labels_dir).df.iloc[0]
+        assert row["adjudication_scope"] == "exact_identity"
+        saved = json.loads(row["edge_dispositions"])
+        assert [edge["ref_id"] for edge in saved] == ["r1", "r2"]
+        assert saved[1]["resolution"] == "drop"
+        assert saved[1]["identity"] == "match"
+
     def test_notes_na_token_text_survives_reload(self, store):
         """A note whose text collides with a pandas NA token must not be blanked.
 
@@ -2603,6 +2640,69 @@ _STITCHING_DATASETS = sorted(
 
 
 @pytest.mark.skipif(not _STITCHING_DATASETS, reason="no stitching labels on disk")
+def test_pairwise_revisit_queue_only_returns_unupgraded_exact_ids(monkeypatch):
+    import crosswalk.labeling.stitching_store as stitching_store_module
+    from crosswalk.web.services import get_pairwise_revisit_groups
+
+    labels = pd.DataFrame(
+        [
+            {
+                "group_id": "needs-upgrade",
+                "labeler": "brad",
+                "label_semantics": "set",
+                "ref_ids": '["r1"]',
+                "target_ids": '["t1"]',
+                "selected_edges": "[]",
+                "adjudication_scope": "membership",
+                "edge_dispositions": "",
+                "notes": "prior note",
+            },
+            {
+                "group_id": "done",
+                "labeler": "brad",
+                "label_semantics": "pair",
+                "selected_edges": '[{"ref_id":"r2","target_id":"t2"}]',
+                "adjudication_scope": "exact_identity",
+                "edge_dispositions": "[{}]",
+            },
+            # A drifted id is intentionally absent from the fast in-place queue.
+            {"group_id": "old-drifted", "labeler": "brad"},
+        ]
+    ).fillna("")
+
+    class FakeStore:
+        def __init__(self, dataset_id):
+            self.dataset_id = dataset_id
+
+        def load(self, dataset_id):
+            assert dataset_id == self.dataset_id == "ds"
+            return labels
+
+    monkeypatch.setattr(stitching_store_module, "StitchingLabelStore", FakeStore)
+    groups = [
+        {
+            "dataset_id": "ds",
+            "group_id": "needs-upgrade",
+            "ref_ids": ["r1", "r-extra"],
+            "target_ids": ["t1"],
+        },
+        {
+            "dataset_id": "ds",
+            "group_id": "done",
+            "ref_ids": ["r2"],
+            "target_ids": ["t2"],
+        },
+    ]
+
+    queue = get_pairwise_revisit_groups("__pairwise__", groups)
+
+    assert [group["group_id"] for group in queue] == ["needs-upgrade"]
+    prior = queue[0]["prior_label"]
+    assert prior["covered_ref_ids"] == ["r1"]
+    assert prior["new_ref_ids"] == ["r-extra"]
+    assert prior["notes"] == "prior note"
+
+
 class TestStitchingLabelIntegrity:
     """Ensure committed stitching labels are well-formed and internally consistent."""
 
@@ -3208,6 +3308,58 @@ class TestParseExplicitEdges:
         with pytest.raises(ValueError):
             _parse_explicit_edges(raw, self._group_with_rejected())
 
+    def test_valid_exact_dispositions(self):
+        from crosswalk.web.routes.stitching import _parse_edge_dispositions
+
+        raw = json.dumps(
+            [
+                {
+                    "ref_id": "r1",
+                    "target_id": "t1",
+                    "resolution": "keep",
+                    "identity": "match",
+                },
+                {
+                    "ref_id": "r2",
+                    "target_id": "t2",
+                    "resolution": "drop",
+                    "identity": "no_match",
+                },
+            ]
+        )
+        assert _parse_edge_dispositions(raw, self._group()) == json.loads(raw)
+
+    def test_kept_edge_must_be_identity_match(self):
+        from crosswalk.web.routes.stitching import _parse_edge_dispositions
+
+        raw = json.dumps(
+            [
+                {
+                    "ref_id": "r1",
+                    "target_id": "t1",
+                    "resolution": "keep",
+                    "identity": "unsure",
+                }
+            ]
+        )
+        with pytest.raises(ValueError, match="kept edge must have identity=match"):
+            _parse_edge_dispositions(raw, self._group())
+
+    def test_parser_allows_targeted_disposition_subset(self):
+        from crosswalk.web.routes.stitching import _parse_edge_dispositions
+
+        raw = json.dumps(
+            [
+                {
+                    "ref_id": "r1",
+                    "target_id": "t1",
+                    "resolution": "drop",
+                    "identity": "no_match",
+                }
+            ]
+        )
+        assert _parse_edge_dispositions(raw, self._group()) == json.loads(raw)
+
 
 # ---------------------------------------------------------------------------
 # /stitching-review/select — explicit edge set vs. cross-product
@@ -3318,6 +3470,85 @@ class TestStitchingSelectRoute:
             assert set(kwargs["target_ids"]) == {"t1", "t2"}
             assert kwargs["num_refs"] == 2
             assert kwargs["num_targets"] == 2
+        finally:
+            self._stop(patches)
+
+    def test_manual_exact_identity_records_dual_edge_truth(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            dispositions = [
+                {
+                    "ref_id": "r1",
+                    "target_id": "t1",
+                    "resolution": "keep",
+                    "identity": "match",
+                },
+                {
+                    "ref_id": "r1",
+                    "target_id": "t2",
+                    "resolution": "drop",
+                    "identity": "no_match",
+                },
+                {
+                    "ref_id": "r2",
+                    "target_id": "t1",
+                    "resolution": "drop",
+                    # Same physical feature but excluded from the final graph.
+                    "identity": "match",
+                },
+                {
+                    "ref_id": "r2",
+                    "target_id": "t2",
+                    "resolution": "drop",
+                    "identity": "unsure",
+                },
+            ]
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "group_index": 0,
+                    "included_refs": "",
+                    "included_targets": "",
+                    "selected_edges": json.dumps([{"ref_id": "r1", "target_id": "t1"}]),
+                    "adjudication_scope": "exact_identity",
+                    "edge_dispositions": json.dumps(dispositions),
+                },
+            )
+            assert resp.status_code == 200
+            kwargs = recorder.call_args.kwargs
+            assert kwargs["label_semantics"] == "pair"
+            assert kwargs["adjudication_scope"] == "exact_identity"
+            assert kwargs["selected_edges"] == [{"ref_id": "r1", "target_id": "t1"}]
+            assert kwargs["edge_dispositions"] == dispositions
+        finally:
+            self._stop(patches)
+
+    def test_exact_identity_rejects_selected_disposition_mismatch(self):
+        client, recorder, patches = self._client_and_recorder()
+        try:
+            resp = client.post(
+                "/stitching-review/select",
+                data={
+                    "dataset": self.DATASET,
+                    "group_id": "gmn",
+                    "selected_edges": json.dumps([{"ref_id": "r2", "target_id": "t2"}]),
+                    "adjudication_scope": "exact_identity",
+                    "edge_dispositions": json.dumps(
+                        [
+                            {
+                                "ref_id": "r1",
+                                "target_id": "t1",
+                                "resolution": "keep",
+                                "identity": "match",
+                            }
+                        ]
+                    ),
+                },
+            )
+            assert resp.status_code == 400
+            recorder.assert_not_called()
         finally:
             self._stop(patches)
 

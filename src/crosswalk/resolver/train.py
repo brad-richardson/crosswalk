@@ -39,7 +39,14 @@ from crosswalk.resolver.round2 import (
     run_cv2,
     select_group_predictions,
 )
-from crosswalk.resolver.votes import default_votes_paths, edge_soft_labels, load_votes
+from crosswalk.resolver.votes import (
+    default_evidence_paths,
+    default_votes_paths,
+    edge_soft_labels,
+    load_archived_label_maps,
+    load_evidence,
+    load_votes,
+)
 
 
 def _sanitize_ds(ds: str, max_len: int = 80) -> str:
@@ -180,6 +187,7 @@ def _build_combined_table(
 def _build_soft_extra(
     groups_by_dataset: dict[str, list[dict]],
     batches_root: Path,
+    archive_batches_root: Path = Path("data/agents/stitching/batches"),
 ) -> pd.DataFrame | None:
     batches_root = Path(batches_root)
     if not batches_root.exists():
@@ -191,22 +199,35 @@ def _build_soft_extra(
     if votes_df.empty:
         return None
 
+    evidence_paths = default_evidence_paths(batches_root)
+    evidence_df = load_evidence([str(path) for path in evidence_paths])
+    label_maps = load_archived_label_maps(votes_df, archive_batches_root)
+
     frames: list[pd.DataFrame] = []
     for dataset_id, groups in groups_by_dataset.items():
-        soft = edge_soft_labels(groups, votes_df, dataset_id=dataset_id)
+        soft = edge_soft_labels(
+            groups,
+            votes_df,
+            dataset_id=dataset_id,
+            evidence_df=evidence_df,
+            label_maps=label_maps,
+        )
         if not soft.empty:
             frames.append(soft)
     if not frames:
         return None
     soft = pd.concat(frames, ignore_index=True)
     if "group_id" in soft.columns and "ref_id" in soft.columns:
+        aggregations = {
+            "soft_keep": "mean",
+            "n_providers": "max",
+            "unanimous": "min",
+        }
+        if "evidence_complete" in soft.columns:
+            aggregations["evidence_complete"] = "max"
         soft = (
             soft.groupby(["dataset_id", "group_id", "ref_id", "target_id"], as_index=False).agg(
-                {
-                    "soft_keep": "mean",
-                    "n_providers": "max",
-                    "unanimous": "min",
-                }
+                aggregations
             )
             if "n_providers" in soft.columns
             else soft.drop_duplicates(subset=["group_id", "ref_id", "target_id"])

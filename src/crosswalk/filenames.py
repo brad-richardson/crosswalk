@@ -316,6 +316,11 @@ def candidates_sidecar_path(bridge_path: Path) -> Path:
 # ``dataset_id`` so the review UI can route labels back to the owning partition.
 STITCH_ALL_QUEUE = "__all__"
 
+# Separate cross-dataset queue for upgrading prior stitch decisions with
+# pair-identity dispositions.  Keeping it distinct prevents already-reviewed
+# work from reappearing in the ordinary ``__all__`` queue.
+STITCH_PAIRWISE_QUEUE = "__pairwise__"
+
 
 def stitch_batch_path(dataset_id: str) -> Path:
     """Get path to stitching review batch file.

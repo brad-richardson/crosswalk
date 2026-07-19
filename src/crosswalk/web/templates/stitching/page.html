@@ -61,12 +61,14 @@
         // pre-seeded assignment in the live confidence / Review summary.
         applyStitchTab();
         refreshSelectionUI();
+        maybeOpenPairwiseRevisit();
     });
 
     // Reflect the pre-seeded assignment for the initially-rendered group
     document.addEventListener('DOMContentLoaded', function () {
         applyStitchTab();
         refreshSelectionUI();
+        maybeOpenPairwiseRevisit();
     });
 
     // Populate the outgoing request with the currently active segment IDs.
@@ -150,6 +152,15 @@
         // A confirmed re-issue (issueRequest(true)) skips htmx:confirm, but guard
         // anyway so a stray event never re-opens the panel.
         if (window.__stitchConfirmedSubmit) return;
+        // In the dedicated upgrade queue, every save must pass through the
+        // identity panel. This also makes Cancel -> Select This resume the
+        // exact review instead of accidentally storing only the old resolution.
+        if (isPairwiseRevisit()) {
+            evt.preventDefault();
+            window.__pendingIssueRequest = evt.detail.issueRequest;
+            maybeOpenPairwiseRevisit();
+            return;
+        }
         var sel = document.getElementById('selected-edges');
         var isOption = !!(sel && sel.value);
         if (isOption && !isStaleGroup()) return; // direct submit of a fresh option
@@ -160,6 +171,7 @@
 
     function resetPairConfirmState() {
         window.__stitchConfirmedSubmit = false;
+        window.__pairConfirmIdentityMode = false;
         window.__pendingIssueRequest = null;
         var flag = document.getElementById('confirm-reject-all');
         if (flag) flag.value = '';
@@ -194,7 +206,7 @@
     //   - option/stale mode: the picked option's exact edges (all ticked).
     //   - manual mode: the active ref×target cross-product over the candidate
     //     union, used only as supporting evidence for the SET confirmation.
-    function collectConfirmPairs(isOption) {
+    function collectConfirmPairs(isOption, includeAllCandidates) {
         var edges = parseGroupEdges();
         var byKey = {};
         for (var i = 0; i < edges.length; i++) {
@@ -220,10 +232,15 @@
         } else {
             var activeRefs = pillIdSet('.segment-pill-ref.active');
             var activeTargets = pillIdSet('.segment-pill-target.active');
+            var exactSelected = includeAllCandidates ? parseSelectedSet() : null;
             for (var k = 0; k < edges.length; k++) {
                 var ed = edges[k];
-                if (activeRefs[ed.ref_id] && activeTargets[ed.target_id]) {
-                    chosen.push({ edge: ed, checked: true });
+                var inMembership = !!(activeRefs[ed.ref_id] && activeTargets[ed.target_id]);
+                if (includeAllCandidates || inMembership) {
+                    var checked = exactSelected
+                        ? !!(exactSelected[ed.ref_id] && exactSelected[ed.ref_id][ed.target_id])
+                        : inMembership;
+                    chosen.push({ edge: ed, checked: checked });
                 }
             }
         }
@@ -235,17 +252,22 @@
                 is_sliver: !!c.edge.is_sliver,
                 ref_name: refNames[c.edge.ref_id] || '',
                 target_name: tgtNames[c.edge.target_id] || '',
-                checked: c.checked
+                checked: c.checked,
+                identity: c.checked ? 'match' : 'unsure'
             };
         });
     }
 
-    function renderPairConfirm(pairs) {
+    function renderPairConfirm(pairs, identityMode) {
         var list = document.getElementById('pair-confirm-list');
         var emptyNote = document.getElementById('pair-confirm-empty');
         var header = document.getElementById('pair-confirm-header');
         if (!list) return;
-        if (header) header.textContent = 'Confirm pairs to record';
+        if (header) {
+            header.textContent = identityMode
+                ? 'Exact edges — checkbox = keep; identity = physical match'
+                : 'Confirm pairs to record';
+        }
         list.innerHTML = '';
         for (var i = 0; i < pairs.length; i++) {
             var pr = pairs[i];
@@ -278,6 +300,31 @@
                 badge.style.cssText = 'flex-shrink:0; font-size:0.62rem; padding:0 4px; ' +
                     'border-radius:3px; background:rgba(220,140,0,0.2); color:var(--text-muted);';
                 row.appendChild(badge);
+            }
+            if (identityMode) {
+                var identity = document.createElement('select');
+                identity.className = 'pair-identity-select';
+                identity.setAttribute('aria-label', 'Physical pair identity');
+                identity.style.cssText = 'font-size:0.68rem; max-width:8.5rem;';
+                [['match', 'same feature'], ['no_match', 'not same'], ['unsure', 'unsure']]
+                    .forEach(function (choice) {
+                        var opt = document.createElement('option');
+                        opt.value = choice[0];
+                        opt.textContent = choice[1];
+                        identity.appendChild(opt);
+                    });
+                identity.value = pr.identity || (pr.checked ? 'match' : 'unsure');
+                cb.addEventListener('change', function () {
+                    if (this.checked) {
+                        this.closest('.pair-confirm-row').querySelector('.pair-identity-select').value = 'match';
+                    }
+                });
+                identity.addEventListener('change', function () {
+                    if (this.value !== 'match') {
+                        this.closest('.pair-confirm-row').querySelector('.pair-confirm-check').checked = false;
+                    }
+                });
+                row.appendChild(identity);
             }
             list.appendChild(row);
         }
@@ -358,13 +405,56 @@
                 '<br>' + names.join('<br>');
             list.appendChild(warn);
         }
+
+        var exact = document.createElement('button');
+        exact.type = 'button';
+        exact.className = 'btn-skip-stitch';
+        exact.style.cssText = 'margin-top:8px; width:100%;';
+        exact.textContent = 'Adjudicate exact edges (also trains pair matcher)';
+        exact.onclick = openExactPairAdjudication;
+        list.appendChild(exact);
+    }
+
+    // Upgrade a membership review into full candidate-edge truth.  Every
+    // candidate is shown: the active membership is preselected for resolution,
+    // while excluded candidates default to identity=unsure (never an invented
+    // pairwise negative).  This is opt-in because large groups can be costly.
+    function startExactPairAdjudication() {
+        window.__pairConfirmIsOption = true;  // explicit-edge transport path
+        window.__pairConfirmIdentityMode = true;
+        var scope = document.getElementById('adjudication-scope');
+        if (scope) scope.value = 'exact_identity';
+        renderPairConfirm(collectConfirmPairs(false, true), true);
+    }
+
+    function openExactPairAdjudication() {
+        startExactPairAdjudication();
+        var panel = document.getElementById('pair-confirm-panel');
+        var actions = document.getElementById('card-actions');
+        if (panel) panel.style.display = '';
+        if (actions) actions.style.display = 'none';
+        var card = document.getElementById('group-card');
+        if (card && card.classList.contains('collapsed')) togglePanelCollapse();
+    }
+
+    // The dedicated prior-decision queue is optimized for throughput: open
+    // directly on the exact edge list with the earlier decision preselected.
+    function isPairwiseRevisit() {
+        var card = document.getElementById('group-card');
+        return !!card && card.getAttribute('data-pairwise-revisit') === '1';
+    }
+
+    function maybeOpenPairwiseRevisit() {
+        if (!isPairwiseRevisit()) return;
+        openExactPairAdjudication();
     }
 
     // Open the inline confirmation panel; hide the primary action row while it's up.
     function openPairConfirm(isOption) {
         window.__pairConfirmIsOption = isOption;
+        window.__pairConfirmIdentityMode = false;
         if (isOption) {
-            renderPairConfirm(collectConfirmPairs(isOption));
+            renderPairConfirm(collectConfirmPairs(isOption, false), false);
         } else {
             renderSetConfirm();
         }
@@ -392,6 +482,8 @@
     function confirmPairSubmit() {
         var sel = document.getElementById('selected-edges');
         var flag = document.getElementById('confirm-reject-all');
+        var scope = document.getElementById('adjudication-scope');
+        var dispositionsInput = document.getElementById('edge-dispositions');
 
         if (window.__pairConfirmIsOption) {
             var checks = document.querySelectorAll('#pair-confirm-list .pair-confirm-check');
@@ -405,6 +497,25 @@
                 }
             }
             if (sel) sel.value = ticked.length ? JSON.stringify(ticked) : '';
+            if (window.__pairConfirmIdentityMode) {
+                var rows = document.querySelectorAll('#pair-confirm-list .pair-confirm-row');
+                var dispositions = [];
+                for (var j = 0; j < rows.length; j++) {
+                    var rowCheck = rows[j].querySelector('.pair-confirm-check');
+                    var rowIdentity = rows[j].querySelector('.pair-identity-select');
+                    dispositions.push({
+                        ref_id: rowCheck.getAttribute('data-ref'),
+                        target_id: rowCheck.getAttribute('data-target'),
+                        resolution: rowCheck.checked ? 'keep' : 'drop',
+                        identity: rowIdentity ? rowIdentity.value : (rowCheck.checked ? 'match' : 'unsure')
+                    });
+                }
+                if (dispositionsInput) dispositionsInput.value = JSON.stringify(dispositions);
+                if (scope) scope.value = 'exact_identity';
+            } else {
+                if (dispositionsInput) dispositionsInput.value = '';
+                if (scope) scope.value = 'exact_resolution';
+            }
             if (flag) {
                 flag.value = ticked.length === 0 ? '1' : '';
             }
@@ -413,6 +524,8 @@
             // included_targets (populated by populateSelection). An empty
             // membership is a deliberate reject-all in every review mode.
             if (sel) sel.value = '';
+            if (dispositionsInput) dispositionsInput.value = '';
+            if (scope) scope.value = 'membership';
             var nActive = document.querySelectorAll('.segment-pill-ref.active').length +
                 document.querySelectorAll('.segment-pill-target.active').length;
             if (flag) {

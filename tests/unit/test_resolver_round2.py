@@ -167,3 +167,28 @@ class TestExtractPrunedColumn:
         assert by.loc["t2", "pruned"]
         assert by.loc["t2", "keep"] == 0
         assert not by.loc["t2", "selected"]
+
+
+def test_pair_feature_families_are_cumulative_and_deduplicated():
+    from crosswalk.config import FEATURE_COLUMNS as pair_columns
+    from crosswalk.resolver.round2 import (
+        EXTENDED_FEATURE_COLUMNS,
+        resolver_feature_columns,
+    )
+
+    base = resolver_feature_columns(pair_family="none")
+    geometry = resolver_feature_columns(pair_family="geometry")
+    nonsemantic = resolver_feature_columns(pair_family="nonsemantic")
+    all_features = resolver_feature_columns(pair_family="all")
+
+    assert base == EXTENDED_FEATURE_COLUMNS
+    assert set(base) < set(geometry) < set(nonsemantic) < set(all_features)
+    assert set(pair_columns) <= set(all_features)
+    assert len(all_features) == len(set(all_features))
+
+
+def test_unknown_pair_feature_family_rejected():
+    from crosswalk.resolver.round2 import resolver_feature_columns
+
+    with pytest.raises(ValueError, match="unknown pair feature family"):
+        resolver_feature_columns(pair_family="magic")
