@@ -1,3 +1,6 @@
+{% if pairwise_revisit is defined and pairwise_revisit %}
+{% include "stitching/pairwise_wizard.html" %}
+{% else %}
 {# De-anchored review mode: reviewer builds the selection from a blank slate,
    the optimizer's proposal is hidden (collapsed behind an opt-in reveal) and no
    styling leaks which edges it chose. Defaulted so every render path is safe. #}
@@ -480,3 +483,4 @@
         </button>
     </div>
 </div>
+{% endif %}

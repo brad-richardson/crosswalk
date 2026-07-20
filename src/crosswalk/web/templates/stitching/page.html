@@ -1037,7 +1037,7 @@
         var resizeObs = null;
 
         function updateOffset() {
-            var card = document.getElementById('group-card');
+            var card = document.getElementById('group-card') || document.getElementById('pairwise-card');
             var offset = card ? card.offsetHeight + 8 : 0;
             document.getElementById('map').style.setProperty('--card-offset', offset + 'px');
         }
@@ -1045,7 +1045,7 @@
         function observe() {
             updateOffset();
             resizeObs = new ResizeObserver(updateOffset);
-            var card = document.getElementById('group-card');
+            var card = document.getElementById('group-card') || document.getElementById('pairwise-card');
             if (card) resizeObs.observe(card);
         }
 
@@ -1064,4 +1064,6 @@
         });
     })();
 </script>
+<script src="/static/js/features.js?v={{cache_bust}}"></script>
+<script src="/static/js/stitching-pairwise.js?v={{cache_bust}}"></script>
 {% endblock %}

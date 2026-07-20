@@ -2,20 +2,25 @@
 
 import json
 import logging
+import math
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from shapely.geometry import LineString, mapping, shape
 from shapely.ops import substring, unary_union
 
+from ...config import FEATURE_COLUMNS
 from ...filenames import (
     PROJECT_ROOT,
     STITCH_ALL_QUEUE,
     STITCH_PAIRWISE_QUEUE,
     bridge_filename,
+    candidates_sidecar_path,
     groups_sidecar_path,
     stitch_batch_path,
 )
+from ...labeling.stitch_pair_review import enrich_candidate_endpoints
 from ...labeling.stitching_store import (
     ADJUDICATION_SCOPE_EXACT_IDENTITY,
     ADJUDICATION_SCOPE_EXACT_RESOLUTION,
@@ -284,6 +289,13 @@ def _extract_subline_geojson(full_geojson: dict, start_frac: float, end_frac: fl
         return None
     if not isinstance(geom, LineString) or geom.is_empty or geom.length == 0:
         return None
+    try:
+        start_frac = float(start_frac)
+        end_frac = float(end_frac)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(start_frac) or not math.isfinite(end_frac):
+        return None
     start_frac = max(0.0, min(1.0, start_frac))
     end_frac = max(0.0, min(1.0, end_frac))
     if abs(end_frac - start_frac) < 1e-6:
@@ -292,6 +304,104 @@ def _extract_subline_geojson(full_geojson: dict, start_frac: float, end_frac: fl
     if sub.is_empty:
         return None
     return mapping(sub)
+
+
+def _candidate_value(group: dict, side: str, kind: str, segment_id: str, default=None):
+    """Resolve a pair endpoint value across member, candidate, and context maps."""
+    for key in (
+        f"{side}_{kind}",
+        f"candidate_{side}_{kind}",
+        f"context_{side}_{kind}",
+    ):
+        values = group.get(key) or {}
+        if segment_id in values:
+            return values[segment_id]
+    return default
+
+
+def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
+    """Build mobile pair-review cards with complete pair-specific geometry."""
+    edges = _annotate_candidate_edges(group)
+    selected = {
+        (str(edge.get("ref_id")), str(edge.get("target_id")))
+        for edge in (context.get("preseed_edges") or [])
+    }
+    active_refs = context.get("preseed_active_refs")
+    active_targets = context.get("preseed_active_targets")
+    active_ref_set = {str(value) for value in active_refs or []}
+    active_target_set = {str(value) for value in active_targets or []}
+    has_membership_seed = active_refs is not None and active_targets is not None
+
+    member_refs = {str(value) for value in group.get("ref_ids", [])}
+    member_targets = {str(value) for value in group.get("target_ids", [])}
+    group_selected = {
+        (str(item.get("ref_id")), str(item.get("target_id"))) for item in (group.get("edges") or [])
+    }
+    result: list[dict] = []
+    for edge in edges:
+        ref_id = str(edge["ref_id"])
+        target_id = str(edge["target_id"])
+        ref_full = _candidate_value(group, "ref", "geometries", ref_id)
+        target_full = _candidate_value(group, "target", "geometries", target_id)
+
+        ref_aligned = None
+        if ref_full:
+            ref_aligned = _extract_subline_geojson(
+                ref_full,
+                edge.get("gers_start_frac", 0.0),
+                edge.get("gers_end_frac", 1.0),
+            )
+        target_aligned = None
+        if target_full:
+            target_aligned = _extract_subline_geojson(
+                target_full,
+                edge.get("local_start_frac", 0.0),
+                edge.get("local_end_frac", 1.0),
+            )
+
+        key = (ref_id, target_id)
+        if selected:
+            keep = key in selected
+        elif has_membership_seed:
+            keep = ref_id in active_ref_set and target_id in active_target_set
+        else:
+            keep = bool(edge.get("selected", key in group_selected))
+
+        result.append(
+            {
+                "ref_id": ref_id,
+                "target_id": target_id,
+                "ref_name": _candidate_value(group, "ref", "names", ref_id, "") or "",
+                "target_name": _candidate_value(group, "target", "names", target_id, "") or "",
+                "ref_class": _candidate_value(group, "ref", "classes", ref_id, "") or "",
+                "target_class": _candidate_value(group, "target", "classes", target_id, "") or "",
+                "confidence": edge.get("confidence"),
+                "is_sliver": bool(edge.get("is_sliver")),
+                "is_external": ref_id not in member_refs or target_id not in member_targets,
+                "geometry_available": bool(ref_full and target_full),
+                "geometry": {
+                    "reference_full": ref_full,
+                    "target_full": target_full,
+                    "reference": ref_aligned or ref_full,
+                    "target": target_aligned or target_full,
+                },
+                "default_resolution": "keep" if keep else "drop",
+                "default_identity": "match" if keep else "unsure",
+                "edge_details": {
+                    key: edge.get(key)
+                    for key in (
+                        "degree_ref",
+                        "degree_tgt",
+                        "is_bridge",
+                        "corridor_ref",
+                        "corridor_tgt",
+                        "review_reason",
+                    )
+                    if edge.get(key) is not None
+                },
+            }
+        )
+    return result
 
 
 def _build_group_geojson(group: dict, deanchored: bool = False) -> dict:
@@ -647,6 +757,27 @@ def _render_group(
       default) — so it does not un-blind the de-anchored mode, and the bulk
       All/None controls remain one click away.
     """
+    if pairwise_revisit:
+        # Older pairwise queue files predate candidate-endpoint enrichment.
+        # Hydrate only missing ids at render time so the reviewer works
+        # immediately; regenerated queues persist these maps and skip the read.
+        try:
+            stats = enrich_candidate_endpoints([group], dataset)
+            missing = (stats["requested_ref"] - stats["attached_ref"]) + (
+                stats["requested_target"] - stats["attached_target"]
+            )
+            if missing:
+                logger.warning(
+                    "Pairwise group %s still lacks %d candidate endpoint geometries",
+                    group.get("group_id"),
+                    missing,
+                )
+        except Exception:
+            logger.exception(
+                "Failed to hydrate candidate endpoint geometry for pairwise group %s",
+                group.get("group_id"),
+            )
+
     geojson = _build_group_geojson(group, deanchored=deanchored)
     ctx = _build_group_context(group, dataset=dataset)
     ctx["deanchored"] = deanchored
@@ -698,6 +829,8 @@ def _render_group(
         # layer carries the note through PriorLabelCoverage.to_batch_dict(); falls
         # back to empty for a prior label that had no note.
         ctx["prior_note"] = prior.get("notes", "")
+    if pairwise_revisit:
+        ctx["pairwise_candidates"] = _build_pairwise_candidates(group, ctx)
     return geojson, ctx
 
 
@@ -943,6 +1076,110 @@ async def stitching_group(
             "total_groups": display_total,
             **group_ctx,
         },
+    )
+
+
+def _edge_feature_fallback(edge: dict) -> dict:
+    """Small always-available detail set when the feature sidecar has no row."""
+
+    def _span(start_key: str, end_key: str) -> float:
+        start = edge.get(start_key)
+        end = edge.get(end_key)
+        try:
+            return abs(float(1.0 if end is None else end) - float(0.0 if start is None else start))
+        except (TypeError, ValueError):
+            return 0.0
+
+    details = {
+        "confidence": edge.get("confidence"),
+        "ref_coverage": _span("gers_start_frac", "gers_end_frac"),
+        "target_coverage": _span("local_start_frac", "local_end_frac"),
+    }
+    for key in (
+        "degree_ref",
+        "degree_tgt",
+        "is_bridge",
+        "corridor_ref",
+        "corridor_tgt",
+        "is_sliver",
+        "review_reason",
+    ):
+        if edge.get(key) is not None:
+            details[key] = edge[key]
+    return details
+
+
+@router.get("/stitching-review/pair-features", response_class=HTMLResponse)
+async def stitching_pair_features(
+    request: Request,
+    dataset: str,
+    group_id: str,
+    group_dataset: str,
+    ref_id: str,
+    target_id: str,
+):
+    """Lazy feature drawer for one exact-identity candidate pair."""
+    if not _validate_dataset(dataset):
+        return HTMLResponse("Unknown dataset", status_code=404)
+    batch = load_stitch_batch(dataset)
+    if not batch:
+        return HTMLResponse("No batch found", status_code=404)
+    group = _find_group(batch.get("groups", []), group_id, group_dataset)
+    if group is None:
+        return HTMLResponse("Group not found", status_code=404)
+
+    edge = next(
+        (
+            item
+            for item in _group_candidate_edges(group)
+            if str(item.get("ref_id")) == ref_id and str(item.get("target_id")) == target_id
+        ),
+        None,
+    )
+    if edge is None:
+        return HTMLResponse("Pair not found", status_code=404)
+
+    features = _edge_feature_fallback(edge)
+    owner_dataset = _group_dataset(group, dataset)
+    bridge_path = PROJECT_ROOT / "data" / "output" / bridge_filename(owner_dataset)
+    candidates_path = candidates_sidecar_path(bridge_path)
+    if candidates_path.exists():
+        try:
+            import pandas as pd
+            import pyarrow.parquet as pq
+
+            available = set(pq.read_schema(candidates_path).names)
+            feature_columns = [column for column in FEATURE_COLUMNS if column in available]
+            if {"ref_id", "target_id"}.issubset(available) and feature_columns:
+                frame = pd.read_parquet(
+                    candidates_path,
+                    columns=["ref_id", "target_id", *feature_columns],
+                    filters=[("ref_id", "=", ref_id), ("target_id", "=", target_id)],
+                )
+                if not frame.empty:
+                    row = frame.iloc[0]
+                    features = {
+                        column: row[column]
+                        for column in feature_columns
+                        if not pd.isna(row[column])
+                    }
+                    # Keep structural review context that is not part of the
+                    # matcher feature vector.
+                    for key, value in _edge_feature_fallback(edge).items():
+                        features.setdefault(key, value)
+        except Exception:
+            logger.exception(
+                "Failed feature lookup for pair %s/%s in group %s",
+                ref_id,
+                target_id,
+                group_id,
+            )
+
+    pair = SimpleNamespace(features=features)
+    return templates.TemplateResponse(
+        request,
+        "labeling/features.html",
+        {"request": request, "pair": pair},
     )
 
 
