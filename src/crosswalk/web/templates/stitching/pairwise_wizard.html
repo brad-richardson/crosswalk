@@ -1,0 +1,123 @@
+<!-- Mobile-first exact-identity reviewer: one candidate pair at a time. -->
+<span id="group-progress-text" style="display:none">Group {{ group_index + 1 }} of {{ total_groups }}</span>
+
+<script type="application/json" id="pairwise-candidates">{{ pairwise_candidates | tojson }}</script>
+<script type="application/json" id="pairwise-group-geometry">{{ group_geojson | tojson }}</script>
+
+<div class="info-card map-overlay pairwise-card" id="pairwise-card"
+     data-queue-dataset="{{ dataset }}"
+     data-group-dataset="{{ group.dataset_id or dataset }}"
+     data-group-id="{{ group.group_id }}">
+    <div class="pairwise-ribbon">
+        <span class="match-type-badge match-type-{{ group.match_type | replace(':', '-') }}">
+            Pairwise upgrade
+        </span>
+        <span id="pairwise-progress">Pair 1 of {{ pairwise_candidates | length }}</span>
+        <span class="pairwise-reviewed-count" id="pairwise-reviewed-count"></span>
+        <button type="button" class="pairwise-overview-btn" id="pairwise-overview-btn"
+                aria-pressed="false">Group map</button>
+    </div>
+
+    <div id="pairwise-review-view">
+        <div class="pair-names pairwise-names">
+            <div class="pair-row">
+                <span class="pair-label ref-label">REF</span>
+                <span class="pair-name" id="pairwise-ref-name"></span>
+                <span class="pair-id" id="pairwise-ref-id"></span>
+            </div>
+            <div class="pair-row">
+                <span class="pair-label target-label">TRGT</span>
+                <span class="pair-name" id="pairwise-target-name"></span>
+                <span class="pair-id" id="pairwise-target-id"></span>
+            </div>
+        </div>
+
+        <div class="pair-meta pairwise-meta">
+            <span class="pair-class" id="pairwise-classes"></span>
+            <span class="pair-confidence" id="pairwise-confidence"></span>
+            <span class="pairwise-warning" id="pairwise-warning"></span>
+        </div>
+
+        <div class="pairwise-question">
+            <div class="pairwise-question-label">Same physical feature?</div>
+            <div class="pairwise-choice-row" id="pairwise-identity-choices">
+                <button type="button" data-identity="match" class="btn-match">Same</button>
+                <button type="button" data-identity="no_match" class="btn-no-match">Not same</button>
+                <button type="button" data-identity="unsure" class="btn-skip">Unsure</button>
+            </div>
+        </div>
+
+        <div class="pairwise-question">
+            <div class="pairwise-question-label">
+                Keep in stitched resolution?
+                <span class="pairwise-help">Keep implies same feature.</span>
+            </div>
+            <div class="pairwise-choice-row pairwise-resolution-row" id="pairwise-resolution-choices">
+                <button type="button" data-resolution="keep">Keep</button>
+                <button type="button" data-resolution="drop">Drop</button>
+            </div>
+        </div>
+
+        <div class="pairwise-toolbar">
+            <button type="button" class="btn-skip-stitch" id="pairwise-prev">Back</button>
+            <button type="button" class="features-toggle-inline" id="pairwise-features">Features</button>
+            <button type="button" class="btn-select" id="pairwise-next">Accept &amp; next</button>
+        </div>
+    </div>
+
+    <div class="pairwise-summary" id="pairwise-summary" hidden>
+        <h4>Group ready to record</h4>
+        <div class="pairwise-summary-grid">
+            <span>Reviewed</span><strong id="pairwise-summary-reviewed"></strong>
+            <span>Physical matches</span><strong id="pairwise-summary-matches"></strong>
+            <span>Not same</span><strong id="pairwise-summary-nomatches"></strong>
+            <span>Unsure</span><strong id="pairwise-summary-unsure"></strong>
+            <span>Stitch edges kept</span><strong id="pairwise-summary-kept"></strong>
+        </div>
+        <textarea name="notes" id="pairwise-notes" form="pairwise-submit-form" rows="2"
+                  maxlength="2000" placeholder="Optional group note…">{% if prior_note is defined and prior_note %}{{ prior_note }}{% endif %}</textarea>
+        <div class="pairwise-summary-actions">
+            <button type="button" class="btn-skip-stitch" id="pairwise-review-again">Review pairs</button>
+            <button type="button" class="btn-select" id="pairwise-record">Record group</button>
+        </div>
+    </div>
+
+    <div class="pairwise-footer">
+        <form id="pairwise-submit-form"
+              hx-post="/stitching-review/select"
+              hx-target="#group-content"
+              hx-swap="innerHTML">
+            <input type="hidden" name="dataset" value="{{ dataset }}">
+            <input type="hidden" name="group_id" value="{{ group.group_id }}">
+            <input type="hidden" name="group_dataset" value="{{ group.dataset_id or '' }}">
+            <input type="hidden" name="group_index" value="{{ group_index }}">
+            <input type="hidden" name="included_refs" value="">
+            <input type="hidden" name="included_targets" value="">
+            <input type="hidden" name="selected_edges" id="pairwise-selected-edges" value="">
+            <input type="hidden" name="adjudication_scope" value="exact_identity">
+            <input type="hidden" name="edge_dispositions" id="pairwise-edge-dispositions" value="">
+            <input type="hidden" name="deanchored" value="0">
+            <input type="hidden" name="confirm_reject_all" id="pairwise-confirm-reject-all" value="">
+        </form>
+        <form hx-post="/stitching-review/skip"
+              hx-target="#group-content"
+              hx-swap="innerHTML">
+            <input type="hidden" name="dataset" value="{{ dataset }}">
+            <input type="hidden" name="group_id" value="{{ group.group_id }}">
+            <input type="hidden" name="group_dataset" value="{{ group.dataset_id or '' }}">
+            <input type="hidden" name="deanchored" value="0">
+            <button type="submit" class="pairwise-skip-link">Skip group</button>
+        </form>
+    </div>
+</div>
+
+<div class="features-backdrop hidden" id="features-backdrop"></div>
+<div class="features-drawer" id="features-drawer">
+    <div class="features-drawer-header">
+        <div class="handle" id="pairwise-features-handle"></div>
+        <h4>Feature Details</h4>
+        <button type="button" class="features-close" id="pairwise-features-close"
+                aria-label="Close feature details">&times;</button>
+    </div>
+    <div id="features-drawer-body"></div>
+</div>

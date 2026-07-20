@@ -451,8 +451,37 @@
         renderOverlays(data);
     }
 
+    function computePairFitPadding() {
+        var base = 32;
+        var pad = { top: base, bottom: base, left: base, right: base };
+        var card = document.getElementById("pairwise-card") || document.getElementById("pair-card");
+        var mapEl = document.getElementById("map");
+        if (!card || !mapEl) return pad;
+        var rect = card.getBoundingClientRect();
+        if (window.innerWidth <= 768) {
+            pad.bottom = base + rect.height;
+        } else {
+            pad.right = base + rect.width;
+        }
+        var maxW = (mapEl.clientWidth || window.innerWidth) * 0.85;
+        var maxH = (mapEl.clientHeight || window.innerHeight) * 0.85;
+        if (pad.left + pad.right > maxW) pad.right = Math.max(0, maxW - pad.left);
+        if (pad.top + pad.bottom > maxH) pad.bottom = Math.max(0, maxH - pad.top);
+        return pad;
+    }
+
     function renderOverlays(data) {
         if (!data) return;
+
+        // Pairwise stitch review switches between a whole-group overview and a
+        // focused pair. Clear the group source when returning to pair mode so
+        // unrelated members do not obscure the two geometries being judged.
+        if (typeof GROUP_SOURCE !== "undefined" && map.getSource(GROUP_SOURCE)) {
+            map.getSource(GROUP_SOURCE).setData(EMPTY_FC);
+        }
+        if (typeof GAP_SOURCE !== "undefined" && map.getSource(GAP_SOURCE)) {
+            map.getSource(GAP_SOURCE).setData(EMPTY_FC);
+        }
 
         // Ensure context layer exists below pair layers
         if (contextVisible && contextDataset) {
@@ -490,8 +519,7 @@
 
         var bbox = geojsonBounds(boundsFC);
         if (bbox) {
-            var isMobile = window.innerWidth < 768;
-            map.fitBounds(bbox, { padding: isMobile ? 150 : 60, animate: false });
+            map.fitBounds(bbox, { padding: computePairFitPadding(), animate: false });
         }
     }
 
@@ -1085,7 +1113,7 @@
     function computeGroupFitPadding() {
         var base = 40;
         var pad = { top: base, bottom: base, left: base, right: base };
-        var card = document.getElementById("group-card");
+        var card = document.getElementById("group-card") || document.getElementById("pairwise-card");
         var mapEl = document.getElementById("map");
         if (!card || !mapEl) return pad;
 

@@ -2221,6 +2221,214 @@ body {
     }
 }
 
+/* === Pairwise stitch-upgrade wizard === */
+.pairwise-card {
+    width: min(430px, calc(100vw - 24px));
+    max-width: 430px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+}
+
+.pairwise-ribbon {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.pairwise-reviewed-count {
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.pairwise-overview-btn {
+    min-height: 40px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.pairwise-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 24px;
+}
+
+.pairwise-warning {
+    color: #d17b00;
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+.pairwise-question {
+    margin-top: 10px;
+}
+
+.pairwise-question-label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 5px;
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    font-weight: 650;
+}
+
+.pairwise-help {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    font-weight: 400;
+}
+
+.pairwise-choice-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.pairwise-choice-row button {
+    min-height: 44px;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.88rem;
+    font-weight: 700;
+    cursor: pointer;
+    opacity: 0.66;
+    touch-action: manipulation;
+}
+
+.pairwise-choice-row .btn-match {
+    background: #4caf50;
+}
+
+.pairwise-choice-row .btn-no-match {
+    background: #f44336;
+}
+
+.pairwise-choice-row .btn-skip {
+    background: #8b8b8b;
+}
+
+.pairwise-choice-row button.active {
+    border-color: #fff;
+    box-shadow: 0 0 0 2px var(--accent);
+    opacity: 1;
+}
+
+.pairwise-resolution-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pairwise-resolution-row button {
+    border-color: var(--border-primary);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+.pairwise-resolution-row button[data-resolution="keep"].active {
+    border-color: #4caf50;
+    background: rgba(76, 175, 80, 0.16);
+    color: #2e7d32;
+}
+
+.pairwise-resolution-row button[data-resolution="drop"].active {
+    border-color: #ef5350;
+    background: rgba(244, 67, 54, 0.12);
+    color: #c62828;
+}
+
+@media (prefers-color-scheme: dark) {
+    .pairwise-resolution-row button[data-resolution="keep"].active {
+        color: #81c784;
+    }
+
+    .pairwise-resolution-row button[data-resolution="drop"].active {
+        color: #ef9a9a;
+    }
+}
+
+.pairwise-toolbar,
+.pairwise-summary-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.pairwise-toolbar > *,
+.pairwise-summary-actions > * {
+    flex: 1;
+    min-height: 44px;
+}
+
+.pairwise-summary-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 5px 12px;
+    margin: 8px 0 10px;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.pairwise-summary-grid strong {
+    color: var(--text-primary);
+    text-align: right;
+}
+
+#pairwise-notes {
+    width: 100%;
+    resize: vertical;
+    font: inherit;
+}
+
+.pairwise-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 5px;
+}
+
+.pairwise-skip-link {
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+@media (max-width: 768px) {
+    .pairwise-card {
+        width: 100%;
+        max-width: 100%;
+        max-height: 54vh;
+        max-height: 54dvh;
+        padding-top: 12px;
+    }
+
+    .pairwise-card.showing-summary {
+        max-height: 58vh;
+        max-height: 58dvh;
+    }
+
+    .pairwise-choice-row button,
+    .pairwise-toolbar > *,
+    .pairwise-summary-actions > * {
+        min-height: 48px;
+    }
+
+    .pairwise-names {
+        margin-bottom: 4px;
+    }
+}
+
 /* ============================================================
    Stitching review — tabbed information architecture
    Ribbon (always on) + Review / Assignment / Details panels.

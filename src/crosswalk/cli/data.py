@@ -2715,6 +2715,7 @@ def stitch_pairwise_revisit(
         groups_sidecar_path,
         stitch_batch_path,
     )
+    from ..labeling.stitch_pair_review import enrich_candidate_endpoints
     from ..labeling.stitching_store import (
         ADJUDICATION_SCOPE_EXACT_IDENTITY,
         StitchingLabelStore,
@@ -2761,6 +2762,32 @@ def stitch_pairwise_revisit(
             queue.append(queued)
             added += 1
         summary.append((dataset_id, added, drifted))
+
+    # Exact identity review is pair-centric, so every displayed candidate must
+    # carry both endpoint geometries. Rejected candidates can point outside the
+    # selected group's member ids; normal group sidecars intentionally omit
+    # those foreign geometries. Enrich once per owning dataset so the generated
+    # queue is self-contained and the web UI never has to load an entire raw
+    # network while the reviewer advances through pairs.
+    queue_by_dataset: dict[str, list[dict]] = {}
+    for group in queue:
+        queue_by_dataset.setdefault(str(group["dataset_id"]), []).append(group)
+    for dataset_id, dataset_groups in queue_by_dataset.items():
+        try:
+            stats = enrich_candidate_endpoints(dataset_groups, dataset_id)
+        except Exception as exc:
+            console.print(
+                f"  [yellow]Could not enrich candidate endpoint geometry for "
+                f"{dataset_id}: {exc}[/yellow]"
+            )
+            continue
+        requested = stats["requested_ref"] + stats["requested_target"]
+        attached = stats["attached_ref"] + stats["attached_target"]
+        if requested:
+            console.print(
+                f"  {dataset_id}: attached {attached}/{requested} external "
+                "candidate endpoint geometries"
+            )
 
     payload = {
         "dataset_id": STITCH_PAIRWISE_QUEUE,
