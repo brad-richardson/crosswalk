@@ -21,9 +21,11 @@ jobs:
         run: uv python install 3.11
       - name: Create virtual environment
         run: uv venv
-      - run: uv pip install ruff --python .venv/bin/python
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
+      # Keep this in sync with uv.lock. Invoke Ruff directly so this lint-only
+      # job does not resolve and install the project's runtime dependencies.
+      - run: uv pip install ruff==0.14.13 --python .venv/bin/python
+      - run: .venv/bin/ruff format --check .
+      - run: .venv/bin/ruff check .
 
   mbench:
     # mbench is a standalone package with its own env; the crosswalk `test` job
