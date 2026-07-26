@@ -11,9 +11,9 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
+      # Lint only needs repository text; leave LFS objects as pointers to avoid
+      # downloading the training corpus on every fresh runner.
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
@@ -80,9 +80,9 @@ jobs:
     # skips these (marker `spark`, guarded to SKIP when the extra/JDK is absent).
     runs-on: ubuntu-latest
     steps:
+      # These tests use synthetic data and the bundled model, so materializing
+      # the LFS-backed training corpus would only consume bandwidth.
       - uses: actions/checkout@v4
-        with:
-          lfs: true
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
