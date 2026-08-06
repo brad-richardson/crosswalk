@@ -66,7 +66,7 @@
     </div>
 
     <div class="pairwise-summary" id="pairwise-summary" hidden>
-        <h4>Group ready to record</h4>
+        <h4 id="pairwise-summary-title">Group ready to record</h4>
         <div class="pairwise-summary-grid">
             <span>Reviewed</span><strong id="pairwise-summary-reviewed"></strong>
             <span>Physical matches</span><strong id="pairwise-summary-matches"></strong>
@@ -78,7 +78,8 @@
                   maxlength="2000" placeholder="Optional group note…">{% if prior_note is defined and prior_note %}{{ prior_note }}{% endif %}</textarea>
         <div class="pairwise-summary-actions">
             <button type="button" class="btn-skip-stitch" id="pairwise-review-again">Review pairs</button>
-            <button type="button" class="btn-select" id="pairwise-record">Record group</button>
+            <button type="button" class="btn-skip-stitch" id="pairwise-save-progress" hidden>Save progress</button>
+            <button type="button" class="btn-select" id="pairwise-record">Complete group</button>
         </div>
     </div>
 
@@ -98,6 +99,7 @@
             <input type="hidden" name="edge_dispositions" id="pairwise-edge-dispositions" value="">
             <input type="hidden" name="deanchored" value="0">
             <input type="hidden" name="confirm_reject_all" id="pairwise-confirm-reject-all" value="">
+            <input type="hidden" name="partial_save" id="pairwise-partial-save" value="">
         </form>
         <form hx-post="/stitching-review/skip"
               hx-target="#group-content"

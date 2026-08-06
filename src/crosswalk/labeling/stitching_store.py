@@ -35,6 +35,13 @@ ADJUDICATION_SCOPE_MEMBERSHIP = "membership"
 ADJUDICATION_SCOPE_EXACT_RESOLUTION = "exact_resolution"
 ADJUDICATION_SCOPE_EXACT_IDENTITY = "exact_identity"
 ADJUDICATION_SCOPE_REJECT_ALL = "reject_all"
+# In-progress pairwise-wizard save: ``edge_dispositions`` covers only a SUBSET
+# of the group's candidate universe. Completion checks (pairwise queue
+# exclusion, eval slicing) key on ``exact_identity``, so a partial row keeps
+# its group queued; its resolver-facing fields (selected_edges / membership)
+# are preserved verbatim from the prior label and must not be read as a fresh
+# resolution claim.
+ADJUDICATION_SCOPE_PARTIAL_IDENTITY = "partial_identity"
 
 STITCHING_LABEL_COLUMNS = [
     "group_id",
@@ -214,6 +221,7 @@ class StitchingLabelStore:
         notes: str = "",
         adjudication_scope: str = "",
         edge_dispositions: list[dict] | None = None,
+        labeled_at: str | None = None,
     ) -> None:
         """Add a stitching review label.
 
@@ -242,6 +250,9 @@ class StitchingLabelStore:
                 Empty preserves the historical/unknown scope on old callers.
             edge_dispositions: Optional dual identity/resolution decisions for
                 reviewed candidate edges. Stored as deterministic JSON.
+            labeled_at: Timestamp override. Defaults to now; a partial-progress
+                update passes the PRIOR row's timestamp through so a progress
+                save never re-dates (or re-authors) the original decision.
         """
         new_row = {
             "group_id": str(group_id),
@@ -251,7 +262,7 @@ class StitchingLabelStore:
             "num_refs": num_refs,
             "num_targets": num_targets,
             "labeler": labeler,
-            "labeled_at": datetime.now(UTC).isoformat(),
+            "labeled_at": labeled_at or datetime.now(UTC).isoformat(),
             "session_id": session_id,
             "label_semantics": label_semantics,
             "ref_ids": json.dumps(sorted(ref_ids)) if ref_ids else "",

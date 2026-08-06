@@ -43,6 +43,7 @@ from ..services import (
     get_unreviewed_stitch_groups,
     list_datasets,
     load_stitch_batch,
+    record_partial_identity_progress,
     record_stitching_label,
 )
 
@@ -320,8 +321,34 @@ def _candidate_value(group: dict, side: str, kind: str, segment_id: str, default
 
 
 def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
-    """Build mobile pair-review cards with complete pair-specific geometry."""
+    """Build mobile pair-review cards with complete pair-specific geometry.
+
+    Cards are served in a deterministic confirm-the-obvious order: keep-seeded
+    cards first (fast momentum from confirming what the optimizer/prior label
+    already selected), highest per-edge ``confidence`` first within each
+    keep/drop bucket, slivers last within their bucket. Tiebreak on
+    (ref_id, target_id) — no wall clock, no RNG.
+
+    A ``prior_label.edge_dispositions`` payload (in-progress partial save)
+    prefills the already-decided cards: their defaults become the saved
+    identity/resolution and the card is flagged ``saved`` so the client counts
+    it as reviewed and resumes at the first undecided card.
+    """
     edges = _annotate_candidate_edges(group)
+    saved_dispositions: dict[tuple[str, str], dict] = {}
+    for item in (context.get("prior_label") or {}).get("edge_dispositions") or []:
+        if not isinstance(item, dict):
+            continue
+        identity = str(item.get("identity", ""))
+        resolution = str(item.get("resolution", ""))
+        if identity not in {"match", "no_match", "unsure"} or resolution not in {"keep", "drop"}:
+            continue
+        if resolution == "keep" and identity != "match":
+            # Same invariant the submit path enforces: a kept edge asserts
+            # identity=match. Never prefill a state the UI cannot produce.
+            continue
+        saved_key = (str(item.get("ref_id", "")), str(item.get("target_id", "")))
+        saved_dispositions[saved_key] = {"identity": identity, "resolution": resolution}
     selected = {
         (str(edge.get("ref_id")), str(edge.get("target_id")))
         for edge in (context.get("preseed_edges") or [])
@@ -338,6 +365,7 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
         (str(item.get("ref_id")), str(item.get("target_id"))) for item in (group.get("edges") or [])
     }
     result: list[dict] = []
+    seed_keeps: dict[tuple[str, str], bool] = {}
     for edge in edges:
         ref_id = str(edge["ref_id"])
         target_id = str(edge["target_id"])
@@ -367,6 +395,17 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
         else:
             keep = bool(edge.get("selected", key in group_selected))
 
+        # A saved partial-progress decision overrides the seed defaults for
+        # PREFILL only — ordering stays frozen on the seed (below) so a save
+        # never reshuffles cards or drifts chunk boundaries mid-review.
+        saved_decision = saved_dispositions.get(key)
+        default_resolution = "keep" if keep else "drop"
+        default_identity = "match" if keep else "unsure"
+        if saved_decision is not None:
+            default_resolution = saved_decision["resolution"]
+            default_identity = saved_decision["identity"]
+        seed_keeps[key] = keep
+
         result.append(
             {
                 "ref_id": ref_id,
@@ -385,8 +424,9 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
                     "reference": ref_aligned or ref_full,
                     "target": target_aligned or target_full,
                 },
-                "default_resolution": "keep" if keep else "drop",
-                "default_identity": "match" if keep else "unsure",
+                "default_resolution": default_resolution,
+                "default_identity": default_identity,
+                "saved": saved_decision is not None,
                 "edge_details": {
                     key: edge.get(key)
                     for key in (
@@ -401,6 +441,23 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
                 },
             }
         )
+
+    def _order_key(card: dict) -> tuple:
+        confidence = card.get("confidence")
+        if not isinstance(confidence, (int, float)) or not math.isfinite(float(confidence)):
+            confidence = -1.0
+        # Bucket on the SEED keep, not the (possibly saved-overridden) default
+        # resolution: seeds are stable across partial saves, so card order and
+        # chunk boundaries never move once a reviewer has started a group.
+        return (
+            0 if seed_keeps[(card["ref_id"], card["target_id"])] else 1,
+            1 if card["is_sliver"] else 0,
+            -float(confidence),
+            card["ref_id"],
+            card["target_id"],
+        )
+
+    result.sort(key=_order_key)
     return result
 
 
@@ -841,6 +898,30 @@ def _queue_groups(dataset: str, groups: list[dict]) -> list[dict]:
     return get_unreviewed_stitch_groups(dataset, groups)
 
 
+def _attach_pairwise_prior(dataset: str, all_groups: list[dict], group: dict) -> dict:
+    """Swap a deep-linked pairwise group for its queue-enriched copy.
+
+    Deep-link renders (page and fragment) serve straight from the batch, which
+    carries no ``prior_label``. In the pairwise queue that context is
+    load-bearing: it prefills the prior note and any saved partial
+    dispositions, and it anchors the seed defaults to the reviewer's prior
+    label. Without it, a deep-linked partial save would post an empty note
+    over the stored one and REPLACE (rather than extend) previously saved
+    dispositions, and the reordered cards would invalidate the local draft.
+    So resolve the same group through the queue builder and render that copy
+    when available. A group absent from the queue (already completed) renders
+    as-is — partial saves on it are refused server-side anyway.
+    """
+    if dataset != STITCH_PAIRWISE_QUEUE:
+        return group
+    enriched = _find_group(
+        _queue_groups(dataset, all_groups),
+        group.get("group_id"),
+        group.get("dataset_id") or "",
+    )
+    return enriched if enriched is not None else group
+
+
 @router.get("/stitching-review", response_class=HTMLResponse)
 async def stitching_review(
     request: Request,
@@ -932,7 +1013,7 @@ async def stitching_review(
         if deep_index is None:
             logger.warning(f"Deep-link group not found in {dataset} batch: {group_id!r}")
             return HTMLResponse("Group not found in batch", status_code=404)
-        deep_group = all_groups[deep_index]
+        deep_group = _attach_pairwise_prior(dataset, all_groups, all_groups[deep_index])
         geojson, group_ctx = _render_group(
             deep_group,
             _group_dataset(deep_group, dataset),
@@ -1041,7 +1122,8 @@ async def stitching_group(
             if g.get("group_id") == group_id and (
                 not group_dataset or (g.get("dataset_id") or "") == group_dataset
             ):
-                group, display_index, display_total = g, i, batch_total
+                group = _attach_pairwise_prior(dataset, all_groups, g)
+                display_index, display_total = i, batch_total
                 break
     if group is None:
         groups = _queue_groups(dataset, all_groups)
@@ -1238,10 +1320,11 @@ def _parse_explicit_edges(raw: str, group: dict) -> list[dict] | None:
 def _parse_edge_dispositions(raw: str, group: dict) -> list[dict]:
     """Validate dual identity/resolution decisions from exact review mode.
 
-    The list may cover any subset only at the transport layer, but the current
-    UI deliberately sends the full candidate universe.  Keeping validation
-    independent of UI shape makes stale/forged candidate ids impossible while
-    allowing future targeted identity queues to review a smaller subset.
+    The list may cover any subset at the transport layer: a "Complete group"
+    submit sends the full candidate universe (enforced downstream by the
+    exact-identity branch), while a partial progress save sends only the
+    decided subset.  Keeping validation independent of UI shape makes
+    stale/forged candidate ids impossible in both cases.
     """
     if not raw:
         return []
@@ -1300,6 +1383,7 @@ async def stitching_select(
     exclude_slivers: str = Form(""),
     deanchored: bool = Form(False),
     confirm_reject_all: str = Form(""),
+    partial_save: str = Form(""),
     notes: str = Form(""),
 ):
     """Records selection, returns next group via HTMX swap.
@@ -1372,6 +1456,105 @@ async def stitching_select(
         stored_scope = ADJUDICATION_SCOPE_EXACT_RESOLUTION
         ref_members: list[str] | None = None
         target_members: list[str] | None = None
+        if identity_adjudication and partial_save.strip().lower() in {"true", "1", "on", "yes"}:
+            # Partial progress save from the pairwise wizard: a decided SUBSET
+            # of the candidate universe (validated against the union above).
+            # It never asserts resolver truth — no selected_edges payload is
+            # accepted — and it is stored under the dedicated partial scope so
+            # the group STAYS in the queue with progress prefilled.
+            if dataset != STITCH_PAIRWISE_QUEUE:
+                # Only the pairwise queue's wizard may save progress: every
+                # group it serves is guaranteed a prior label row to attach
+                # progress to. Elsewhere a partial save would throw away the
+                # identity truth of a full review.
+                logger.warning(
+                    "Rejected partial identity save outside the pairwise queue "
+                    "(dataset %s, group %s)",
+                    dataset,
+                    group_id,
+                )
+                return HTMLResponse(
+                    "Partial saves are only valid in the pairwise queue", status_code=400
+                )
+            if explicit_edges is not None:
+                logger.warning(
+                    "Rejected partial identity save with selected_edges for group %s",
+                    group_id,
+                )
+                return HTMLResponse("Invalid partial save", status_code=400)
+            candidate_keys = {
+                (str(edge["ref_id"]), str(edge["target_id"]))
+                for edge in _group_candidate_edges(group)
+            }
+            if {(e["ref_id"], e["target_id"]) for e in dispositions} == candidate_keys:
+                # A full-universe payload is a completed adjudication and must
+                # be submitted as one (with its selected_edges consistency and
+                # reject-all confirmation checks) — storing it as partial would
+                # never dequeue the group and would hide identity truth from
+                # the bridge. The client hides "Save progress" at 100%, so this
+                # only fires for replayed/forged posts.
+                logger.warning(
+                    "Rejected full-universe partial save for group %s: submit as completion",
+                    group_id,
+                )
+                return HTMLResponse(
+                    "Full adjudication must be submitted as a completion", status_code=400
+                )
+            try:
+                record_partial_identity_progress(
+                    dataset_id=owner_dataset,
+                    group_id=group_id,
+                    dispositions=dispositions,
+                    notes=notes.strip()[:2000],
+                )
+            except ValueError as e:
+                # Detail can embed client-supplied ids — log it, never reflect it
+                logger.warning(f"Refused partial identity save for group {group_id}: {e}")
+                return HTMLResponse("Invalid partial save", status_code=400)
+            # Re-serve the SAME group (now carrying the saved dispositions as
+            # prior progress) so the reviewer resumes at the next undecided
+            # card — a partial save must not advance the queue.
+            groups = _queue_groups(dataset, all_groups)
+            next_index = next(
+                (
+                    i
+                    for i, g in enumerate(groups)
+                    if g.get("group_id") == group_id
+                    and (not group_dataset or (g.get("dataset_id") or "") == group_dataset)
+                ),
+                None,
+            )
+            if next_index is None:
+                # A partial row keeps its group queued, so absence means the
+                # queue drifted underneath the save. Surface it rather than
+                # silently serving a different group; the progress is stored
+                # and a reload resumes it.
+                logger.error("Group %s missing from pairwise queue after partial save", group_id)
+                return HTMLResponse(
+                    "Progress saved, but the group left the queue; reload to continue",
+                    status_code=409,
+                )
+            next_group = groups[next_index]
+            geojson, group_ctx = _render_group(
+                next_group,
+                _group_dataset(next_group, dataset),
+                deanchored,
+                dataset == STITCH_PAIRWISE_QUEUE,
+            )
+            return templates.TemplateResponse(
+                request,
+                "stitching/group.html",
+                {
+                    "request": request,
+                    "dataset": dataset,
+                    "group": next_group,
+                    "group_geojson": geojson,
+                    "group_index": next_index,
+                    "total_groups": len(groups),
+                    **group_ctx,
+                },
+            )
+
         if identity_adjudication:
             # Exact dual-label review.  The resolution=keep subset MUST equal
             # selected_edges; identity=match on a dropped edge is intentionally

@@ -2369,6 +2369,16 @@ body {
     min-height: 44px;
 }
 
+/* Three actions (continue / save progress / complete) can share the summary
+   row; let them wrap instead of crushing on narrow screens. */
+.pairwise-summary-actions {
+    flex-wrap: wrap;
+}
+
+.pairwise-summary-actions > * {
+    flex: 1 1 40%;
+}
+
 .pairwise-summary-grid {
     display: grid;
     grid-template-columns: 1fr auto;

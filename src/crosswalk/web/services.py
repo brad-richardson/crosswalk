@@ -1248,9 +1248,20 @@ def get_pairwise_revisit_groups(dataset_id: str, groups: list[dict]) -> list[dic
     still current.  Replacing one of those rows is a safe in-place upgrade.
     Drifted/split/merged labels require reconciliation and must not be silently
     duplicated under a new group id by this streamlined workflow.
+
+    The queue is served easy-first: groups sorted by ascending candidate-card
+    count (selected + rejected edge union), so tiny confirm-the-obvious groups
+    build momentum before the multi-hundred-card monsters. Deterministic
+    (dataset, group_id) tiebreak — no wall clock, no RNG.
+
+    A ``partial_identity`` row (in-progress wizard save) does NOT complete a
+    group: only ``exact_identity`` scope with dispositions excludes it. The
+    partial dispositions ride along in ``prior_label.edge_dispositions`` so the
+    wizard can prefill the decided cards and resume where the reviewer left off.
     """
     import json
 
+    from ..labeling.stitch_pair_review import candidate_edge_union
     from ..labeling.stitching_store import (
         ADJUDICATION_SCOPE_EXACT_IDENTITY,
         StitchingLabelStore,
@@ -1319,9 +1330,107 @@ def get_pairwise_revisit_groups(dataset_id: str, groups: list[dict]) -> list[dic
             "n_total_targets": len(current_targets),
             "selected_edges": selected,
             "notes": str(row.get("notes") or ""),
+            # Decided-so-far wizard progress (empty for non-partial rows).
+            "edge_dispositions": _json_list(row.get("edge_dispositions")),
         }
         out.append(upgraded)
+    out.sort(
+        key=lambda g: (
+            len(candidate_edge_union(g)),
+            str(g.get("dataset_id") or dataset_id),
+            str(g.get("group_id") or ""),
+        )
+    )
     return out
+
+
+def record_partial_identity_progress(
+    dataset_id: str,
+    group_id: str,
+    dispositions: list[dict],
+    notes: str = "",
+) -> None:
+    """Persist partial pairwise-wizard progress WITHOUT completing the review.
+
+    A progress save must never be mistaken for a finished exact-identity
+    adjudication, and it must never degrade the label row it updates:
+
+    - the decided-so-far ``edge_dispositions`` subset is stored under the
+      dedicated ``partial_identity`` scope, so the pairwise queue (which
+      excludes only ``exact_identity`` rows with dispositions) keeps the group
+      queued with progress prefilled;
+    - the existing row is preserved verbatim except for scope, dispositions,
+      and notes: the resolver-facing fields (selected_edges, label_semantics,
+      ref/target membership, counts) because partial identity progress is not
+      a resolution claim, AND the provenance fields (``labeler``,
+      ``labeled_at``, ``session_id``) because a progress save is not
+      re-authorship — eval slices on the original labeler (e.g. ``panel_*``
+      vs human) and on the original decision time.
+
+    ``notes`` is stored verbatim: the wizard prefills the textarea with the
+    prior note, so an empty submission is a deliberate clear.
+
+    Raises:
+        ValueError: when no prior label row exists for the group (both queue
+            builders only serve labeled groups, so this is never a legitimate
+            call — minting a fresh half-session pair label here would count
+            toward gate arming and score as complete ground truth), or when
+            the prior row is already a COMPLETED exact-identity adjudication
+            (overwriting it would destroy identity truth).
+    """
+    import json
+
+    from ..labeling.stitching_store import (
+        ADJUDICATION_SCOPE_EXACT_IDENTITY,
+        ADJUDICATION_SCOPE_PARTIAL_IDENTITY,
+        LABEL_SEMANTICS_PAIR,
+        StitchingLabelStore,
+    )
+
+    def _json_value(raw) -> list:
+        if raw is None or isinstance(raw, float) or not str(raw).strip():
+            return []
+        try:
+            value = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            return []
+        return value if isinstance(value, list) else []
+
+    store = StitchingLabelStore(dataset_id)
+    frame = store.load(dataset_id)
+    prior = None
+    if not frame.empty:
+        rows = frame[frame["group_id"].astype(str) == str(group_id)]
+        if len(rows):
+            prior = rows.iloc[-1].to_dict()
+
+    if prior is None:
+        raise ValueError(f"no prior label row to attach partial progress to (group {group_id})")
+    if (
+        str(prior.get("adjudication_scope") or "") == ADJUDICATION_SCOPE_EXACT_IDENTITY
+        and str(prior.get("edge_dispositions") or "").strip()
+    ):
+        raise ValueError(
+            f"group {group_id} already has a completed exact-identity adjudication; "
+            "refusing to overwrite it with partial progress"
+        )
+
+    store.add(
+        group_id=group_id,
+        selected_edges=_json_value(prior.get("selected_edges")),
+        match_type=str(prior.get("match_type") or ""),
+        num_refs=int(prior.get("num_refs") or 0),
+        num_targets=int(prior.get("num_targets") or 0),
+        labeler=str(prior.get("labeler") or "") or get_labeler_name(),
+        session_id=str(prior.get("session_id") or "") or get_session_id(),
+        labeled_at=str(prior.get("labeled_at") or "") or None,
+        label_semantics=str(prior.get("label_semantics") or LABEL_SEMANTICS_PAIR),
+        ref_ids=[str(v) for v in _json_value(prior.get("ref_ids"))] or None,
+        target_ids=[str(v) for v in _json_value(prior.get("target_ids"))] or None,
+        notes=notes,
+        adjudication_scope=ADJUDICATION_SCOPE_PARTIAL_IDENTITY,
+        edge_dispositions=dispositions,
+    )
 
 
 def record_stitching_label(

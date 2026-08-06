@@ -137,3 +137,48 @@ def test_human_truth_filter_and_candidate_feature_materialization():
     assert list(features["gers_id"]) == ["new"]
     assert missing == [("missing", "t")]
     assert set(FEATURE_COLUMNS) <= set(features.columns)
+
+
+def test_partial_identity_progress_is_bridge_neutral(tmp_path, monkeypatch):
+    """A pairwise-wizard partial save never changes the derived pair bridge.
+
+    Safety by construction, not accident: the exact-identity export requires
+    scope == "exact_identity", a partial row keeps the dedicated
+    "partial_identity" scope, and every field the bridge reads
+    (selected_edges, labeler, labeled_at, group_id) is preserved verbatim from
+    the prior row — so derivation is byte-identical before and after the save,
+    and the partial dispositions never mint stitch_exact_identity records.
+    """
+    from crosswalk.labeling.stitching_store import StitchingLabelStore
+    from crosswalk.web.services import record_partial_identity_progress
+
+    monkeypatch.chdir(tmp_path)
+    StitchingLabelStore("ds").add(
+        "g1",
+        [{"ref_id": "r1", "target_id": "t1"}],
+        "1:N",
+        1,
+        1,
+        "panel_unanimous_v7",
+        "s1",
+        adjudication_scope="exact_resolution",
+    )
+    before, stats_before = derive_stitch_pair_labels(StitchingLabelStore("ds").load("ds"), "ds")
+    assert stats_before["weak_selected_positive"] == 1
+
+    record_partial_identity_progress(
+        "ds",
+        "g1",
+        [
+            {"ref_id": "r1", "target_id": "t1", "resolution": "keep", "identity": "match"},
+            {"ref_id": "r2", "target_id": "t1", "resolution": "drop", "identity": "no_match"},
+        ],
+    )
+    labels_after = StitchingLabelStore("ds").load("ds")
+    assert labels_after.iloc[0]["adjudication_scope"] == "partial_identity"
+
+    after, stats_after = derive_stitch_pair_labels(labels_after, "ds")
+
+    assert stats_after["explicit_identity"] == 0
+    assert stats_after == stats_before
+    pd.testing.assert_frame_equal(after, before)
