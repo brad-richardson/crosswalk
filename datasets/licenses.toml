@@ -168,7 +168,7 @@ source_url = "https://services2.arcgis.com/jUpNdisbWqRpMo35/arcgis/rest/services
 panel_recommendation = "needs_human"
 panel_confidence = 0.88
 panel_reviewed_at = "2026-07-06"
-note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): stricter-variant posture. The fetched Esri DE ArcGIS item (94bd52bffeef412daee37565fce745e2) declares dl-de/by-2.0 with mandatory credit 'Geoportal Berlin / Detailnetz'; official Berlin records (daten.berlin.de, gdi.berlin.de GeoNetwork) say dl-de/zero-2.0. Both permit extraction/redistribution/derivatives + ODbL coexistence; attributing under by-2.0 satisfies both, so the conflict is moot for shipping. Hunt for an Esri DE terms overlay found none (item license governs)."
+note = "Approved by Brad 2026-08-06 (flip delegated to Claude) per triage 2026-07-09: Triage 2026-07-09 (research/license_burndown_2026_07.md): stricter-variant posture. The fetched Esri DE ArcGIS item (94bd52bffeef412daee37565fce745e2) declares dl-de/by-2.0 with mandatory credit 'Geoportal Berlin / Detailnetz'; official Berlin records (daten.berlin.de, gdi.berlin.de GeoNetwork) say dl-de/zero-2.0. Both permit extraction/redistribution/derivatives + ODbL coexistence; attributing under by-2.0 satisfies both, so the conflict is moot for shipping. Hunt for an Esri DE terms overlay found none (item license governs)."
 
 [datasets.fi_helsinki_roads]
 display_name = "Digiroad Finland (Helsinki + Southern Uusimaa)"
@@ -218,7 +218,7 @@ source_url = "https://static.data.gov.hk/td/road-network-v2/RdNet_IRNP.gdb.zip"
 panel_recommendation = "needs_human"
 panel_confidence = 0.82
 panel_reviewed_at = "2026-07-06"
-note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): grant re-verified verbatim (distribute/reproduce, commercial + non-commercial, free of charge, attribution + IP acknowledgement). Derivative-silence resolved by the DATA.GOV.HK FAQ: 'Except re-sale of the data, there is no restriction on the uses of the data'. We do not re-sell. APPROVAL ACCEPTS THE INDEMNITY CLAUSE (indemnify the Government against third-party IP claims arising from our use/reproduction/distribution); HK SAR governing law. No per-dataset override on the Road Network (2nd Generation) page."
+note = "Approved by Brad 2026-08-06 (flip delegated to Claude) per triage 2026-07-09: Triage 2026-07-09 (research/license_burndown_2026_07.md): grant re-verified verbatim (distribute/reproduce, commercial + non-commercial, free of charge, attribution + IP acknowledgement). Derivative-silence resolved by the DATA.GOV.HK FAQ: 'Except re-sale of the data, there is no restriction on the uses of the data'. We do not re-sell. APPROVAL ACCEPTS THE INDEMNITY CLAUSE (indemnify the Government against third-party IP claims arising from our use/reproduction/distribution); HK SAR governing law. No per-dataset override on the Road Network (2nd Generation) page."
 
 [datasets.in_mumbai_streets]
 display_name = "Mumbai BMC Streets"
@@ -316,7 +316,7 @@ source_url = "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospati
 panel_recommendation = "needs_human"
 panel_confidence = 0.6
 panel_reviewed_at = "2026-07-06"
-note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): SODL-vs-website-ToU conflict resolved by LTA's DataMall landing page — 'Use of LTA's datasets and APIs on DataMall constitutes acceptance of the Singapore Open Data Licence' (no static-vs-API distinction) — plus the API/SDK ToS ('Use of the datasets is governed by the Singapore Open Data Licence'). The restrictive website Term of Use protects site 'Contents' (Clause 3: information, marks, software). SODL: distribute/modify/adapt of datasets and derived analyses, commercial or not; conspicuous attribution notice required (rendered in the published artifact). Downstream Sub-Licensee clause noted: our users need their own LTA licence for the RAW dataset."
+note = "Approved by Brad 2026-08-06 (flip delegated to Claude) per triage 2026-07-09: Triage 2026-07-09 (research/license_burndown_2026_07.md): SODL-vs-website-ToU conflict resolved by LTA's DataMall landing page — 'Use of LTA's datasets and APIs on DataMall constitutes acceptance of the Singapore Open Data Licence' (no static-vs-API distinction) — plus the API/SDK ToS ('Use of the datasets is governed by the Singapore Open Data Licence'). The restrictive website Term of Use protects site 'Contents' (Clause 3: information, marks, software). SODL: distribute/modify/adapt of datasets and derived analyses, commercial or not; conspicuous attribution notice required (rendered in the published artifact). Downstream Sub-Licensee clause noted: our users need their own LTA licence for the RAW dataset."
 
 [datasets.sg_singapore_roads]
 display_name = "LTA Singapore Roads"
@@ -329,7 +329,7 @@ source_url = "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospati
 panel_recommendation = "needs_human"
 panel_confidence = 0.8
 panel_reviewed_at = "2026-07-06"
-note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): same resolution as sg_singapore_footpaths — LTA's DataMall landing page ('Use of LTA's datasets and APIs on DataMall constitutes acceptance of the Singapore Open Data Licence') + API/SDK ToS bind the static geospatial zips to SODL; the restrictive website Term of Use protects site 'Contents' (information/marks/software). SODL grants distribute/modify/adapt of datasets and derived analyses, commercial or not; conspicuous attribution notice required. Published ids are synthetic geometry-hash ids (a 'derived analysis', expressly distributable)."
+note = "Approved by Brad 2026-08-06 (flip delegated to Claude) per triage 2026-07-09: Triage 2026-07-09 (research/license_burndown_2026_07.md): same resolution as sg_singapore_footpaths — LTA's DataMall landing page ('Use of LTA's datasets and APIs on DataMall constitutes acceptance of the Singapore Open Data Licence') + API/SDK ToS bind the static geospatial zips to SODL; the restrictive website Term of Use protects site 'Contents' (information/marks/software). SODL grants distribute/modify/adapt of datasets and derived analyses, commercial or not; conspicuous attribution notice required. Published ids are synthetic geometry-hash ids (a 'derived analysis', expressly distributable)."
 
 [datasets.tn_tunis_ml_roads]
 display_name = "Tunis ML-Extracted Roads (Microsoft)"
@@ -509,7 +509,7 @@ source_url = "https://arcgis.dvrpc.org/portal/rest/services/Transportation/pedes
 panel_recommendation = "needs_human"
 panel_confidence = 0.82
 panel_reviewed_at = "2026-07-06"
-note = "Triage 2026-07-09 (research/license_burndown_2026_07.md): full DVRPC Data License text read verbatim — warranty disclaimer + credit/no-updates/accuracy obligations only; no redistribution, derivative, share-alike, or NC term. Dataset-level Use Limitations: 'Unrestricted: can be shared internally and externally without data sharing agreement'. Hunt for newer/named DVRPC license found none. Optional: confirm derived-table reading with mruane@dvrpc.org."
+note = "Approved by Brad 2026-08-06 (flip delegated to Claude) per triage 2026-07-09: Triage 2026-07-09 (research/license_burndown_2026_07.md): full DVRPC Data License text read verbatim — warranty disclaimer + credit/no-updates/accuracy obligations only; no redistribution, derivative, share-alike, or NC term. Dataset-level Use Limitations: 'Unrestricted: can be shared internally and externally without data sharing agreement'. Hunt for newer/named DVRPC license found none. Optional: confirm derived-table reading with mruane@dvrpc.org."
 
 [datasets.us_seattle_sidewalks]
 display_name = "Seattle Sidewalks"
