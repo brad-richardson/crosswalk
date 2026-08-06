@@ -1807,12 +1807,19 @@ def panel_stats(
 ):
     """Per-voter bias monitor for the stitch panel.
 
-    Reads committed vote provenance (labels/votes/dataset=*/{votes,consensus}.csv)
-    and prints a per-voter table plus any tripped alarms. Makes voter defects LOUD
-    instead of found by accident — e.g. voter `agy` voting the first-listed option
-    "A" in 11/12 valid ballots at a flat 0.95 confidence (POSITION_ANCHOR +
-    CONSTANT_CONFIDENCE). This is a MONITOR by design: we do NOT shuffle option
-    letters (that would hide the anchor), we surface it.
+    Reads committed vote provenance (labels/votes/dataset=*/{votes,consensus,
+    evidence}.csv) and prints a per-voter table plus any tripped alarms. Makes
+    voter defects LOUD instead of found by accident — e.g. voter `agy` voting the
+    first-listed option "A" in 11/12 valid ballots at a flat 0.95 confidence
+    (POSITION_ANCHOR + CONSTANT_CONFIDENCE).
+
+    Two operating modes for the anchoring signal: by default option order is NOT
+    shuffled (option A = the optimizer's proposal) and POSITION_ANCHOR carries
+    it; with the opt-in pack shuffle (settings.stitch_panel_shuffle_options)
+    letters become content-free, so shuffled-era ballots are excluded from
+    position statistics and OPTIMIZER_ANCHOR — per-voter agreement with each
+    pack's recorded optimizer letter, from evidence.csv — carries the signal in
+    both modes.
 
     Examples:
         crosswalk agent panel-stats
@@ -1823,8 +1830,10 @@ def panel_stats(
 
     from ..agent_labeling.panel_monitor import (
         CONSTANT_CONFIDENCE,
+        OPTIMIZER_ANCHOR,
         POSITION_ANCHOR,
         compute_voter_stats,
+        load_evidence_provenance,
         load_vote_provenance,
     )
     from ..config import settings
@@ -1833,8 +1842,9 @@ def panel_stats(
     if len(votes_df) == 0:
         console.print(f"[yellow]No committed votes found under {data_root}/labels/votes[/yellow]")
         raise typer.Exit(0)
+    evidence_df = load_evidence_provenance(data_root, dataset=dataset)
 
-    stats = compute_voter_stats(votes_df, consensus_df)
+    stats = compute_voter_stats(votes_df, consensus_df, evidence_df)
     scope = dataset or "all datasets"
     n_datasets = votes_df["dataset"].nunique() if "dataset" in votes_df.columns else 1
 
@@ -1851,6 +1861,7 @@ def panel_stats(
     table.add_column("valid", justify="right")
     table.add_column("modal pos", justify="right")
     table.add_column("share", justify="right")
+    table.add_column("opt agree", justify="right")
     table.add_column("dissent", justify="right")
     table.add_column("none", justify="right")
     table.add_column("abstain", justify="right")
@@ -1865,6 +1876,9 @@ def panel_stats(
         share_txt = _f(s.modal_position_share, pct=True)
         if POSITION_ANCHOR in s.alarms:
             share_txt = f"[red]{share_txt}[/red]"
+        opt_txt = _f(s.optimizer_agree_share, pct=True)
+        if OPTIMIZER_ANCHOR in s.alarms:
+            opt_txt = f"[red]{opt_txt}[/red]"
         std_txt = _f(s.conf_std)
         if CONSTANT_CONFIDENCE in s.alarms:
             std_txt = f"[red]{std_txt}[/red]"
@@ -1874,6 +1888,7 @@ def panel_stats(
             str(s.n_valid),
             f"{s.modal_letter}",
             share_txt,
+            opt_txt,
             _f(s.dissent_rate, pct=True),
             str(s.n_none),
             _f(s.abstain_rate, pct=True),
@@ -1886,6 +1901,16 @@ def panel_stats(
 
     console.print(table)
 
+    # Mixed-era annotation: position statistics silently exclude shuffled-era
+    # ballots (content-free letters), so say so whenever any were excluded.
+    n_shuffled_total = sum(s.n_shuffled for s in stats)
+    if n_shuffled_total:
+        console.print(
+            f"[dim]note: {n_shuffled_total} shuffled-era letter ballot(s) excluded from "
+            f"position statistics (POSITION_ANCHOR is meaningless over shuffled packs; "
+            f"OPTIMIZER_ANCHOR covers those ballots).[/dim]"
+        )
+
     tripped = [(s.provider, a) for s in stats for a in s.alarms]
     if tripped:
         console.print("\n[bold red]Tripped alarms[/bold red]")
@@ -1894,9 +1919,16 @@ def panel_stats(
                 if a == POSITION_ANCHOR:
                     console.print(
                         f"  [red]{a}[/red] {s.provider}: "
-                        f"{s.modal_position_share:.0%} of {s.n_valid} valid ballots on "
-                        f"position {s.modal_letter} (threshold "
+                        f"{s.modal_position_share:.0%} of {s.n_position} position-eligible "
+                        f"ballots on position {s.modal_letter} (threshold "
                         f"{settings.panel_monitor_position_anchor_share:.0%}) — picking by slot"
+                    )
+                elif a == OPTIMIZER_ANCHOR:
+                    console.print(
+                        f"  [red]{a}[/red] {s.provider}: agreed with the optimizer's option "
+                        f"on {s.optimizer_agree_share:.0%} of {s.n_optimizer_known} ballots "
+                        f"(threshold {settings.panel_monitor_optimizer_anchor_share:.0%}) — "
+                        f"rubber-stamping the optimizer"
                     )
                 elif a == CONSTANT_CONFIDENCE:
                     console.print(

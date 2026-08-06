@@ -13,11 +13,17 @@ For each M:N group in a stitch batch, writes a self-contained evidence pack:
 The agent (any provider) picks one option letter, or NONE if no option is
 correct. Options are the deduplicated optimizer assignment + top-K
 alternatives, from the shared :func:`build_stitch_options` so humans and agents
-see the identical option set ("verify, don't construct"). One panel-only
-exception: on monster groups (thousands of distinct candidate edges) the
+see the identical option set ("verify, don't construct"). Two panel-only
+exceptions: on monster groups (thousands of distinct candidate edges) the
 near-duplicate perturbation options are pruned to a small, maximally-distinct
 subset (:func:`prune_options_for_panel`) before rendering — the web review UI
-keeps the full set.
+keeps the full set — and, when ``settings.stitch_panel_shuffle_options`` is
+enabled (OFF by default), the presentation order of the (post-prune) options is
+deterministically shuffled (:func:`shuffle_options_for_panel`) so option A is
+no longer systematically the optimizer's proposal (position-anchoring bias
+observed in the 2026-07-18 bulk wave). With the flag off, packs are
+byte-identical to pre-shuffle output and the panel_monitor POSITION_ANCHOR /
+OPTIMIZER_ANCHOR alarms carry the anchoring signal.
 """
 
 from __future__ import annotations
@@ -60,7 +66,13 @@ from .matching_rubric import (
     MATCH_IDENTITY_RUBRIC,
     STITCH_ASSIGNMENT_RUBRIC,
 )
-from .stitch_provenance import build_evidence_record, safe_group_id, write_evidence_manifest
+from .stitch_provenance import (
+    build_evidence_record,
+    option_identity,
+    safe_group_id,
+    sha256_json,
+    write_evidence_manifest,
+)
 
 # Styling
 CONTEXT_COLOR = (190, 190, 190)  # light gray context roads
@@ -540,6 +552,82 @@ def prune_options_for_panel(
         "n_before": len(keys),
         "n_after": len(survivors),
         "dropped_keys": dropped_keys,
+    }
+
+
+def shuffle_options_for_panel(options_ctx: dict, group: dict) -> dict:
+    """Deterministically shuffle option presentation order (evidence packs only).
+
+    Opt-in mitigation, applied by :func:`generate_group_evidence` only when
+    ``settings.stitch_panel_shuffle_options`` is enabled (OFF by default —
+    monitoring via panel_monitor remains the default posture; see config.py).
+
+    :func:`build_stitch_options` always lists the optimizer's proposal first, so
+    without this shuffle "option A" is systematically the optimizer's pick. The
+    2026-07-18 bulk wave showed a position-anchoring bias in one panel seat
+    (codex was the most common lone dissenter and voted "A" in 33 of its 46 lone
+    dissents; replayed lone dissents were right 0/6 times), sending
+    otherwise-unanimous groups to human review. Shuffling the letter assignment
+    per pack breaks the "A = optimizer" anchor while every voter still sees the
+    identical (shuffled) menu, so letter-keyed vote parsing, consensus tallies,
+    and export blessing are untouched.
+
+    The permutation is a pure function of this pack's displayed content — the
+    group id plus the per-option canonical edge-set ids of the options AS PASSED
+    IN (post-prune when pruning ran, i.e. exactly the menu being rendered) —
+    with NO wall-clock or process-random state: display order sorts positions by
+    ``sha256({seed, option_id, position})``. Option ids are distinct (options
+    are deduped by edge set), so the per-option hash alone determines the order;
+    ``position`` is included in the hashed key only to keep the sort key total
+    if that invariant ever broke. Regenerating a pack from the same inputs
+    therefore reproduces the same letters, images, and hashes.
+
+    Mutates ``options_ctx`` in place (options reordered and re-lettered A, B,
+    C..., ``optimizer_letter`` refreshed) and returns a provenance dict::
+
+        {
+            "shuffled": True,   # this function always shuffles; the flag gate
+                                # lives in generate_group_evidence, which omits
+                                # the whole record when the shuffle is disabled
+            "seed_sha256": <hex>,
+            "permutation": [...],   # permutation[i] = pre-shuffle index shown
+                                    # at display position i (pre-shuffle order =
+                                    # the incoming options_ctx order: optimizer
+                                    # first, then alternatives, post-prune)
+            "optimizer_letter": <letter or None>,
+        }
+
+    The web review UI shares :func:`build_stitch_options` but never calls this;
+    its one-click list keeps the canonical optimizer-first order.
+    """
+    options = options_ctx["options"]
+    option_ids = [option_identity(opt["edges"]) for opt in options]
+    seed_hex = sha256_json({"group_id": group.get("group_id"), "option_ids": option_ids})
+    # Deterministic shuffle: order display positions by a per-option keyed hash.
+    order = sorted(
+        range(len(options)),
+        key=lambda i: sha256_json({"seed": seed_hex, "option_id": option_ids[i], "position": i}),
+    )
+    shuffled = [options[i] for i in order]
+
+    # Re-letter A, B, C... in display order (same scheme as build_stitch_options
+    # and prune_options_for_panel) and refresh the optimizer letter so metadata,
+    # prompt, images, and vote parsing agree.
+    letters = list(string.ascii_uppercase)
+    optimizer_letter = None
+    for i, opt in enumerate(shuffled):
+        letter = letters[i] if i < len(letters) else f"O{i}"
+        opt["letter"] = letter
+        if opt["is_optimizer"]:
+            optimizer_letter = letter
+
+    options_ctx["options"] = shuffled
+    options_ctx["optimizer_letter"] = optimizer_letter
+    return {
+        "shuffled": True,
+        "seed_sha256": seed_hex,
+        "permutation": order,
+        "optimizer_letter": optimizer_letter,
     }
 
 
@@ -1265,12 +1353,26 @@ def generate_group_evidence(
             f"{prune_info['n_before']} -> {prune_info['n_after']} (diversity)"
         )
 
+    # Panel-only deterministic presentation shuffle (opt-in, OFF by default):
+    # breaks the systematic "option A = optimizer's proposal" position anchor.
+    # Runs after pruning so the shuffled set is exactly the displayed menu;
+    # everything downstream (evidence record, images, metadata, prompt, hashes)
+    # uses the shuffled letters consistently. With the flag off nothing runs and
+    # no provenance key is written, so packs stay byte-identical to pre-shuffle
+    # output (and the POSITION_ANCHOR monitor keeps its signal).
+    shuffle_info = (
+        shuffle_options_for_panel(options_ctx, group)
+        if settings.stitch_panel_shuffle_options
+        else None
+    )
+
     evidence = build_evidence_record(
         group,
         options_ctx,
         source_artifacts=source_artifacts,
         batch_generation_source=batch_generation_source,
         options_pruned=prune_info,
+        option_order=shuffle_info,
     )
 
     # Regeneration in the same directory must never leave a stale option or
@@ -1293,6 +1395,13 @@ def generate_group_evidence(
     )
     if prune_info is not None:
         metadata["options_pruned"] = prune_info
+    # Presentation-order provenance: which pre-shuffle option landed at each
+    # letter (metadata.yaml is covered by evidence_pack_sha256, so the recorded
+    # permutation is tamper-evident). Written only when the shuffle actually
+    # ran — with the flag off the key is absent and packs stay byte-identical
+    # to pre-shuffle output.
+    if shuffle_info is not None:
+        metadata["option_order"] = shuffle_info
 
     # Junction zoom crops for SLIVER/BORDERLINE edges, and annotate the metadata
     # edge rows (all options that contain the edge) with their crop filename so

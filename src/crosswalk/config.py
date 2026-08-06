@@ -802,15 +802,42 @@ class MatcherSettings(BaseSettings):
         "options span MORE than this many distinct candidate edges; smaller groups "
         "keep the full option set (byte-identical packs).",
     )
+    # Panel option-order shuffling (evidence packs only; OFF by default). With the
+    # flag off, packs list options in canonical order — optimizer proposal first,
+    # so option A IS the optimizer's pick — and the POSITION_ANCHOR monitor below
+    # carries the anchoring signal (Brad's original monitoring-over-shuffling
+    # decision, unchanged by default). Turning the flag ON deterministically
+    # shuffles the letter assignment per pack (content-seeded; see
+    # stitch_evidence.shuffle_options_for_panel), which breaks the "A = optimizer"
+    # anchor but makes letters content-free: POSITION_ANCHOR cannot trip on
+    # shuffled-era ballots (the monitor excludes them) and the OPTIMIZER_ANCHOR
+    # monitor — which joins ballots to each pack's recorded optimizer letter —
+    # becomes the anchoring signal in both modes. Flipping the flag re-mints
+    # option_menu_sha256 for regenerated packs, so enable it only at a wave
+    # boundary (mid-wave, --resume seat salvage correctly rejects the reordered
+    # menus).
+    stitch_panel_shuffle_options: bool = Field(
+        default=False,
+        description="Shuffle panel option presentation order per evidence pack "
+        "(deterministic, content-seeded). OFF by default: canonical optimizer-first "
+        "order, monitored by POSITION_ANCHOR. Turning it on breaks the 'A = "
+        "optimizer' position anchor; OPTIMIZER_ANCHOR then carries the anchoring "
+        "signal. Enable only at a wave boundary (packs regenerate with new "
+        "option_menu_sha256).",
+    )
     # Per-voter bias monitoring for the stitch panel (crosswalk.agent_labeling.
     # panel_monitor). Makes voter defects LOUD instead of found by accident.
     # Motivating evidence: voter `agy` (Gemini Flash via CLI) voted the first-listed
     # option "A" in 11/12 valid ballots at a CONSTANT 0.95 confidence — a
     # position-anchored rubber stamp that inflated unanimity and drove ~1/3 of panel
-    # failures in its waves, with nothing surfacing it. Brad chose MONITORING over
-    # option-letter shuffling deliberately: shuffling hides the anchor, the monitor
-    # exposes it. Defaults are conservative so only a genuine anchor / rubber-stamp
-    # trips, not ordinary agreement.
+    # failures in its waves, with nothing surfacing it. Brad originally chose
+    # MONITORING over option-letter shuffling (the monitor exposes the anchor;
+    # shuffling hides it), and monitoring remains the default. Shuffling is now
+    # additionally available as an opt-in mitigation (stitch_panel_shuffle_options
+    # above); because shuffled letters are content-free, the OPTIMIZER_ANCHOR
+    # monitor keys on the pack's recorded optimizer letter instead of the letter
+    # slot and works in BOTH modes. Defaults are conservative so only a genuine
+    # anchor / rubber-stamp trips, not ordinary agreement.
     panel_monitor_position_anchor_share: float = Field(
         default=0.6,
         description="POSITION_ANCHOR alarm: fraction of a voter's valid ballots landing on "
@@ -820,7 +847,20 @@ class MatcherSettings(BaseSettings):
     panel_monitor_position_anchor_min_n: int = Field(
         default=10,
         description="Minimum valid ballots before POSITION_ANCHOR can trip (aggregate / "
-        "offline monitoring floor).",
+        "offline monitoring floor). Also the aggregate floor for OPTIMIZER_ANCHOR "
+        "(minimum ballots with a known optimizer letter).",
+    )
+    panel_monitor_optimizer_anchor_share: float = Field(
+        default=0.8,
+        description="OPTIMIZER_ANCHOR alarm: fraction of a voter's letter ballots (on "
+        "groups whose pack records an optimizer letter) that agree with the optimizer's "
+        "proposed option. Above this the voter is rubber-stamping the optimizer rather "
+        "than judging the geometry. Unlike POSITION_ANCHOR this works whether or not "
+        "option order is shuffled. The threshold is calibrated to committed provenance "
+        "base rates (the optimizer is genuinely right most of the time): healthy seats "
+        "sit at ~0.72-0.73 agreement, the anchoring-suspect codex seat at ~0.81, and "
+        "the retired rubber-stamp agy seat at ~0.92 — 0.8 separates them; the "
+        "POSITION_ANCHOR-style 0.6 would trip every honest seat.",
     )
     panel_monitor_constant_confidence_std: float = Field(
         default=0.02,

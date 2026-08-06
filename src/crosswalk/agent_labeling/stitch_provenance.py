@@ -402,6 +402,24 @@ def _edge_identity(edge: dict) -> dict[str, str]:
     }
 
 
+def option_identity(edges: list[dict]) -> str:
+    """Canonical, letter-independent identity of an option: sha256 of its edge set.
+
+    Hashes the sorted ``{ref_id, target_id}`` identity pairs (ids normalized
+    through :func:`_stable_id`, exactly as the evidence record's per-option
+    ``option_id`` is built), so the same edge set always yields the same id no
+    matter which letter or position the option is displayed under. Shared by
+    the evidence record and the panel presentation shuffle
+    (``stitch_evidence.shuffle_options_for_panel``) so both identify options
+    identically.
+    """
+    identities = sorted(
+        (_edge_identity(edge) for edge in edges),
+        key=lambda e: (e["ref_id"], e["target_id"]),
+    )
+    return sha256_json(identities)
+
+
 def _edge_record(edge: dict) -> dict[str, Any]:
     out: dict[str, Any] = _edge_identity(edge)
     for key in _EDGE_PROVENANCE_KEYS:
@@ -425,8 +443,17 @@ def build_evidence_record(
     source_artifacts: dict[str, Any] | None = None,
     batch_generation_source: dict[str, Any] | None = None,
     options_pruned: dict[str, Any] | None = None,
+    option_order: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Describe the exact post-prune menu made selectable to the panel."""
+    """Describe the exact post-prune menu made selectable to the panel.
+
+    ``option_order`` is the presentation-shuffle provenance dict from
+    ``stitch_evidence.shuffle_options_for_panel`` when the opt-in shuffle ran;
+    it is recorded in the evidence (and thus archived to ``evidence.csv``) so
+    downstream monitoring can tell shuffled-era ballots apart. When ``None``
+    (shuffle disabled — the default) the key is OMITTED entirely, keeping
+    unshuffled evidence records byte-identical to pre-shuffle output.
+    """
     group_id = safe_group_id(group.get("group_id"))
     if group.get("candidate_edges"):
         source_edges = list(group.get("candidate_edges") or [])
@@ -448,9 +475,7 @@ def build_evidence_record(
         option_menu.append(
             {
                 "letter": str(option["letter"]),
-                "option_id": sha256_json(
-                    sorted(identities, key=lambda e: (e["ref_id"], e["target_id"]))
-                ),
+                "option_id": option_identity(option.get("edges", [])),
                 "is_optimizer": bool(option.get("is_optimizer", False)),
                 "edges": identities,
             }
@@ -487,6 +512,13 @@ def build_evidence_record(
         "source_artifacts": source_artifacts or {"status": "unavailable"},
         "batch_generation_source": batch_generation_source or {"status": "unavailable"},
     }
+    # Presentation-shuffle provenance is only stamped when the shuffle actually
+    # ran: omitting the key (never writing option_order: null) keeps unshuffled
+    # evidence records — and their evidence_id — byte-identical to pre-shuffle
+    # output, and makes key-absence a reliable "unshuffled era" signal for the
+    # panel monitor.
+    if option_order is not None:
+        base["option_order"] = option_order
     base["evidence_id"] = sha256_json(base)
     return base
 
