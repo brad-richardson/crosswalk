@@ -18,6 +18,7 @@ discovery, snapshot-date resolution, and staging-tree layout:
           snapshot=<fetch-date>/
             data.parquet                              # copied verbatim from data/raw
             meta.yaml                                  # normalized provenance sidecar
+            ATTRIBUTION.txt                            # artifact-specific source notice
 
 ``snapshot=<fetch-date>`` partitions are immutable once published — enforced at
 sync time by ``publish_sync.sync_targets_local`` / ``sync_targets_r2``, not here;
@@ -46,6 +47,7 @@ from .publish import _load_dataset_yaml, dataset_quality_hold
 TARGETS_PREFIX = "targets"
 TARGET_DATA_FILENAME = "data.parquet"
 TARGET_META_FILENAME = "meta.yaml"
+TARGET_ATTRIBUTION_FILENAME = "ATTRIBUTION.txt"
 LATEST_JSON_FILENAME = "latest.json"
 TARGETS_INDEX_FILENAME = "index.json"
 
@@ -231,8 +233,9 @@ def assemble_targets_staging(
 ) -> TargetsPublishReport:
     """Build the ``targets/`` staging tree from local target dataset snapshots.
 
-    Only datasets that are ``approved`` in the license registry, NOT under a
-    declarative quality hold (``quality_hold:`` in ``datasets/<name>.yaml`` —
+    Only datasets that are bridge- and geometry-``approved`` in the license
+    registry, NOT under a declarative quality hold (``quality_hold:`` in
+    ``datasets/<name>.yaml`` —
     see ``publish.py::dataset_quality_hold``), and have a local
     ``data/raw/<name>_<DATA_VERSION>.parquet`` file are published; every other
     discovered target is recorded as excluded (with its reason) but never
@@ -291,6 +294,20 @@ def assemble_targets_staging(
             )
             continue
 
+        if not decision.geometry_approved:
+            pubs.append(
+                TargetSnapshotPublication(
+                    dataset=name,
+                    status="excluded",
+                    reason=decision.geometry_reason,
+                    license=decision.to_dict(),
+                )
+            )
+            continue
+
+        geometry_attribution = decision.geometry_attribution
+        assert geometry_attribution is not None  # guaranteed by geometry_approved
+
         prov = resolve_snapshot_provenance(path, name, datasets_dir=datasets_dir)
         display = registry.display_name(name) or name
 
@@ -313,11 +330,13 @@ def assemble_targets_staging(
             "snapshot": prov.snapshot,
             "provenance_from": prov.provenance_from,
             "license": decision.license,
-            "attribution": decision.attribution,
+            "attribution": geometry_attribution,
+            "geometry_note": decision.geometry_note,
         }
         (snap_dir / TARGET_META_FILENAME).write_text(
             yaml.dump(meta, default_flow_style=False, sort_keys=False, allow_unicode=True)
         )
+        (snap_dir / TARGET_ATTRIBUTION_FILENAME).write_text(f"{geometry_attribution.strip()}\n")
 
         latest = {
             "dataset": name,
@@ -331,7 +350,8 @@ def assemble_targets_staging(
             "size_bytes": size_bytes,
             "display_name": display,
             "license": decision.license,
-            "attribution": decision.attribution,
+            "attribution": geometry_attribution,
+            "geometry_note": decision.geometry_note,
             "source_url": decision.source_url,
         }
 
