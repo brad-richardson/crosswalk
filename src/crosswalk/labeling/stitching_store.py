@@ -35,6 +35,13 @@ ADJUDICATION_SCOPE_MEMBERSHIP = "membership"
 ADJUDICATION_SCOPE_EXACT_RESOLUTION = "exact_resolution"
 ADJUDICATION_SCOPE_EXACT_IDENTITY = "exact_identity"
 ADJUDICATION_SCOPE_REJECT_ALL = "reject_all"
+# In-progress pairwise-wizard save: ``edge_dispositions`` covers only a SUBSET
+# of the group's candidate universe. Completion checks (pairwise queue
+# exclusion, eval slicing) key on ``exact_identity``, so a partial row keeps
+# its group queued; its resolver-facing fields (selected_edges / membership)
+# are preserved verbatim from the prior label and must not be read as a fresh
+# resolution claim.
+ADJUDICATION_SCOPE_PARTIAL_IDENTITY = "partial_identity"
 
 STITCHING_LABEL_COLUMNS = [
     "group_id",

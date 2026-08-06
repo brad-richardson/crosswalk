@@ -43,6 +43,7 @@ from ..services import (
     get_unreviewed_stitch_groups,
     list_datasets,
     load_stitch_batch,
+    record_partial_identity_progress,
     record_stitching_label,
 )
 
@@ -320,8 +321,30 @@ def _candidate_value(group: dict, side: str, kind: str, segment_id: str, default
 
 
 def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
-    """Build mobile pair-review cards with complete pair-specific geometry."""
+    """Build mobile pair-review cards with complete pair-specific geometry.
+
+    Cards are served in a deterministic confirm-the-obvious order: keep-seeded
+    cards first (fast momentum from confirming what the optimizer/prior label
+    already selected), highest per-edge ``confidence`` first within each
+    keep/drop bucket, slivers last within their bucket. Tiebreak on
+    (ref_id, target_id) — no wall clock, no RNG.
+
+    A ``prior_label.edge_dispositions`` payload (in-progress partial save)
+    prefills the already-decided cards: their defaults become the saved
+    identity/resolution and the card is flagged ``saved`` so the client counts
+    it as reviewed and resumes at the first undecided card.
+    """
     edges = _annotate_candidate_edges(group)
+    saved_dispositions: dict[tuple[str, str], dict] = {}
+    for item in (context.get("prior_label") or {}).get("edge_dispositions") or []:
+        if not isinstance(item, dict):
+            continue
+        identity = str(item.get("identity", ""))
+        resolution = str(item.get("resolution", ""))
+        if identity not in {"match", "no_match", "unsure"} or resolution not in {"keep", "drop"}:
+            continue
+        saved_key = (str(item.get("ref_id", "")), str(item.get("target_id", "")))
+        saved_dispositions[saved_key] = {"identity": identity, "resolution": resolution}
     selected = {
         (str(edge.get("ref_id")), str(edge.get("target_id")))
         for edge in (context.get("preseed_edges") or [])
@@ -367,6 +390,14 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
         else:
             keep = bool(edge.get("selected", key in group_selected))
 
+        # A saved partial-progress decision overrides the seed defaults.
+        saved_decision = saved_dispositions.get(key)
+        default_resolution = "keep" if keep else "drop"
+        default_identity = "match" if keep else "unsure"
+        if saved_decision is not None:
+            default_resolution = saved_decision["resolution"]
+            default_identity = saved_decision["identity"]
+
         result.append(
             {
                 "ref_id": ref_id,
@@ -385,8 +416,9 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
                     "reference": ref_aligned or ref_full,
                     "target": target_aligned or target_full,
                 },
-                "default_resolution": "keep" if keep else "drop",
-                "default_identity": "match" if keep else "unsure",
+                "default_resolution": default_resolution,
+                "default_identity": default_identity,
+                "saved": saved_decision is not None,
                 "edge_details": {
                     key: edge.get(key)
                     for key in (
@@ -401,6 +433,20 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
                 },
             }
         )
+
+    def _order_key(card: dict) -> tuple:
+        confidence = card.get("confidence")
+        if not isinstance(confidence, (int, float)) or not math.isfinite(float(confidence)):
+            confidence = -1.0
+        return (
+            0 if card["default_resolution"] == "keep" else 1,
+            1 if card["is_sliver"] else 0,
+            -float(confidence),
+            card["ref_id"],
+            card["target_id"],
+        )
+
+    result.sort(key=_order_key)
     return result
 
 
@@ -1238,10 +1284,11 @@ def _parse_explicit_edges(raw: str, group: dict) -> list[dict] | None:
 def _parse_edge_dispositions(raw: str, group: dict) -> list[dict]:
     """Validate dual identity/resolution decisions from exact review mode.
 
-    The list may cover any subset only at the transport layer, but the current
-    UI deliberately sends the full candidate universe.  Keeping validation
-    independent of UI shape makes stale/forged candidate ids impossible while
-    allowing future targeted identity queues to review a smaller subset.
+    The list may cover any subset at the transport layer: a "Complete group"
+    submit sends the full candidate universe (enforced downstream by the
+    exact-identity branch), while a partial progress save sends only the
+    decided subset.  Keeping validation independent of UI shape makes
+    stale/forged candidate ids impossible in both cases.
     """
     if not raw:
         return []
@@ -1300,6 +1347,7 @@ async def stitching_select(
     exclude_slivers: str = Form(""),
     deanchored: bool = Form(False),
     confirm_reject_all: str = Form(""),
+    partial_save: str = Form(""),
     notes: str = Form(""),
 ):
     """Records selection, returns next group via HTMX swap.
@@ -1372,6 +1420,65 @@ async def stitching_select(
         stored_scope = ADJUDICATION_SCOPE_EXACT_RESOLUTION
         ref_members: list[str] | None = None
         target_members: list[str] | None = None
+        if identity_adjudication and partial_save.strip().lower() in {"true", "1", "on", "yes"}:
+            # Partial progress save from the pairwise wizard: a decided SUBSET
+            # of the candidate universe (validated against the union above).
+            # It never asserts resolver truth — no selected_edges payload is
+            # accepted — and it is stored under the dedicated partial scope so
+            # the group STAYS in the queue with progress prefilled.
+            if explicit_edges is not None:
+                logger.warning(
+                    "Rejected partial identity save with selected_edges for group %s",
+                    group_id,
+                )
+                return HTMLResponse("Invalid partial save", status_code=400)
+            record_partial_identity_progress(
+                dataset_id=owner_dataset,
+                group_id=group_id,
+                dispositions=dispositions,
+                match_type=group.get("match_type", ""),
+                notes=notes.strip()[:2000],
+            )
+            # Re-serve the SAME group (now carrying the saved dispositions as
+            # prior progress) so the reviewer resumes at the next undecided
+            # card — a partial save must not advance the queue.
+            groups = _queue_groups(dataset, all_groups)
+            if not groups:
+                return templates.TemplateResponse(
+                    request,
+                    "stitching/no_groups.html",
+                    {"request": request, "dataset": dataset, "all_reviewed": True},
+                )
+            next_index = next(
+                (
+                    i
+                    for i, g in enumerate(groups)
+                    if g.get("group_id") == group_id
+                    and (not group_dataset or (g.get("dataset_id") or "") == group_dataset)
+                ),
+                0,
+            )
+            next_group = groups[next_index]
+            geojson, group_ctx = _render_group(
+                next_group,
+                _group_dataset(next_group, dataset),
+                deanchored,
+                dataset == STITCH_PAIRWISE_QUEUE,
+            )
+            return templates.TemplateResponse(
+                request,
+                "stitching/group.html",
+                {
+                    "request": request,
+                    "dataset": dataset,
+                    "group": next_group,
+                    "group_geojson": geojson,
+                    "group_index": next_index,
+                    "total_groups": len(groups),
+                    **group_ctx,
+                },
+            )
+
         if identity_adjudication:
             # Exact dual-label review.  The resolution=keep subset MUST equal
             # selected_edges; identity=match on a dropped edge is intentionally

@@ -5,6 +5,11 @@
     var review = null;
     var advanceTimer = null;
 
+    // Monster groups are presented in chunks of at most this many cards.
+    // Chunking is presentation-only: the group identity stays single and
+    // decisions accumulate across chunks via partial progress saves.
+    var CHUNK_SIZE = 40;
+
     function parseJsonElement(id, fallback) {
         var el = document.getElementById(id);
         if (!el) return fallback;
@@ -53,7 +58,9 @@
             result[pairKey(pair)] = {
                 resolution: pair.default_resolution || "drop",
                 identity: pair.default_identity || "unsure",
-                reviewed: false
+                // Server-side partial saves come back as saved cards: their
+                // defaults are the recorded decision, so count them reviewed.
+                reviewed: !!pair.saved
             };
         }
         return result;
@@ -62,6 +69,7 @@
     function restoreDraft(candidates, storageKey, signature) {
         var result = {
             index: 0,
+            hasDraft: false,
             decisions: defaultDecisions(candidates)
         };
         var raw = storageGet(storageKey);
@@ -69,6 +77,7 @@
         try {
             var saved = JSON.parse(raw);
             if (saved.version !== 1 || saved.signature !== signature) return result;
+            result.hasDraft = true;
             result.index = Math.max(0, Math.min(Number(saved.index) || 0, candidates.length - 1));
             for (var i = 0; i < candidates.length; i++) {
                 var key = pairKey(candidates[i]);
@@ -115,6 +124,25 @@
             if (review.decisions[keys[i]].reviewed) count++;
         }
         return count;
+    }
+
+    function firstUnreviewedIndex() {
+        for (var i = 0; i < review.candidates.length; i++) {
+            if (!review.decisions[pairKey(review.candidates[i])].reviewed) return i;
+        }
+        return -1;
+    }
+
+    function chunkTotal() {
+        return Math.max(1, Math.ceil(review.candidates.length / CHUNK_SIZE));
+    }
+
+    function chunkIndex(index) {
+        return Math.floor(index / CHUNK_SIZE);
+    }
+
+    function chunkEndIndex(index) {
+        return Math.min((chunkIndex(index) + 1) * CHUNK_SIZE, review.candidates.length) - 1;
     }
 
     function closeFeatures() {
@@ -165,7 +193,11 @@
         if (summary) summary.hidden = true;
         if (card) card.classList.remove("showing-summary");
 
-        setText("pairwise-progress", "Pair " + (review.index + 1) + " of " + review.candidates.length);
+        var progress = "Pair " + (review.index + 1) + " of " + review.candidates.length;
+        if (chunkTotal() > 1) {
+            progress += " · chunk " + (chunkIndex(review.index) + 1) + "/" + chunkTotal();
+        }
+        setText("pairwise-progress", progress);
         setText("pairwise-reviewed-count", reviewedCount() + " reviewed");
         setText("pairwise-ref-name", pair.ref_name || "unnamed");
         setText("pairwise-target-name", pair.target_name || "unnamed");
@@ -199,7 +231,7 @@
         var prev = document.getElementById("pairwise-prev");
         if (prev) prev.disabled = review.index === 0;
         var next = document.getElementById("pairwise-next");
-        if (next) next.textContent = review.index === review.candidates.length - 1
+        if (next) next.textContent = review.index === chunkEndIndex(review.index)
             ? "Review summary" : "Accept & next";
 
         var body = document.getElementById("features-drawer-body");
@@ -219,18 +251,34 @@
         if (summary) summary.hidden = false;
         if (card) card.classList.add("showing-summary");
 
+        // Only decided cards count: with partial progress the undecided
+        // defaults must not inflate the identity/keep tallies.
         var counts = { match: 0, no_match: 0, unsure: 0, keep: 0 };
         var keys = Object.keys(review.decisions);
         for (var i = 0; i < keys.length; i++) {
             var decision = review.decisions[keys[i]];
+            if (!decision.reviewed) continue;
             counts[decision.identity]++;
             if (decision.resolution === "keep") counts.keep++;
         }
-        setText("pairwise-summary-reviewed", reviewedCount() + " / " + review.candidates.length);
+        var total = review.candidates.length;
+        var reviewed = reviewedCount();
+        setText("pairwise-summary-reviewed", reviewed + " / " + total);
         setText("pairwise-summary-matches", counts.match);
         setText("pairwise-summary-nomatches", counts.no_match);
         setText("pairwise-summary-unsure", counts.unsure);
         setText("pairwise-summary-kept", counts.keep);
+        var title = reviewed === total ? "Group ready to record"
+            : chunkTotal() > 1
+                ? "Chunk " + (chunkIndex(review.index) + 1) + " of " + chunkTotal() + " reviewed"
+                : "Progress so far";
+        setText("pairwise-summary-title", title);
+        setText("pairwise-review-again", reviewed === total ? "Review pairs" : "Continue reviewing");
+        var save = document.getElementById("pairwise-save-progress");
+        if (save) {
+            save.hidden = !(reviewed > 0 && reviewed < total);
+            save.textContent = "Save progress (" + reviewed + " of " + total + ")";
+        }
         closeFeatures();
         if (window.matcherShowGroupGeometry) {
             window.matcherShowGroupGeometry(review.groupGeometry);
@@ -240,7 +288,9 @@
     function advance() {
         if (!review) return;
         saveDraft();
-        if (review.index >= review.candidates.length - 1) {
+        // Chunk boundaries (and the true end) both land on the summary, so a
+        // monster group pauses every CHUNK_SIZE cards with a save affordance.
+        if (review.index >= chunkEndIndex(review.index)) {
             showSummary();
             return;
         }
@@ -297,13 +347,7 @@
 
     function reviewAgain() {
         if (!review) return;
-        var firstUnreviewed = -1;
-        for (var i = 0; i < review.candidates.length; i++) {
-            if (!review.decisions[pairKey(review.candidates[i])].reviewed) {
-                firstUnreviewed = i;
-                break;
-            }
-        }
+        var firstUnreviewed = firstUnreviewedIndex();
         review.index = firstUnreviewed >= 0 ? firstUnreviewed : 0;
         saveDraft();
         renderPair();
@@ -334,17 +378,13 @@
         }
     }
 
-    function recordGroup() {
-        if (!review) return;
-        if (reviewedCount() !== review.candidates.length) {
-            reviewAgain();
-            return;
-        }
+    function submitDispositions(partial) {
         var dispositions = [];
         var selected = [];
         for (var i = 0; i < review.candidates.length; i++) {
             var pair = review.candidates[i];
             var decision = review.decisions[pairKey(pair)];
+            if (partial && !decision.reviewed) continue;
             dispositions.push({
                 ref_id: pair.ref_id,
                 target_id: pair.target_id,
@@ -358,12 +398,39 @@
         var selectedInput = document.getElementById("pairwise-selected-edges");
         var dispositionsInput = document.getElementById("pairwise-edge-dispositions");
         var rejectInput = document.getElementById("pairwise-confirm-reject-all");
-        if (selectedInput) selectedInput.value = JSON.stringify(selected);
+        var partialInput = document.getElementById("pairwise-partial-save");
         if (dispositionsInput) dispositionsInput.value = JSON.stringify(dispositions);
-        if (rejectInput) rejectInput.value = selected.length === 0 ? "1" : "";
+        if (partial) {
+            // Progress saves never assert resolver truth: no selected_edges
+            // payload, no reject-all claim. The server stores the subset under
+            // the partial scope and re-serves this group with it prefilled.
+            if (selectedInput) selectedInput.value = "";
+            if (rejectInput) rejectInput.value = "";
+            if (partialInput) partialInput.value = "1";
+        } else {
+            if (selectedInput) selectedInput.value = JSON.stringify(selected);
+            if (rejectInput) rejectInput.value = selected.length === 0 ? "1" : "";
+            if (partialInput) partialInput.value = "";
+        }
         window.__pairwisePendingDraftKey = review.storageKey;
         var form = document.getElementById("pairwise-submit-form");
         if (form) form.requestSubmit();
+    }
+
+    function saveProgress() {
+        if (!review) return;
+        var reviewed = reviewedCount();
+        if (reviewed === 0 || reviewed === review.candidates.length) return;
+        submitDispositions(true);
+    }
+
+    function recordGroup() {
+        if (!review) return;
+        if (reviewedCount() !== review.candidates.length) {
+            reviewAgain();
+            return;
+        }
+        submitDispositions(false);
     }
 
     function bindButtons() {
@@ -386,6 +453,7 @@
             ["pairwise-features-handle", closeFeatures],
             ["features-backdrop", closeFeatures],
             ["pairwise-review-again", reviewAgain],
+            ["pairwise-save-progress", saveProgress],
             ["pairwise-record", recordGroup]
         ];
         for (var i = 0; i < bindings.length; i++) {
@@ -417,7 +485,18 @@
         };
         bindButtons();
         if (candidates.length) {
-            renderPair();
+            var firstUnreviewed = firstUnreviewedIndex();
+            if (!restored.hasDraft) {
+                // Resume server-saved progress at the first undecided card.
+                review.index = firstUnreviewed >= 0 ? firstUnreviewed : 0;
+            }
+            if (!restored.hasDraft && firstUnreviewed === -1 && reviewedCount() > 0) {
+                // Everything decided (e.g. saved but never completed): land on
+                // the summary so "Complete group" is one tap away.
+                showSummary();
+            } else {
+                renderPair();
+            }
         } else {
             setText("pairwise-progress", "No candidate pairs");
             var next = document.getElementById("pairwise-next");
