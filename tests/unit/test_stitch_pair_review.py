@@ -35,6 +35,7 @@ from crosswalk.labeling.stitching_store import (
 )
 from crosswalk.web.routes.stitching import (
     _build_pairwise_candidates,
+    stitching_group,
     stitching_pair_features,
     stitching_review,
     stitching_select,
@@ -780,3 +781,178 @@ class TestPairwiseWizardRoutes:
             )
 
         assert response.status_code == 400
+
+    def test_partial_save_maps_recorder_refusal_to_400(self):
+        """The completed-row guard's ValueError surfaces as a 400, not a 500."""
+        group = self._two_candidate_group()
+        batch = {"dataset_id": self.QUEUE, "groups": [group]}
+        subset = [
+            {"ref_id": "r1", "target_id": "t1", "resolution": "keep", "identity": "match"},
+        ]
+        with (
+            patch(
+                "crosswalk.web.routes.stitching.list_datasets",
+                return_value=[self.DATASET],
+            ),
+            patch(
+                "crosswalk.web.routes.stitching.load_stitch_batch",
+                return_value=batch,
+            ),
+            patch(
+                "crosswalk.web.routes.stitching.record_partial_identity_progress",
+                side_effect=ValueError("completed exact-identity adjudication"),
+            ),
+        ):
+            response = asyncio.run(
+                stitching_select(
+                    self._request("/stitching-review/select"),
+                    **self._select_kwargs(
+                        edge_dispositions=json.dumps(subset),
+                        partial_save="1",
+                    ),
+                )
+            )
+
+        assert response.status_code == 400
+
+    def test_partial_save_when_group_left_queue_returns_409(self):
+        """Queue drift after a stored save is surfaced, never a silent redirect."""
+        group = self._two_candidate_group()
+        batch = {"dataset_id": self.QUEUE, "groups": [group]}
+        subset = [
+            {"ref_id": "r1", "target_id": "t1", "resolution": "keep", "identity": "match"},
+        ]
+        calls = []
+        with (
+            patch(
+                "crosswalk.web.routes.stitching.list_datasets",
+                return_value=[self.DATASET],
+            ),
+            patch(
+                "crosswalk.web.routes.stitching.load_stitch_batch",
+                return_value=batch,
+            ),
+            patch(
+                "crosswalk.web.routes.stitching.get_pairwise_revisit_groups",
+                return_value=[],
+            ),
+            patch(
+                "crosswalk.web.routes.stitching.record_partial_identity_progress",
+                side_effect=lambda **kw: calls.append(kw),
+            ),
+        ):
+            response = asyncio.run(
+                stitching_select(
+                    self._request("/stitching-review/select"),
+                    **self._select_kwargs(
+                        edge_dispositions=json.dumps(subset),
+                        partial_save="1",
+                    ),
+                )
+            )
+
+        assert response.status_code == 409
+        assert len(calls) == 1  # the progress WAS stored before the drift
+
+    def _three_candidate_group(self):
+        group = self._two_candidate_group()
+        group["target_ids"] = ["t1", "t2", "t3"]
+        group["target_geometries"]["t3"] = _line(3)
+        group["target_names"]["t3"] = "Third target"
+        group["target_classes"]["t3"] = "primary"
+        group["rejected_edges"] = [_edge("r1", "t2", 0.4), _edge("r1", "t3", 0.3)]
+        return group
+
+    def test_deep_link_render_preserves_notes_and_merges_progress(self, tmp_path, monkeypatch):
+        """N1/N2 regression: deep links render the queue-enriched group.
+
+        Without ``prior_label`` a deep-linked wizard would render an empty
+        notes textarea (so a partial save posts ``""`` over the stored note)
+        and no saved-disposition prefill (so a second save REPLACES rather
+        than extends the stored progress, and the reshuffled cards discard
+        the local draft).
+        """
+        monkeypatch.chdir(tmp_path)
+        group = self._three_candidate_group()
+        group.pop("prior_label", None)  # batch groups carry no prior_label
+        batch = {"dataset_id": self.QUEUE, "groups": [group]}
+        StitchingLabelStore(self.DATASET).add(
+            "gpair",
+            [],
+            "1:N",
+            1,
+            3,
+            "brad",
+            "s1",
+            label_semantics="set",
+            ref_ids=["r1"],
+            target_ids=["t1"],
+            notes="irreplaceable reviewer note",
+            adjudication_scope="membership",
+        )
+        saved = [
+            {"ref_id": "r1", "target_id": "t1", "resolution": "keep", "identity": "match"},
+        ]
+        record_partial_identity_progress(
+            self.DATASET, "gpair", saved, notes="irreplaceable reviewer note"
+        )
+
+        with (
+            patch(
+                "crosswalk.web.routes.stitching.list_datasets",
+                return_value=[self.DATASET],
+            ),
+            patch(
+                "crosswalk.web.routes.stitching.load_stitch_batch",
+                return_value=batch,
+            ),
+        ):
+            # Page-level deep link and the HTMX fragment both carry the prior
+            # note and the saved-progress prefill.
+            for response in (
+                asyncio.run(
+                    stitching_review(
+                        self._request("/stitching-review"),
+                        dataset=self.QUEUE,
+                        group_id="gpair",
+                        group_dataset=self.DATASET,
+                    )
+                ),
+                asyncio.run(
+                    stitching_group(
+                        self._request("/stitching-review/group"),
+                        dataset=self.QUEUE,
+                        group_id="gpair",
+                        group_dataset=self.DATASET,
+                    )
+                ),
+            ):
+                assert response.status_code == 200
+                html = response.body.decode()
+                assert "irreplaceable reviewer note" in html
+                assert '"saved": true' in html or '"saved":true' in html
+
+            # The wizard accumulates: a follow-up save posts prior + new
+            # decisions and the prefilled note verbatim.
+            merged = saved + [
+                {"ref_id": "r1", "target_id": "t2", "resolution": "drop", "identity": "no_match"},
+            ]
+            select_response = asyncio.run(
+                stitching_select(
+                    self._request("/stitching-review/select"),
+                    **self._select_kwargs(
+                        edge_dispositions=json.dumps(merged),
+                        partial_save="1",
+                        notes="irreplaceable reviewer note",
+                    ),
+                )
+            )
+
+        assert select_response.status_code == 200
+        row = StitchingLabelStore(self.DATASET).load(self.DATASET).iloc[0]
+        assert row["adjudication_scope"] == ADJUDICATION_SCOPE_PARTIAL_IDENTITY
+        assert json.loads(row["edge_dispositions"]) == merged
+        assert row["notes"] == "irreplaceable reviewer note"
+        # The set-label membership truth is still intact underneath.
+        assert row["label_semantics"] == "set"
+        assert json.loads(row["ref_ids"]) == ["r1"]

@@ -898,6 +898,30 @@ def _queue_groups(dataset: str, groups: list[dict]) -> list[dict]:
     return get_unreviewed_stitch_groups(dataset, groups)
 
 
+def _attach_pairwise_prior(dataset: str, all_groups: list[dict], group: dict) -> dict:
+    """Swap a deep-linked pairwise group for its queue-enriched copy.
+
+    Deep-link renders (page and fragment) serve straight from the batch, which
+    carries no ``prior_label``. In the pairwise queue that context is
+    load-bearing: it prefills the prior note and any saved partial
+    dispositions, and it anchors the seed defaults to the reviewer's prior
+    label. Without it, a deep-linked partial save would post an empty note
+    over the stored one and REPLACE (rather than extend) previously saved
+    dispositions, and the reordered cards would invalidate the local draft.
+    So resolve the same group through the queue builder and render that copy
+    when available. A group absent from the queue (already completed) renders
+    as-is — partial saves on it are refused server-side anyway.
+    """
+    if dataset != STITCH_PAIRWISE_QUEUE:
+        return group
+    enriched = _find_group(
+        _queue_groups(dataset, all_groups),
+        group.get("group_id"),
+        group.get("dataset_id") or "",
+    )
+    return enriched if enriched is not None else group
+
+
 @router.get("/stitching-review", response_class=HTMLResponse)
 async def stitching_review(
     request: Request,
@@ -989,7 +1013,7 @@ async def stitching_review(
         if deep_index is None:
             logger.warning(f"Deep-link group not found in {dataset} batch: {group_id!r}")
             return HTMLResponse("Group not found in batch", status_code=404)
-        deep_group = all_groups[deep_index]
+        deep_group = _attach_pairwise_prior(dataset, all_groups, all_groups[deep_index])
         geojson, group_ctx = _render_group(
             deep_group,
             _group_dataset(deep_group, dataset),
@@ -1098,7 +1122,8 @@ async def stitching_group(
             if g.get("group_id") == group_id and (
                 not group_dataset or (g.get("dataset_id") or "") == group_dataset
             ):
-                group, display_index, display_total = g, i, batch_total
+                group = _attach_pairwise_prior(dataset, all_groups, g)
+                display_index, display_total = i, batch_total
                 break
     if group is None:
         groups = _queue_groups(dataset, all_groups)

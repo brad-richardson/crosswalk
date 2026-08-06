@@ -529,6 +529,11 @@
             // touched-but-undecided decisions live only in the draft).
             if (!pending.partial) storageRemove(pending.key);
             window.__pairwisePendingSubmit = null;
+        } else if (xhr && xhr.status === 409 && pending.partial) {
+            // 409 means the progress WAS stored but the queue drifted under
+            // this group — the generic failure alert would be a lie here.
+            window.alert("Progress saved, but the queue changed under this group. Reload to continue.");
+            window.__pairwisePendingSubmit = null;
         } else if (xhr && xhr.status >= 400) {
             window.alert("Save failed (" + xhr.status + "). Your pairwise draft is still saved.");
             window.__pairwisePendingSubmit = null;
