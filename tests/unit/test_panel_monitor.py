@@ -17,13 +17,17 @@ from typer.testing import CliRunner
 
 from crosswalk.agent_labeling.panel_monitor import (
     CONSTANT_CONFIDENCE,
+    OPTIMIZER_ANCHOR,
     POSITION_ANCHOR,
     VoterStats,
     _position,
     compute_voter_stats,
     constant_confidence_tripped,
+    load_evidence_provenance,
     load_vote_provenance,
+    optimizer_anchor_tripped,
     position_anchor_tripped,
+    wave_optimizer_anchor_warnings,
     wave_position_anchor_warnings,
 )
 from crosswalk.cli import app
@@ -134,6 +138,185 @@ def test_position_anchor_n_floor_boundary():
     )
     assert POSITION_ANCHOR in stat10.alarms
     assert position_anchor_tripped(stat10)
+
+
+def _evidence(rows: list[dict]) -> pd.DataFrame:
+    """Build a per-group evidence frame (see load_evidence_provenance)."""
+    return pd.DataFrame(
+        [
+            {
+                "group_id": r["group_id"],
+                "optimizer_letter": r.get("optimizer_letter"),
+                "option_shuffled": r.get("option_shuffled", False),
+            }
+            for r in rows
+        ]
+    )
+
+
+def test_position_anchor_suppressed_for_shuffled_era_ballots():
+    """Shuffled-era letters are content-free: they must not feed POSITION stats.
+
+    12 all-A ballots would trip POSITION_ANCHOR — but when every pack was
+    shuffled, "A" carries no positional meaning, so the alarm must stay quiet
+    and the exclusion must be visible in the era-aware counters.
+    """
+    rows = [
+        {"provider": "v", "group_id": f"g{i}", "choice": "A", "confidence": 0.3 + 0.05 * i}
+        for i in range(12)
+    ]
+    evidence = _evidence(
+        [{"group_id": f"g{i}", "optimizer_letter": "B", "option_shuffled": True} for i in range(12)]
+    )
+    stat = _one(compute_voter_stats(_votes(rows), evidence=evidence), "v")
+
+    assert stat.n_valid == 12  # still valid ballots for everything else
+    assert stat.n_position == 0  # ...but none are position-eligible
+    assert stat.n_shuffled == 12
+    assert stat.position_counts == {}
+    assert stat.modal_position is None
+    assert POSITION_ANCHOR not in stat.alarms
+    assert not position_anchor_tripped(stat)
+    assert wave_position_anchor_warnings(_votes(rows), evidence=evidence) == []
+
+
+def test_position_anchor_mixed_eras_uses_only_unshuffled_ballots():
+    """Mixed shuffled/unshuffled pools: position stats run over the unshuffled
+    subset only, and the n-floor applies to THAT subset (a voter with mostly
+    shuffled-era ballots cannot trip on a handful of eligible ones)."""
+    # 6 unshuffled all-A + 30 shuffled all-A: without the era split this would
+    # scream POSITION_ANCHOR at share 1.0 over n=36.
+    rows = [
+        {"provider": "v", "group_id": f"g{i}", "choice": "A", "confidence": 0.3 + 0.01 * i}
+        for i in range(36)
+    ]
+    evidence = _evidence(
+        [
+            {"group_id": f"g{i}", "option_shuffled": i >= 6, "optimizer_letter": "A"}
+            for i in range(36)
+        ]
+    )
+    stat = _one(compute_voter_stats(_votes(rows), evidence=evidence), "v")
+
+    assert stat.n_valid == 36
+    assert stat.n_position == 6
+    assert stat.n_shuffled == 30
+    assert stat.modal_position_share == pytest.approx(1.0)  # over the 6 eligible
+    # Aggregate floor is 10 position-eligible ballots: 6 does not clear it.
+    assert POSITION_ANCHOR not in stat.alarms
+
+
+def test_position_stats_unchanged_without_evidence():
+    """No evidence frame -> every ballot counts as unshuffled (legacy behavior)."""
+    rows = [
+        {"provider": "v", "group_id": f"g{i}", "choice": "A", "confidence": 0.3 + 0.05 * i}
+        for i in range(12)
+    ]
+    stat = _one(compute_voter_stats(_votes(rows)), "v")
+    assert stat.n_position == stat.n_valid == 12
+    assert stat.n_shuffled == 0
+    assert POSITION_ANCHOR in stat.alarms
+    # And optimizer stats stay unknown rather than fabricated.
+    assert stat.n_optimizer_known == 0
+    assert stat.optimizer_agree_share != stat.optimizer_agree_share  # NaN
+    assert OPTIMIZER_ANCHOR not in stat.alarms
+
+
+# ---------------------------------------------------------------------------
+# OPTIMIZER_ANCHOR
+# ---------------------------------------------------------------------------
+
+
+def _optimizer_rows(n_agree: int, n_disagree: int, provider: str = "v") -> tuple:
+    """n_agree ballots on the optimizer letter + n_disagree off it, with evidence."""
+    rows, ev = [], []
+    for i in range(n_agree + n_disagree):
+        opt_letter = "A" if i % 2 else "B"  # optimizer letter varies across groups
+        choice = opt_letter if i < n_agree else ("B" if opt_letter == "A" else "A")
+        rows.append(
+            {
+                "provider": provider,
+                "group_id": f"g{i}",
+                "choice": choice,
+                "confidence": 0.3 + 0.01 * i,
+            }
+        )
+        ev.append({"group_id": f"g{i}", "optimizer_letter": opt_letter})
+    return _votes(rows), _evidence(ev)
+
+
+def test_optimizer_anchor_trips_on_rubber_stamp():
+    """A voter agreeing with the optimizer on ~92% of ballots trips the alarm,
+    even though its LETTER positions are split (POSITION_ANCHOR stays quiet)."""
+    votes, evidence = _optimizer_rows(11, 1)
+    stat = _one(compute_voter_stats(votes, evidence=evidence), "v")
+
+    assert stat.n_optimizer_known == 12
+    assert stat.n_optimizer_agree == 11
+    assert stat.optimizer_agree_share == pytest.approx(11 / 12)
+    assert OPTIMIZER_ANCHOR in stat.alarms
+    assert optimizer_anchor_tripped(stat)
+    assert POSITION_ANCHOR not in stat.alarms  # letters alternate A/B
+
+
+def test_optimizer_anchor_quiet_for_healthy_agreement():
+    """Base-rate agreement (the optimizer IS right most of the time) must not
+    trip: ~72% agreement — the committed healthy-seat level — stays quiet."""
+    votes, evidence = _optimizer_rows(13, 5)  # 13/18 ~ 0.72
+    stat = _one(compute_voter_stats(votes, evidence=evidence), "v")
+
+    assert stat.optimizer_agree_share == pytest.approx(13 / 18)
+    assert OPTIMIZER_ANCHOR not in stat.alarms
+    assert not optimizer_anchor_tripped(stat)
+
+
+def test_optimizer_anchor_n_floor():
+    """Below the aggregate floor (10 known-optimizer ballots) the alarm holds."""
+    votes, evidence = _optimizer_rows(9, 0)
+    stat = _one(compute_voter_stats(votes, evidence=evidence), "v")
+    assert stat.n_optimizer_known == 9
+    assert stat.optimizer_agree_share == pytest.approx(1.0)
+    assert OPTIMIZER_ANCHOR not in stat.alarms
+    assert not optimizer_anchor_tripped(stat)
+
+
+def test_optimizer_anchor_survives_shuffle():
+    """The alarm keys on the pack's recorded optimizer letter, so an optimizer
+    rubber stamp is caught even when every pack was shuffled (where
+    POSITION_ANCHOR is structurally blind)."""
+    rows, ev = [], []
+    for i in range(12):
+        opt_letter = "A" if i % 2 else "B"
+        rows.append(
+            {
+                "provider": "v",
+                "group_id": f"g{i}",
+                "choice": opt_letter,
+                "confidence": 0.3 + 0.01 * i,
+            }
+        )
+        ev.append({"group_id": f"g{i}", "optimizer_letter": opt_letter, "option_shuffled": True})
+    stat = _one(compute_voter_stats(_votes(rows), evidence=_evidence(ev)), "v")
+
+    assert stat.n_position == 0  # POSITION view is (correctly) blind here
+    assert POSITION_ANCHOR not in stat.alarms
+    assert stat.optimizer_agree_share == pytest.approx(1.0)
+    assert OPTIMIZER_ANCHOR in stat.alarms
+
+
+def test_wave_optimizer_anchor_uses_lower_n_floor():
+    """Wave-time surfacing mirrors POSITION_ANCHOR: the lower wave floor (8)
+    applies, and without an evidence frame no warning can fire."""
+    votes, evidence = _optimizer_rows(8, 0)
+    stat = _one(compute_voter_stats(votes, evidence=evidence), "v")
+    assert OPTIMIZER_ANCHOR not in stat.alarms  # aggregate floor (10) not met
+
+    warnings = wave_optimizer_anchor_warnings(votes, evidence=evidence)
+    assert len(warnings) == 1
+    assert OPTIMIZER_ANCHOR in warnings[0]
+    assert "v" in warnings[0]
+
+    assert wave_optimizer_anchor_warnings(votes) == []  # no evidence -> no signal
 
 
 # ---------------------------------------------------------------------------
@@ -433,11 +616,19 @@ def test_wave_quiet_for_healthy_and_small_voters():
 # ---------------------------------------------------------------------------
 
 
-def _write_provenance(root: Path, dataset: str, votes: pd.DataFrame, consensus: pd.DataFrame):
+def _write_provenance(
+    root: Path,
+    dataset: str,
+    votes: pd.DataFrame,
+    consensus: pd.DataFrame,
+    evidence: pd.DataFrame | None = None,
+):
     d = root / "labels" / "votes" / f"dataset={dataset}"
     d.mkdir(parents=True, exist_ok=True)
     votes.to_csv(d / "votes.csv", index=False)
     consensus.to_csv(d / "consensus.csv", index=False)
+    if evidence is not None:
+        evidence.to_csv(d / "evidence.csv", index=False)
 
 
 def test_cli_panel_stats_smoke(tmp_path):
@@ -494,6 +685,101 @@ def test_cli_panel_stats_empty(tmp_path):
     result = runner.invoke(app, ["agent", "panel-stats", "--data-root", str(tmp_path)])
     assert result.exit_code == 0
     assert "No committed votes" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Evidence provenance loading (optimizer letters + shuffled-era flags)
+# ---------------------------------------------------------------------------
+
+
+def test_load_evidence_provenance_parses_optimizer_and_era(tmp_path):
+    import json
+
+    d = tmp_path / "labels" / "votes" / "dataset=demo"
+    d.mkdir(parents=True)
+    rows = [
+        # Unshuffled era: no option_order key at all (pre-shuffle pack).
+        {
+            "source_batch": "b1",
+            "group_id": "g1",
+            "evidence": json.dumps({"optimizer_letter": "A"}),
+        },
+        # Shuffled era: option_order.shuffled stamped by the opt-in shuffle.
+        {
+            "source_batch": "b1",
+            "group_id": "g2",
+            "evidence": json.dumps(
+                {"optimizer_letter": "B", "option_order": {"shuffled": True, "permutation": [1, 0]}}
+            ),
+        },
+        # Unparseable rows are skipped, never a crash (best-effort monitoring).
+        {"source_batch": "b1", "group_id": "g3", "evidence": "not-json"},
+    ]
+    pd.DataFrame(rows).to_csv(d / "evidence.csv", index=False)
+
+    df = load_evidence_provenance(tmp_path)
+
+    assert set(df["group_id"]) == {"g1", "g2"}
+    assert (df["dataset"] == "demo").all()
+    g1 = df[df["group_id"] == "g1"].iloc[0]
+    assert g1["optimizer_letter"] == "A"
+    assert bool(g1["option_shuffled"]) is False  # key absence == unshuffled era
+    g2 = df[df["group_id"] == "g2"].iloc[0]
+    assert g2["optimizer_letter"] == "B"
+    assert bool(g2["option_shuffled"]) is True
+
+
+def test_load_evidence_provenance_missing_returns_empty(tmp_path):
+    df = load_evidence_provenance(tmp_path)
+    assert len(df) == 0
+
+
+def test_cli_panel_stats_surfaces_optimizer_anchor_and_era_note(tmp_path, monkeypatch):
+    """End-to-end CLI: an optimizer rubber stamp on a fully SHUFFLED wave trips
+    OPTIMIZER_ANCHOR (not POSITION_ANCHOR — those ballots are position-excluded,
+    which the output annotates)."""
+    import json
+
+    monkeypatch.setenv("COLUMNS", "400")
+    n = 12
+    letters = ["A" if i % 2 else "B" for i in range(n)]  # optimizer letter varies
+    votes = _votes(
+        [
+            # Voter "v" always votes the optimizer's letter; positions split A/B.
+            {
+                "provider": "v",
+                "group_id": f"g{i}",
+                "choice": letters[i],
+                "confidence": 0.4 + 0.02 * i,
+            }
+            for i in range(n)
+        ]
+    )
+    consensus = pd.DataFrame([{"group_id": f"g{i}", "choice": letters[i]} for i in range(n)])
+    evidence = pd.DataFrame(
+        [
+            {
+                "source_batch": "b1",
+                "group_id": f"g{i}",
+                "evidence": json.dumps(
+                    {"optimizer_letter": letters[i], "option_order": {"shuffled": True}}
+                ),
+            }
+            for i in range(n)
+        ]
+    )
+    _write_provenance(tmp_path, "demo", votes, consensus, evidence)
+
+    result = runner.invoke(app, ["agent", "panel-stats", "--data-root", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert OPTIMIZER_ANCHOR in result.output
+    assert "shuffled-era" in result.output  # mixed/shuffled-era annotation
+    # POSITION_ANCHOR fires for no voter (the ballots are position-excluded);
+    # the alarm name itself may still appear in the explanatory era note.
+    assert f"{POSITION_ANCHOR} v" not in result.output
+
+    strict = runner.invoke(app, ["agent", "panel-stats", "--data-root", str(tmp_path), "--strict"])
+    assert strict.exit_code == 1, strict.output
 
 
 # ---------------------------------------------------------------------------

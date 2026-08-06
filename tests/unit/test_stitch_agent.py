@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from PIL import Image
 
 from crosswalk.agent_labeling import stitch_runner as sr
 from crosswalk.agent_labeling.stitch_eval import (
@@ -1998,8 +1999,44 @@ def test_generate_evidence_below_threshold_records_no_pruning(tmp_path, monkeypa
 
 
 # ---------------------------------------------------------------------------
-# Panel presentation-order shuffle (position-anchor break)
+# Panel presentation-order shuffle (position-anchor break; opt-in, OFF default)
 # ---------------------------------------------------------------------------
+
+
+def _opt_edge_set(option: dict) -> frozenset:
+    return frozenset((e["ref_id"], e["target_id"]) for e in option["edges"])
+
+
+def _enable_shuffle(monkeypatch):
+    from crosswalk.config import settings
+
+    monkeypatch.setattr(settings, "stitch_panel_shuffle_options", True)
+
+
+def test_shuffle_disabled_by_default_keeps_canonical_packs(tmp_path):
+    """Default (flag off): packs keep the canonical optimizer-first order and
+    carry NO shuffle provenance — byte-identical to pre-shuffle output."""
+    import yaml
+
+    from crosswalk.config import settings
+
+    assert settings.stitch_panel_shuffle_options is False  # default is monitoring, not shuffle
+    g = make_group()
+    d = tmp_path / g["group_id"]
+    meta = generate_group_evidence(g, d)
+
+    # Canonical order: optimizer first, so the anchor (and its monitor) is intact.
+    assert meta["optimizer_letter"] == "A"
+    assert [o["letter"] for o in meta["options"]] == ["A", "B"]
+    assert meta["options"][0]["is_optimizer"] is True
+    # No shuffle provenance anywhere: not in the returned metadata, not on disk,
+    # not in the hashed evidence record (key OMITTED, never null).
+    assert "option_order" not in meta
+    on_disk = yaml.safe_load((d / "metadata.yaml").read_text())
+    assert "option_order" not in on_disk
+    evidence = load_evidence_manifest(d, allow_legacy=False)["evidence"]
+    assert "option_order" not in evidence
+    assert evidence["optimizer_letter"] == "A"
 
 
 def test_shuffle_deterministic_same_content_same_permutation():
@@ -2017,8 +2054,86 @@ def test_shuffle_deterministic_same_content_same_permutation():
     assert ctx1["optimizer_letter"] == ctx2["optimizer_letter"]
 
 
-def _opt_edge_set(option: dict) -> frozenset:
-    return frozenset((e["ref_id"], e["target_id"]) for e in option["edges"])
+def test_shuffle_golden_pin():
+    """Pin the exact seed derivation and sort for two fixed synthetic groups.
+
+    Any accidental change to the seed material (group_id + canonical option
+    ids), the hash construction, or the position sort shows up here as a hard
+    diff. grp002 pins a NON-identity permutation, so a mutant that stops
+    shuffling entirely also fails.
+    """
+    g1 = make_group()  # group_id grp001
+    ctx1 = build_stitch_options(g1)
+    info1 = shuffle_options_for_panel(ctx1, g1)
+    assert (
+        info1["seed_sha256"] == "d71c6a365901e2079f14bdf712a7e86e9092028291fc33889df4e1265da8d2f1"
+    )
+    assert info1["permutation"] == [0, 1]
+    assert info1["optimizer_letter"] == "A"
+
+    g2 = make_group()
+    g2["group_id"] = "grp002"
+    ctx2 = build_stitch_options(g2)
+    info2 = shuffle_options_for_panel(ctx2, g2)
+    assert (
+        info2["seed_sha256"] == "c287553a43765d16d328a5f6c86aed6cc346d0575827354e6bcda307fca23e9c"
+    )
+    assert info2["permutation"] == [1, 0]  # non-identity: optimizer displaced to B
+    assert info2["optimizer_letter"] == "B"
+    assert _opt_edge_set(ctx2["options"][0]) == frozenset({(R1, T1), (R1, T2)})
+    assert _opt_edge_set(ctx2["options"][1]) == frozenset({(R1, T1), (R2, T2)})
+
+
+def test_shuffle_single_option_group():
+    """n == 1: the shuffle is the identity and provenance is still coherent."""
+    g = make_group()
+    g["alternatives"] = []
+    ctx = build_stitch_options(g)
+    assert len(ctx["options"]) == 1
+
+    info = shuffle_options_for_panel(ctx, g)
+
+    assert info["permutation"] == [0]
+    assert [o["letter"] for o in ctx["options"]] == ["A"]
+    assert ctx["optimizer_letter"] == "A"
+    assert info["optimizer_letter"] == "A"
+
+
+def test_shuffle_without_optimizer_option():
+    """No optimizer proposal in the menu: shuffle still works, letter stays None."""
+    g = make_group()
+    g["optimizer_assignment"] = []
+    ctx = build_stitch_options(g)
+    assert all(not o["is_optimizer"] for o in ctx["options"])
+    assert ctx["optimizer_letter"] is None
+
+    info = shuffle_options_for_panel(ctx, g)
+
+    n = len(ctx["options"])
+    assert sorted(info["permutation"]) == list(range(n))
+    assert [o["letter"] for o in ctx["options"]] == [chr(ord("A") + i) for i in range(n)]
+    assert ctx["optimizer_letter"] is None
+    assert info["optimizer_letter"] is None
+
+
+def test_option_identity_shared_between_evidence_and_shuffle():
+    """The shuffle seed and the evidence record identify options with ONE helper.
+
+    ``option_identity`` (stitch_provenance) is the single canonical option-id
+    construction: the evidence record's per-option ``option_id`` must equal
+    ``option_identity`` over the same displayed edges, so the shuffle's seed
+    material and the archived menu can never drift apart.
+    """
+    from crosswalk.agent_labeling.stitch_provenance import build_evidence_record, option_identity
+
+    g = make_group()
+    ctx = build_stitch_options(g)
+    shuffle_options_for_panel(ctx, g)
+    ev = build_evidence_record(g, ctx)
+    assert len(ev["option_menu"]) == len(ctx["options"])
+    for menu_opt, opt in zip(ev["option_menu"], ctx["options"]):
+        assert menu_opt["letter"] == opt["letter"]
+        assert menu_opt["option_id"] == option_identity(opt["edges"])
 
 
 def test_shuffle_reletters_and_preserves_menu():
@@ -2045,24 +2160,36 @@ def test_shuffle_reletters_and_preserves_menu():
     assert info["optimizer_letter"] == ctx["optimizer_letter"]
 
 
-def test_shuffle_breaks_optimizer_first_anchor_across_groups():
-    """Across group ids, the optimizer is NOT always letter A (the old anchor)."""
-    optimizer_letters = set()
-    for i in range(12):
+def test_shuffle_breaks_optimizer_first_anchor_distributionally():
+    """Across many group ids the optimizer's letter is near-uniform, not anchored.
+
+    The whole point of the shuffle: pre-shuffle, the optimizer sat at A in 100%
+    of packs. Over 200 content-seeded shuffles of a 2-option menu no letter may
+    hold the optimizer more than ~65% of the time (deterministic: the seeds are
+    fixed by the synthetic group ids; observed split is 104 A / 96 B).
+    """
+    from collections import Counter
+
+    counts: Counter[str] = Counter()
+    n = 200
+    for i in range(n):
         g = make_group()
-        g["group_id"] = f"grp{i:03d}"
+        g["group_id"] = f"grp{i:04d}"
         ctx = build_stitch_options(g)
         assert ctx["optimizer_letter"] == "A"  # canonical order: optimizer first
         shuffle_options_for_panel(ctx, g)
-        optimizer_letters.add(ctx["optimizer_letter"])
-    assert len(optimizer_letters) > 1
+        counts[ctx["optimizer_letter"]] += 1
+    assert sum(counts.values()) == n
+    assert len(counts) > 1
+    assert max(counts.values()) / n <= 0.65
 
 
-def test_generate_evidence_records_permutation_and_stays_reproducible(tmp_path):
-    """Pack-level: metadata.yaml records the permutation; regeneration from the
-    same inputs reproduces identical letters, menu, and provenance hashes."""
+def test_generate_evidence_records_permutation_and_stays_reproducible(tmp_path, monkeypatch):
+    """Pack-level (shuffle ON): metadata.yaml records the permutation; regeneration
+    from the same inputs reproduces identical letters, menu, and provenance hashes."""
     import yaml
 
+    _enable_shuffle(monkeypatch)
     # The manifest binds the group id to its directory name, so each run uses
     # its own parent directory with the canonical group-id leaf.
     d1 = tmp_path / "run1" / "grp001"
@@ -2075,13 +2202,16 @@ def test_generate_evidence_records_permutation_and_stays_reproducible(tmp_path):
     assert sorted(info["permutation"]) == list(range(len(meta1["options"])))
     assert len(info["seed_sha256"]) == 64
     assert info["optimizer_letter"] == meta1["optimizer_letter"]
-    # The permutation survives on disk (tamper-evident via evidence_pack_sha256).
+    # The permutation survives on disk (tamper-evident via evidence_pack_sha256)
+    # AND inside the hashed evidence record (archived to evidence.csv, where the
+    # panel monitor reads the shuffled-era flag from).
     on_disk = yaml.safe_load((d1 / "metadata.yaml").read_text())
     assert on_disk["option_order"] == info
 
     # Reproducibility: same inputs -> same letters, same menu, same hashes.
     ev1 = load_evidence_manifest(d1, allow_legacy=False)
     ev2 = load_evidence_manifest(d2, allow_legacy=False)
+    assert ev1["evidence"]["option_order"] == info
     assert meta1["option_order"] == meta2["option_order"]
     assert ev1["evidence"]["option_menu"] == ev2["evidence"]["option_menu"]
     assert ev1["evidence"]["option_menu_sha256"] == ev2["evidence"]["option_menu_sha256"]
@@ -2094,9 +2224,54 @@ def test_generate_evidence_records_permutation_and_stays_reproducible(tmp_path):
     assert menu_opt["letter"] == meta1["optimizer_letter"]
 
 
-def test_consensus_and_minting_are_permutation_invariant(tmp_path):
+def test_option_images_saved_under_their_metadata_letter(tmp_path, monkeypatch):
+    """Each option_<L>.png contains the render of the option metadata calls <L>.
+
+    Guards the letter<->image binding under the shuffle: a mutant that renders
+    the right options but saves them under the wrong letters (or saves them in
+    canonical rather than display order) survives every menu/hash test — the
+    manifest hashes whatever bytes were written — but is caught here. The fake
+    renderer encodes each option's exact edge set into the image pixels, so the
+    saved file for letter L must decode to the edge set metadata lists for L.
+    """
+    import hashlib
+
+    import crosswalk.agent_labeling.stitch_evidence as se
+
+    _enable_shuffle(monkeypatch)
+
+    def _digest_image(edges) -> Image.Image:
+        pairs = sorted((str(e["ref_id"]), str(e["target_id"])) for e in edges)
+        digest = (hashlib.sha256(json.dumps(pairs).encode()).digest() * 2)[:48]
+        img = Image.new("RGB", (4, 4))
+        img.putdata([tuple(digest[i * 3 : i * 3 + 3]) for i in range(16)])
+        return img
+
+    def fake_render(group, option, size=None):
+        return _digest_image(option["edges"])
+
+    monkeypatch.setattr(se, "render_option", fake_render)
+
+    # grp002 pins a NON-identity permutation (golden test above), so display
+    # order provably differs from canonical order in this pack.
+    g = make_group()
+    g["group_id"] = "grp002"
+    d = tmp_path / g["group_id"]
+    meta = se.generate_group_evidence(g, d)
+
+    assert meta["option_order"]["permutation"] == [1, 0]
+    for opt in meta["options"]:
+        expected = _digest_image(opt["edges"])
+        with Image.open(d / f"option_{opt['letter']}.png") as saved:
+            assert saved.convert("RGB").tobytes() == expected.tobytes(), (
+                f"option_{opt['letter']}.png does not contain option {opt['letter']}'s render"
+            )
+
+
+def test_consensus_and_minting_are_permutation_invariant(tmp_path, monkeypatch):
     """Voting the optimizer's letter mints the optimizer's edge set no matter
     where the shuffle placed it: consensus keys on the pack's own letters."""
+    _enable_shuffle(monkeypatch)
     g = make_group()
     d = tmp_path / g["group_id"]
     meta = generate_group_evidence(g, d)
