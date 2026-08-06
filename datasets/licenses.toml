@@ -159,15 +159,16 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier's 
 
 [datasets.de_berlin_roads]
 display_name = "Berlin Detailnetz"
-status = "pending_review"
-likely_license = "Datenlizenz Deutschland – Namensnennung – Version 2.0 (dl-de/by-2.0) per the registry's actual source item; NOTE conflict — official Berlin portal record lists dl-de/zero-2.0. Human must resolve."
+status = "approved"
+license = "dl-de/by-2.0 (Datenlizenz Deutschland - Namensnennung - Version 2.0)"
+attribution = "Datenquelle: Geoportal Berlin / Detailnetz (Land Berlin, Senatsverwaltung fuer Mobilitaet, Verkehr, Klimaschutz und Umwelt), lizenziert unter Datenlizenz Deutschland - Namensnennung - Version 2.0 (dl-de/by-2.0, https://www.govdata.de/dl-de/by-2-0)."
+likely_license = "dl-de/by-2.0 per the fetched Esri DE item; official Berlin portal records list dl-de/zero-2.0 — by-2.0-with-attribution posture satisfies both"
 license_url = "https://www.govdata.de/dl-de/by-2-0"
 source_url = "https://services2.arcgis.com/jUpNdisbWqRpMo35/arcgis/rest/services/Stra%C3%9Fennetz_Berlin/FeatureServer/2"
-proposed_attribution = "Datenquelle: Geoportal Berlin / Detailnetz, Land Berlin, lizenziert unter Datenlizenz Deutschland – Namensnennung – Version 2.0 (dl-de/by-2.0). (Attribution treated as REQUIRED pending human confirmation of whether zero-2.0 or by-2.0 governs.)"
 panel_recommendation = "needs_human"
 panel_confidence = 0.88
 panel_reviewed_at = "2026-07-06"
-note = "Panel needs_human (see research/license_burndown_2026_07.md): Refuted. The dossier's dl-de/zero-2.0 finding was verified against the wrong record: the daten.berlin.de \"Detailnetz Berlin - [WFS]\" page, not the registry's actual source_url."
+note = "Approved by Brad 2026-08-06 (flip delegated to Claude) per triage 2026-07-09: Triage 2026-07-09 (research/license_burndown_2026_07.md): stricter-variant posture. The fetched Esri DE ArcGIS item (94bd52bffeef412daee37565fce745e2) declares dl-de/by-2.0 with mandatory credit 'Geoportal Berlin / Detailnetz'; official Berlin records (daten.berlin.de, gdi.berlin.de GeoNetwork) say dl-de/zero-2.0. Both permit extraction/redistribution/derivatives + ODbL coexistence; attributing under by-2.0 satisfies both, so the conflict is moot for shipping. Hunt for an Esri DE terms overlay found none (item license governs)."
 
 [datasets.fi_helsinki_roads]
 display_name = "Digiroad Finland (Helsinki + Southern Uusimaa)"
@@ -208,15 +209,16 @@ note = "Panel approve (see research/license_burndown_2026_07.md): Confirmed. The
 
 [datasets.hk_hongkong_roads]
 display_name = "Hong Kong Transport Dept Roads"
-status = "pending_review"
+status = "approved"
+license = "DATA.GOV.HK Terms and Conditions of Use (portal-wide open terms: attribution + IP acknowledgement required; re-sale prohibited; indemnity clause)"
+attribution = "Contains information from the \"Road Network (2nd Generation)\" dataset provided by the Transport Department of the Government of the Hong Kong Special Administrative Region, obtained via DATA.GOV.HK and used under the DATA.GOV.HK Terms and Conditions of Use. Intellectual property rights in the Data are owned by the Government of the HKSAR."
 likely_license = "DATA.GOV.HK Terms and Conditions of Use (custom open terms, attribution required, re-sale prohibited)"
 license_url = "https://data.gov.hk/en/terms-and-conditions"
 source_url = "https://static.data.gov.hk/td/road-network-v2/RdNet_IRNP.gdb.zip"
-proposed_attribution = "Contains information from the \"Road Network (2nd Generation)\" dataset provided by the Transport Department of the Government of the Hong Kong Special Administrative Region, obtained via DATA.GOV.HK. Used under the DATA.GOV.HK Terms and Conditions of Use."
 panel_recommendation = "needs_human"
 panel_confidence = 0.82
 panel_reviewed_at = "2026-07-06"
-note = "Panel needs_human (see research/license_burndown_2026_07.md): The dossier is well-supported and its evidence verifies cleanly. I fetched the claimed license_url and confirmed it contains the grant language verbatim (\"You are allowed to browse, download, distribute, reproduce, hyperlink to, and print the Data for both commercial and non-commercial purposes on a free-of-charge basis on condition that... you shall identify clearly the source... acknowledge..."
+note = "Approved by Brad 2026-08-06 (flip delegated to Claude) per triage 2026-07-09: Triage 2026-07-09 (research/license_burndown_2026_07.md): grant re-verified verbatim (distribute/reproduce, commercial + non-commercial, free of charge, attribution + IP acknowledgement). Derivative-silence resolved by the DATA.GOV.HK FAQ: 'Except re-sale of the data, there is no restriction on the uses of the data'. We do not re-sell. APPROVAL ACCEPTS THE INDEMNITY CLAUSE (indemnify the Government against third-party IP claims arising from our use/reproduction/distribution); HK SAR governing law. No per-dataset override on the Road Network (2nd Generation) page."
 
 [datasets.in_mumbai_streets]
 display_name = "Mumbai BMC Streets"
@@ -305,27 +307,29 @@ note = "Panel approve (see research/license_burndown_2026_07.md): The dossier's 
 
 [datasets.sg_singapore_footpaths]
 display_name = "LTA Singapore Footpaths"
-status = "pending_review"
+status = "approved"
+license = "Singapore Open Data Licence v1.0"
+attribution = "Contains information from the LTA Footpath dataset accessed on 2026-02-03 from LTA DataMall (https://datamall.lta.gov.sg), made available under the terms of the Singapore Open Data Licence version 1.0 (https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html)."
 likely_license = "Singapore Open Data Licence v1.0"
 license_url = "https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html"
 source_url = "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/Footpath.zip"
-proposed_attribution = "Contains information from the LTA Footpath dataset accessed on 2026-02-03 from LTA DataMall (https://datamall.lta.gov.sg), made available under the terms of the Singapore Open Data Licence version 1.0 (https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html)."
 panel_recommendation = "needs_human"
 panel_confidence = 0.6
 panel_reviewed_at = "2026-07-06"
-note = "Panel needs_human (see research/license_burndown_2026_07.md): The core license identification is correct and verifiable: the Singapore Open Data Licence v1.0 page is live, contains the evidence_quote word-for-word, is an attribution-only permissive licence with no share-alike, permits commercial redistribution and derivatives, and coexists cleanly with Overture's ODbL (the co-publication reasoning is sound)."
+note = "Approved by Brad 2026-08-06 (flip delegated to Claude) per triage 2026-07-09: Triage 2026-07-09 (research/license_burndown_2026_07.md): SODL-vs-website-ToU conflict resolved by LTA's DataMall landing page — 'Use of LTA's datasets and APIs on DataMall constitutes acceptance of the Singapore Open Data Licence' (no static-vs-API distinction) — plus the API/SDK ToS ('Use of the datasets is governed by the Singapore Open Data Licence'). The restrictive website Term of Use protects site 'Contents' (Clause 3: information, marks, software). SODL: distribute/modify/adapt of datasets and derived analyses, commercial or not; conspicuous attribution notice required (rendered in the published artifact). Downstream Sub-Licensee clause noted: our users need their own LTA licence for the RAW dataset."
 
 [datasets.sg_singapore_roads]
 display_name = "LTA Singapore Roads"
-status = "pending_review"
+status = "approved"
+license = "Singapore Open Data Licence v1.0"
+attribution = "Contains information from LTA DataMall (Road Section Line) accessed on 2026-02-08 from https://datamall.lta.gov.sg which is made available under the terms of the Singapore Open Data Licence version 1.0 (https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html)."
 likely_license = "Singapore Open Data Licence v1.0"
 license_url = "https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html"
 source_url = "https://datamall.lta.gov.sg/content/dam/datamall/datasets/Geospatial/RoadSectionLine.zip"
-proposed_attribution = "Contains information from LTA DataMall (Road Section Line) accessed on 2026-02-08 from https://datamall.lta.gov.sg which is made available under the terms of the Singapore Open Data Licence version 1.0 (https://datamall.lta.gov.sg/content/datamall/en/SingaporeOpenDataLicence.html)"
 panel_recommendation = "needs_human"
 panel_confidence = 0.8
 panel_reviewed_at = "2026-07-06"
-note = "Panel needs_human (see research/license_burndown_2026_07.md): The dossier's core license evidence is accurate and verifiable: the Singapore Open Data Licence v1.0 exists at the cited URL, is genuinely permissive (use/copy/distribute/modify/adapt of datasets AND derived analyses, commercial and non-commercial), is attribution-only with no share-alike, coexists cleanly with Overture's ODbL, and the attribution template matches LTA's exact wording."
+note = "Approved by Brad 2026-08-06 (flip delegated to Claude) per triage 2026-07-09: Triage 2026-07-09 (research/license_burndown_2026_07.md): same resolution as sg_singapore_footpaths — LTA's DataMall landing page ('Use of LTA's datasets and APIs on DataMall constitutes acceptance of the Singapore Open Data Licence') + API/SDK ToS bind the static geospatial zips to SODL; the restrictive website Term of Use protects site 'Contents' (information/marks/software). SODL grants distribute/modify/adapt of datasets and derived analyses, commercial or not; conspicuous attribution notice required. Published ids are synthetic geometry-hash ids (a 'derived analysis', expressly distributable)."
 
 [datasets.tn_tunis_ml_roads]
 display_name = "Tunis ML-Extracted Roads (Microsoft)"
@@ -496,15 +500,16 @@ note = "Montana State Library MSDI framework data is published in the public dom
 
 [datasets.us_philadelphia_sidewalks]
 display_name = "Philadelphia Sidewalks"
-status = "pending_review"
-likely_license = "No License Provided (dataset metadata); use governed by DVRPC custom terms — \"Unrestricted: can be shared internally and externally without data sharing agreement\" + mandatory DVRPC attribution"
-license_url = "https://catalog.dvrpc.org/dataset/dvrpc-pedestrian-network"
+status = "approved"
+license = "DVRPC Data License (custom, attribution-only; dataset-level use constraint: \"Unrestricted: can be shared internally and externally without data sharing agreement\")"
+attribution = "Pedestrian network data courtesy of the Delaware Valley Regional Planning Commission (DVRPC), catalog.dvrpc.org (Bucks, Chester, Delaware, Montgomery counties & City of Philadelphia). DVRPC is credited as the source per the DVRPC Data License; data provided as-is without warranty."
+likely_license = "DVRPC Data License (custom, attribution-only)"
+license_url = "https://catalog.dvrpc.org/dvrpc_data_license.html"
 source_url = "https://arcgis.dvrpc.org/portal/rest/services/Transportation/pedestriannetwork_lines/FeatureServer/0"
-proposed_attribution = "Pedestrian network data © Delaware Valley Regional Planning Commission (DVRPC), used under DVRPC data terms (Bucks, Chester, Delaware, Montgomery counties & City of Philadelphia)."
 panel_recommendation = "needs_human"
 panel_confidence = 0.82
 panel_reviewed_at = "2026-07-06"
-note = "Panel needs_human (see research/license_burndown_2026_07.md): Adversarial verification confirms the dossier's evidence. Both load-bearing quotes verify verbatim: the dataset page (catalog.dvrpc.org/dataset/dvrpc-pedestrian-network) sets Use Constraints to \"Unrestricted: can be shared internally and externally without data sharing agreement\" and License to \"No License Provided\" at the dataset level (not portal-wide), and the DVRPC Data License page is a …"
+note = "Approved by Brad 2026-08-06 (flip delegated to Claude) per triage 2026-07-09: Triage 2026-07-09 (research/license_burndown_2026_07.md): full DVRPC Data License text read verbatim — warranty disclaimer + credit/no-updates/accuracy obligations only; no redistribution, derivative, share-alike, or NC term. Dataset-level Use Limitations: 'Unrestricted: can be shared internally and externally without data sharing agreement'. Hunt for newer/named DVRPC license found none. Optional: confirm derived-table reading with mruane@dvrpc.org."
 
 [datasets.us_seattle_sidewalks]
 display_name = "Seattle Sidewalks"
