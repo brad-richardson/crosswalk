@@ -221,6 +221,7 @@ class StitchingLabelStore:
         notes: str = "",
         adjudication_scope: str = "",
         edge_dispositions: list[dict] | None = None,
+        labeled_at: str | None = None,
     ) -> None:
         """Add a stitching review label.
 
@@ -249,6 +250,9 @@ class StitchingLabelStore:
                 Empty preserves the historical/unknown scope on old callers.
             edge_dispositions: Optional dual identity/resolution decisions for
                 reviewed candidate edges. Stored as deterministic JSON.
+            labeled_at: Timestamp override. Defaults to now; a partial-progress
+                update passes the PRIOR row's timestamp through so a progress
+                save never re-dates (or re-authors) the original decision.
         """
         new_row = {
             "group_id": str(group_id),
@@ -258,7 +262,7 @@ class StitchingLabelStore:
             "num_refs": num_refs,
             "num_targets": num_targets,
             "labeler": labeler,
-            "labeled_at": datetime.now(UTC).isoformat(),
+            "labeled_at": labeled_at or datetime.now(UTC).isoformat(),
             "session_id": session_id,
             "label_semantics": label_semantics,
             "ref_ids": json.dumps(sorted(ref_ids)) if ref_ids else "",

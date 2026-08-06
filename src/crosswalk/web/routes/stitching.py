@@ -343,6 +343,10 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
         resolution = str(item.get("resolution", ""))
         if identity not in {"match", "no_match", "unsure"} or resolution not in {"keep", "drop"}:
             continue
+        if resolution == "keep" and identity != "match":
+            # Same invariant the submit path enforces: a kept edge asserts
+            # identity=match. Never prefill a state the UI cannot produce.
+            continue
         saved_key = (str(item.get("ref_id", "")), str(item.get("target_id", "")))
         saved_dispositions[saved_key] = {"identity": identity, "resolution": resolution}
     selected = {
@@ -361,6 +365,7 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
         (str(item.get("ref_id")), str(item.get("target_id"))) for item in (group.get("edges") or [])
     }
     result: list[dict] = []
+    seed_keeps: dict[tuple[str, str], bool] = {}
     for edge in edges:
         ref_id = str(edge["ref_id"])
         target_id = str(edge["target_id"])
@@ -390,13 +395,16 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
         else:
             keep = bool(edge.get("selected", key in group_selected))
 
-        # A saved partial-progress decision overrides the seed defaults.
+        # A saved partial-progress decision overrides the seed defaults for
+        # PREFILL only — ordering stays frozen on the seed (below) so a save
+        # never reshuffles cards or drifts chunk boundaries mid-review.
         saved_decision = saved_dispositions.get(key)
         default_resolution = "keep" if keep else "drop"
         default_identity = "match" if keep else "unsure"
         if saved_decision is not None:
             default_resolution = saved_decision["resolution"]
             default_identity = saved_decision["identity"]
+        seed_keeps[key] = keep
 
         result.append(
             {
@@ -438,8 +446,11 @@ def _build_pairwise_candidates(group: dict, context: dict) -> list[dict]:
         confidence = card.get("confidence")
         if not isinstance(confidence, (int, float)) or not math.isfinite(float(confidence)):
             confidence = -1.0
+        # Bucket on the SEED keep, not the (possibly saved-overridden) default
+        # resolution: seeds are stable across partial saves, so card order and
+        # chunk boundaries never move once a reviewer has started a group.
         return (
-            0 if card["default_resolution"] == "keep" else 1,
+            0 if seed_keeps[(card["ref_id"], card["target_id"])] else 1,
             1 if card["is_sliver"] else 0,
             -float(confidence),
             card["ref_id"],
@@ -1426,29 +1437,59 @@ async def stitching_select(
             # It never asserts resolver truth — no selected_edges payload is
             # accepted — and it is stored under the dedicated partial scope so
             # the group STAYS in the queue with progress prefilled.
+            if dataset != STITCH_PAIRWISE_QUEUE:
+                # Only the pairwise queue's wizard may save progress: every
+                # group it serves is guaranteed a prior label row to attach
+                # progress to. Elsewhere a partial save would throw away the
+                # identity truth of a full review.
+                logger.warning(
+                    "Rejected partial identity save outside the pairwise queue "
+                    "(dataset %s, group %s)",
+                    dataset,
+                    group_id,
+                )
+                return HTMLResponse(
+                    "Partial saves are only valid in the pairwise queue", status_code=400
+                )
             if explicit_edges is not None:
                 logger.warning(
                     "Rejected partial identity save with selected_edges for group %s",
                     group_id,
                 )
                 return HTMLResponse("Invalid partial save", status_code=400)
-            record_partial_identity_progress(
-                dataset_id=owner_dataset,
-                group_id=group_id,
-                dispositions=dispositions,
-                match_type=group.get("match_type", ""),
-                notes=notes.strip()[:2000],
-            )
+            candidate_keys = {
+                (str(edge["ref_id"]), str(edge["target_id"]))
+                for edge in _group_candidate_edges(group)
+            }
+            if {(e["ref_id"], e["target_id"]) for e in dispositions} == candidate_keys:
+                # A full-universe payload is a completed adjudication and must
+                # be submitted as one (with its selected_edges consistency and
+                # reject-all confirmation checks) — storing it as partial would
+                # never dequeue the group and would hide identity truth from
+                # the bridge. The client hides "Save progress" at 100%, so this
+                # only fires for replayed/forged posts.
+                logger.warning(
+                    "Rejected full-universe partial save for group %s: submit as completion",
+                    group_id,
+                )
+                return HTMLResponse(
+                    "Full adjudication must be submitted as a completion", status_code=400
+                )
+            try:
+                record_partial_identity_progress(
+                    dataset_id=owner_dataset,
+                    group_id=group_id,
+                    dispositions=dispositions,
+                    notes=notes.strip()[:2000],
+                )
+            except ValueError as e:
+                # Detail can embed client-supplied ids — log it, never reflect it
+                logger.warning(f"Refused partial identity save for group {group_id}: {e}")
+                return HTMLResponse("Invalid partial save", status_code=400)
             # Re-serve the SAME group (now carrying the saved dispositions as
             # prior progress) so the reviewer resumes at the next undecided
             # card — a partial save must not advance the queue.
             groups = _queue_groups(dataset, all_groups)
-            if not groups:
-                return templates.TemplateResponse(
-                    request,
-                    "stitching/no_groups.html",
-                    {"request": request, "dataset": dataset, "all_reviewed": True},
-                )
             next_index = next(
                 (
                     i
@@ -1456,8 +1497,18 @@ async def stitching_select(
                     if g.get("group_id") == group_id
                     and (not group_dataset or (g.get("dataset_id") or "") == group_dataset)
                 ),
-                0,
+                None,
             )
+            if next_index is None:
+                # A partial row keeps its group queued, so absence means the
+                # queue drifted underneath the save. Surface it rather than
+                # silently serving a different group; the progress is stored
+                # and a reload resumes it.
+                logger.error("Group %s missing from pairwise queue after partial save", group_id)
+                return HTMLResponse(
+                    "Progress saved, but the group left the queue; reload to continue",
+                    status_code=409,
+                )
             next_group = groups[next_index]
             geojson, group_ctx = _render_group(
                 next_group,

@@ -367,7 +367,7 @@ There is **no imputation**. NaN feature values are passed through unchanged to X
 | `label_semantics` | `pair` (default) or `set` |
 | `ref_ids`, `target_ids` | Set-label membership as JSON id arrays (empty for pair rows) |
 | `notes` | Optional reviewer note |
-| `adjudication_scope` | `membership`, `exact_resolution`, `exact_identity`, or `reject_all` |
+| `adjudication_scope` | `membership`, `exact_resolution`, `exact_identity`, `reject_all`, or `partial_identity` (in-progress pairwise-wizard save: `edge_dispositions` covers only a subset of the candidate universe, all other fields are preserved from the prior row, and the group stays queued — never a completed review) |
 | `edge_dispositions` | JSON per-candidate decisions: resolution `keep`/`drop` plus identity `match`/`no_match`/`unsure` |
 
 **Pair vs set semantics.** A **pair** label's `selected_edges` is the authoritative

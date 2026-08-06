@@ -1348,30 +1348,40 @@ def record_partial_identity_progress(
     dataset_id: str,
     group_id: str,
     dispositions: list[dict],
-    match_type: str = "",
     notes: str = "",
 ) -> None:
     """Persist partial pairwise-wizard progress WITHOUT completing the review.
 
     A progress save must never be mistaken for a finished exact-identity
-    adjudication, and it must never degrade the resolver-facing truth of the
-    label row it updates:
+    adjudication, and it must never degrade the label row it updates:
 
     - the decided-so-far ``edge_dispositions`` subset is stored under the
       dedicated ``partial_identity`` scope, so the pairwise queue (which
       excludes only ``exact_identity`` rows with dispositions) keeps the group
       queued with progress prefilled;
-    - the existing row's resolver-facing fields are preserved verbatim
-      (selected_edges, label_semantics, ref/target membership, counts) —
-      partial identity progress is not a resolution claim.
+    - the existing row is preserved verbatim except for scope, dispositions,
+      and notes: the resolver-facing fields (selected_edges, label_semantics,
+      ref/target membership, counts) because partial identity progress is not
+      a resolution claim, AND the provenance fields (``labeler``,
+      ``labeled_at``, ``session_id``) because a progress save is not
+      re-authorship — eval slices on the original labeler (e.g. ``panel_*``
+      vs human) and on the original decision time.
 
-    A group with no prior row (deep-link edge case) falls back to a pair row
-    whose selected_edges are the keeps decided so far; the partial scope still
-    marks it incomplete.
+    ``notes`` is stored verbatim: the wizard prefills the textarea with the
+    prior note, so an empty submission is a deliberate clear.
+
+    Raises:
+        ValueError: when no prior label row exists for the group (both queue
+            builders only serve labeled groups, so this is never a legitimate
+            call — minting a fresh half-session pair label here would count
+            toward gate arming and score as complete ground truth), or when
+            the prior row is already a COMPLETED exact-identity adjudication
+            (overwriting it would destroy identity truth).
     """
     import json
 
     from ..labeling.stitching_store import (
+        ADJUDICATION_SCOPE_EXACT_IDENTITY,
         ADJUDICATION_SCOPE_PARTIAL_IDENTITY,
         LABEL_SEMANTICS_PAIR,
         StitchingLabelStore,
@@ -1394,39 +1404,29 @@ def record_partial_identity_progress(
         if len(rows):
             prior = rows.iloc[-1].to_dict()
 
-    if prior is not None:
-        selected_edges = _json_value(prior.get("selected_edges"))
-        label_semantics = str(prior.get("label_semantics") or LABEL_SEMANTICS_PAIR)
-        ref_ids = [str(v) for v in _json_value(prior.get("ref_ids"))] or None
-        target_ids = [str(v) for v in _json_value(prior.get("target_ids"))] or None
-        match_type = str(prior.get("match_type") or match_type)
-        num_refs = int(prior.get("num_refs") or 0)
-        num_targets = int(prior.get("num_targets") or 0)
-        # An empty submit note must not wipe a prior note the reviewer wrote.
-        notes = notes or str(prior.get("notes") or "")
-    else:
-        selected_edges = [
-            {"ref_id": d["ref_id"], "target_id": d["target_id"]}
-            for d in dispositions
-            if d.get("resolution") == "keep"
-        ]
-        label_semantics = LABEL_SEMANTICS_PAIR
-        ref_ids = None
-        target_ids = None
-        num_refs = len({d["ref_id"] for d in dispositions})
-        num_targets = len({d["target_id"] for d in dispositions})
+    if prior is None:
+        raise ValueError(f"no prior label row to attach partial progress to (group {group_id})")
+    if (
+        str(prior.get("adjudication_scope") or "") == ADJUDICATION_SCOPE_EXACT_IDENTITY
+        and str(prior.get("edge_dispositions") or "").strip()
+    ):
+        raise ValueError(
+            f"group {group_id} already has a completed exact-identity adjudication; "
+            "refusing to overwrite it with partial progress"
+        )
 
     store.add(
         group_id=group_id,
-        selected_edges=selected_edges,
-        match_type=match_type,
-        num_refs=num_refs,
-        num_targets=num_targets,
-        labeler=get_labeler_name(),
-        session_id=get_session_id(),
-        label_semantics=label_semantics,
-        ref_ids=ref_ids,
-        target_ids=target_ids,
+        selected_edges=_json_value(prior.get("selected_edges")),
+        match_type=str(prior.get("match_type") or ""),
+        num_refs=int(prior.get("num_refs") or 0),
+        num_targets=int(prior.get("num_targets") or 0),
+        labeler=str(prior.get("labeler") or "") or get_labeler_name(),
+        session_id=str(prior.get("session_id") or "") or get_session_id(),
+        labeled_at=str(prior.get("labeled_at") or "") or None,
+        label_semantics=str(prior.get("label_semantics") or LABEL_SEMANTICS_PAIR),
+        ref_ids=[str(v) for v in _json_value(prior.get("ref_ids"))] or None,
+        target_ids=[str(v) for v in _json_value(prior.get("target_ids"))] or None,
         notes=notes,
         adjudication_scope=ADJUDICATION_SCOPE_PARTIAL_IDENTITY,
         edge_dispositions=dispositions,

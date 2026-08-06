@@ -412,7 +412,11 @@
             if (rejectInput) rejectInput.value = selected.length === 0 ? "1" : "";
             if (partialInput) partialInput.value = "";
         }
-        window.__pairwisePendingDraftKey = review.storageKey;
+        // Partial saves keep the local draft: only decided cards reach the
+        // server, so the draft is the sole carrier of touched-but-undecided
+        // state (e.g. a Drop tap with identity still open) across the reload.
+        saveDraft();
+        window.__pairwisePendingSubmit = { key: review.storageKey, partial: partial };
         var form = document.getElementById("pairwise-submit-form");
         if (form) form.requestSubmit();
     }
@@ -517,14 +521,17 @@
         }
     });
     document.addEventListener("htmx:afterRequest", function (event) {
-        if (!window.__pairwisePendingDraftKey) return;
+        var pending = window.__pairwisePendingSubmit;
+        if (!pending) return;
         var xhr = event.detail && event.detail.xhr;
         if (xhr && xhr.status >= 200 && xhr.status < 300) {
-            storageRemove(window.__pairwisePendingDraftKey);
-            window.__pairwisePendingDraftKey = null;
+            // Completed groups drop their draft; partial saves keep it (the
+            // touched-but-undecided decisions live only in the draft).
+            if (!pending.partial) storageRemove(pending.key);
+            window.__pairwisePendingSubmit = null;
         } else if (xhr && xhr.status >= 400) {
             window.alert("Save failed (" + xhr.status + "). Your pairwise draft is still saved.");
-            window.__pairwisePendingDraftKey = null;
+            window.__pairwisePendingSubmit = null;
         }
     });
 })();
