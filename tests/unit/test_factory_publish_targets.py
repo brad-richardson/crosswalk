@@ -14,6 +14,7 @@ pipeline run. Any ``aws`` CLI interaction is monkeypatched.
 from __future__ import annotations
 
 import json
+import tomllib
 from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -24,6 +25,7 @@ import yaml
 from typer.testing import CliRunner
 
 from crosswalk.cli import app
+from crosswalk.datasets.schema import get_datasets_dir
 from crosswalk.factory.licenses import LicenseRegistry
 from crosswalk.factory.manifest import Manifest
 from crosswalk.factory.publish import BRIDGES_PREFIX, assemble_staging
@@ -36,6 +38,7 @@ from crosswalk.factory.publish_sync import (
 )
 from crosswalk.factory.publish_targets import (
     LATEST_JSON_FILENAME,
+    TARGET_ATTRIBUTION_FILENAME,
     TARGET_DATA_FILENAME,
     TARGET_META_FILENAME,
     TARGETS_INDEX_FILENAME,
@@ -67,6 +70,7 @@ def _registry() -> LicenseRegistry:
             "datasets": {
                 "us_ok_targets": {
                     "status": "approved",
+                    "geometry_status": "approved",
                     "license": "US-PD",
                     "attribution": "Some Agency",
                     "source_url": "https://example.test/api",
@@ -153,6 +157,7 @@ def test_assembly_publishes_only_licensed(raw_dir, tmp_path, empty_datasets_dir)
     snap_dir = ds_dir / f"snapshot={ok.snapshot}"
     assert (snap_dir / TARGET_DATA_FILENAME).exists()
     assert (snap_dir / TARGET_META_FILENAME).exists()
+    assert (snap_dir / TARGET_ATTRIBUTION_FILENAME).read_text() == "Some Agency\n"
     # Excluded dataset must NOT have any data copied.
     assert not (staging / TARGETS_PREFIX / "dataset=xx_pending_targets").exists()
 
@@ -165,6 +170,87 @@ def test_unlisted_dataset_excluded(raw_dir, tmp_path, empty_datasets_dir):
     zz = next(d for d in report.datasets if d.dataset == "zz_unlisted_targets")
     assert not zz.published
     assert "no license registry entry" in zz.reason
+
+
+def test_geometry_status_is_default_deny(raw_dir, tmp_path, empty_datasets_dir):
+    """Bridge approval alone must never authorize full target redistribution."""
+    _write_target_parquet(raw_dir, "us_bridge_only_targets")
+    registry = LicenseRegistry(
+        {
+            "datasets": {
+                "us_bridge_only_targets": {
+                    "status": "approved",
+                    "license": "L",
+                    "attribution": "Bridge attribution",
+                }
+            }
+        }
+    )
+
+    report = assemble_targets_staging(
+        raw_dir, tmp_path / "staging", registry, datasets_dir=empty_datasets_dir
+    )
+
+    item = report.datasets[0]
+    assert not item.published
+    assert "geometry status 'pending_review'" in item.reason
+    assert item.license["approved"] is True
+    assert item.license["geometry_approved"] is False
+
+
+def test_geometry_attribution_overrides_bridge_attribution(raw_dir, tmp_path, empty_datasets_dir):
+    _write_target_parquet(raw_dir, "us_geometry_targets")
+    registry = LicenseRegistry(
+        {
+            "datasets": {
+                "us_geometry_targets": {
+                    "status": "approved",
+                    "geometry_status": "approved",
+                    "license": "L",
+                    "attribution": "ID-only bridge notice",
+                    "geometry_attribution": "Full geometry redistribution notice",
+                    "geometry_note": "Modification notice required.",
+                }
+            }
+        }
+    )
+    staging = tmp_path / "staging"
+
+    report = assemble_targets_staging(raw_dir, staging, registry, datasets_dir=empty_datasets_dir)
+
+    item = report.datasets[0]
+    assert item.published
+    snap_dir = (
+        staging / TARGETS_PREFIX / "dataset=us_geometry_targets" / f"snapshot={item.snapshot}"
+    )
+    meta = yaml.safe_load((snap_dir / TARGET_META_FILENAME).read_text())
+    assert meta["attribution"] == "Full geometry redistribution notice"
+    assert meta["geometry_note"] == "Modification notice required."
+    assert (snap_dir / TARGET_ATTRIBUTION_FILENAME).read_text() == (
+        "Full geometry redistribution notice\n"
+    )
+    index = json.loads((staging / TARGETS_PREFIX / TARGETS_INDEX_FILENAME).read_text())
+    assert index["datasets"]["us_geometry_targets"]["attribution"] == (
+        "Full geometry redistribution notice"
+    )
+
+
+def test_every_bridge_approved_registry_entry_has_explicit_geometry_status():
+    """Migration completeness: no approved bridge silently relies on the default."""
+    path = get_datasets_dir() / "licenses.toml"
+    with path.open("rb") as fh:
+        entries = tomllib.load(fh)["datasets"]
+
+    approved = {name: entry for name, entry in entries.items() if entry.get("status") == "approved"}
+    missing = sorted(name for name, entry in approved.items() if "geometry_status" not in entry)
+    invalid = {
+        name: entry.get("geometry_status")
+        for name, entry in approved.items()
+        if entry.get("geometry_status") not in {"approved", "pending_review"}
+    }
+
+    assert not missing
+    assert not invalid
 
 
 # --------------------------------------------------------------------------
@@ -347,8 +433,18 @@ def test_dataset_filter_restricts_publication(raw_dir, tmp_path, empty_datasets_
         {
             "overture": {"attribution": "O", "url": "u", "license": "L"},
             "datasets": {
-                "us_ok_targets": {"status": "approved", "license": "L", "attribution": "A"},
-                "us_other_targets": {"status": "approved", "license": "L", "attribution": "A"},
+                "us_ok_targets": {
+                    "status": "approved",
+                    "geometry_status": "approved",
+                    "license": "L",
+                    "attribution": "A",
+                },
+                "us_other_targets": {
+                    "status": "approved",
+                    "geometry_status": "approved",
+                    "license": "L",
+                    "attribution": "A",
+                },
             },
         }
     )

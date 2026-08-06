@@ -1,11 +1,12 @@
-# Publishing: R2-hosted bridge tables (Milestone M5)
+# Publishing: R2-hosted bridge tables and target snapshots (Milestone M5)
 
 The public artifact of the project — the rosetta stone that makes a city's
 locally-keyed data joinable to the open map: queryable **local road/path ID ↔
-Overture GERS id** bridge tables, hosted on Cloudflare R2 (free egress),
-regenerated per Overture release. Modeled on the geocoder repo's pattern — static
-Parquet + a credibility page, no serving infrastructure. This document is the design; the tooling is
-`crosswalk factory publish` (see [Command surface](#command-surface)).
+Overture GERS id** bridge tables plus immutable, normalized source snapshots,
+hosted on Cloudflare R2 (free egress). Modeled on the geocoder repo's pattern —
+static Parquet + a credibility page, no serving infrastructure. The bridge tooling
+is `crosswalk factory publish`; source snapshots use `crosswalk factory publish
+--targets` (see [Command surface](#command-surface)).
 
 M5 builds on the factory (M4, [FACTORY.md](FACTORY.md)), which already produces the
 right shape locally: `data/factory/release=<overture-release>/dataset=<name>/{bridge.parquet,
@@ -45,6 +46,14 @@ r2://<bucket>/
       dataset=<name>/
         bridge.parquet                          # copied verbatim from the factory output
         manifest.json                           # copied verbatim (provenance)
+  targets/
+    index.json                                  # latest snapshot and source metadata per dataset
+    dataset=<name>/
+      latest.json                               # mutable pointer to the newest snapshot
+      snapshot=<fetch-date>/                    # IMMUTABLE once published
+        data.parquet                            # normalized source geometry + attributes
+        meta.yaml                               # fetch + license provenance
+        ATTRIBUTION.txt                         # artifact-specific source notice
 ```
 
 **Why mirror the factory partitioning.** The factory already thinks in
@@ -205,7 +214,8 @@ Overture, so every published artifact must carry both attributions:
 ### The registry (`datasets/licenses.toml`)
 
 The dataset YAMLs carry **no** license field (checked: 0/45), so licensing lives in
-a dedicated, human-reviewed registry. The publisher **never guesses**:
+a dedicated, human-reviewed registry. The publisher **never guesses**. ID-only
+bridges use the base decision:
 
 | `status` | effect |
 |---|---|
@@ -213,9 +223,23 @@ a dedicated, human-reviewed registry. The publisher **never guesses**:
 | `pending_review` | **excluded** (excluded-pending-review) |
 | no entry | treated as `pending_review` (excluded) |
 
-To publish a dataset: verify its source terms, then set `status = "approved"` with
-a `license` and `attribution` in `datasets/licenses.toml`. This is a one-line human
-decision per dataset, recorded in git.
+Geometry-bearing artifacts are a separate redistribution exposure and require a
+second, default-deny decision:
+
+| `geometry_status` | effect on `targets/` |
+|---|---|
+| `approved` (with base `status = "approved"`) | full snapshot published |
+| `pending_review` or absent | snapshot excluded; an approved ID bridge may still publish |
+
+`geometry_attribution` optionally replaces the bridge attribution for the snapshot
+when full-data redistribution adds obligations such as modification, no-updates,
+or warranty notices. Each snapshot carries the resolved value in both `meta.yaml`
+and `ATTRIBUTION.txt`.
+
+To publish a bridge, verify its source terms and set `status = "approved"` with a
+`license` and `attribution`. To mirror the source snapshot as well, separately
+verify redistribution of the complete geometry and attributes, then set
+`geometry_status = "approved"`. Both human decisions are recorded in git.
 
 ### Quality holds (`quality_hold:` in the dataset YAML)
 

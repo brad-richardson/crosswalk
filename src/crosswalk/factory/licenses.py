@@ -12,6 +12,11 @@ Policy (the publisher never guesses a license):
 * ``status = "pending_review"`` — EXCLUDED (excluded-pending-review) until a human
   verifies the source terms and flips it to ``approved``.
 * no registry entry — treated as ``pending_review`` (excluded).
+
+Geometry-bearing artifacts (currently target snapshots) are a materially
+different redistribution surface from ID-only bridge tables. They require the
+base decision above *and* ``geometry_status = "approved"``. Missing geometry
+status is deliberately pending, even for a bridge-approved dataset.
 """
 
 from __future__ import annotations
@@ -35,6 +40,10 @@ class LicenseDecision:
     source_url: str | None = None
     note: str | None = None
     reason: str | None = None  # why excluded, when not approved
+    geometry_approved: bool = False
+    geometry_attribution: str | None = None
+    geometry_note: str | None = None
+    geometry_reason: str | None = None  # why geometry is excluded
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +53,10 @@ class LicenseDecision:
             "source_url": self.source_url,
             "note": self.note,
             "reason": self.reason,
+            "geometry_approved": self.geometry_approved,
+            "geometry_attribution": self.geometry_attribution,
+            "geometry_note": self.geometry_note,
+            "geometry_reason": self.geometry_reason,
         }
 
 
@@ -107,6 +120,7 @@ class LicenseRegistry:
         attribution = entry.get("attribution")
         source_url = entry.get("source_url")
         note = entry.get("note")
+        geometry_note = entry.get("geometry_note")
         if status != "approved":
             return LicenseDecision(
                 dataset=dataset,
@@ -114,6 +128,8 @@ class LicenseRegistry:
                 source_url=source_url,
                 note=note,
                 reason=f"license status '{status}' (excluded-pending-review)",
+                geometry_note=geometry_note,
+                geometry_reason="bridge license is not approved (excluded-geometry)",
             )
         if not lic or not attribution:
             return LicenseDecision(
@@ -122,7 +138,22 @@ class LicenseRegistry:
                 source_url=source_url,
                 note=note,
                 reason="approved but missing license/attribution (excluded)",
+                geometry_note=geometry_note,
+                geometry_reason="bridge license is incomplete (excluded-geometry)",
             )
+
+        geometry_status = str(entry.get("geometry_status", "pending_review")).lower()
+        geometry_attribution = entry.get("geometry_attribution") or attribution
+        geometry_approved = geometry_status == "approved" and bool(geometry_attribution)
+        if geometry_status != "approved":
+            geometry_reason = (
+                f"geometry status '{geometry_status}' (excluded-geometry-pending-review)"
+            )
+        elif not geometry_attribution:
+            geometry_reason = "geometry approved but missing attribution (excluded-geometry)"
+        else:
+            geometry_reason = None
+
         return LicenseDecision(
             dataset=dataset,
             approved=True,
@@ -130,4 +161,8 @@ class LicenseRegistry:
             attribution=attribution,
             source_url=source_url,
             note=note,
+            geometry_approved=geometry_approved,
+            geometry_attribution=geometry_attribution,
+            geometry_note=geometry_note,
+            geometry_reason=geometry_reason,
         )

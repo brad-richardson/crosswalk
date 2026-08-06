@@ -421,8 +421,9 @@ def publish(
       ``index.html``) under the ``bridges/`` prefix. Immutable per ``release=``.
     * Target snapshots (``--targets``): builds a staging tree of local target
       dataset snapshots (``data/raw/<name>_v1.0.parquet`` + a normalized
-      ``meta.yaml`` provenance sidecar + ``latest.json``/``index.json``) under
-      the ``targets/`` prefix. Immutable per ``dataset=*/snapshot=*``.
+      ``meta.yaml`` provenance sidecar + artifact-specific ``ATTRIBUTION.txt`` +
+      ``latest.json``/``index.json``) under the ``targets/`` prefix. Immutable
+      per ``dataset=*/snapshot=*``.
 
     Both modes exclude license-unverified datasets, and then, unless
     ``--dry-run`` (the default), sync to a local directory (``--target-dir``) or
