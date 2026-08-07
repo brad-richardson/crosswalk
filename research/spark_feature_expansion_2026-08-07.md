@@ -1,9 +1,14 @@
 # Widening the Spark-portable feature set: what is actually addable, and what it buys
 
-**Date:** 2026-08-07 · **Status:** research + demo. **No shipped artifact was
-modified** — `src/crosswalk/_model/*`, `config.py`, and
-`SPARK_PORTABLE_FEATURES` are untouched. Everything below is a proposal plus the
-measurement that supports it.
+**Date:** 2026-08-07 · **Status:** research + demo, **now partly applied.**
+
+The measurements below were taken with nothing shipped — `src/crosswalk/_model/*`,
+`config.py`, and `SPARK_PORTABLE_FEATURES` were untouched throughout, so every
+number is a clean read of the feature set as the only moving part. The name block
+was subsequently added (see the Decision section and §4), taking
+`SPARK_PORTABLE_FEATURES` from 28 to 35 with a hyperparameter retune. Nothing in
+§§1-3 has been re-run against that change; treat those tiers as measurements
+relative to the **28-feature** baseline, which is what they are.
 
 ## Recommendation in one line
 
@@ -52,6 +57,35 @@ an optional one. The tf-data-platform coordination in §4.5 is 7 new columns rat
 than one, but all 7 are pure string ops on the resolved name pair — no new geometry
 work on the consumer side, and no new dependency (`jellyfish` and `rapidfuzz` are
 already core `crosswalk-py` deps).
+
+### Found during implementation: `route_prefix_match` is 99.98% NaN
+
+This analysis measured `route_prefix_match`'s *value* (+0.0002 solo, noise) and its
+*cost* (1.18 µs/pair) but never checked how often it produces a value at all. It
+returns NaN unless **both** names canonicalize to a recognized route designation
+(I-90, US-101, SR-520), and street/sidewalk layers do not carry those. Measured
+across the whole feature store: **non-NaN on 1 of 5,532 stored labelled pairs
+(0.02%)**, the single hit in `ca_toronto_roads`. XGBoost cannot split on that.
+
+This is sharper than "worth noise", because `route_prefix_match` is the *only*
+member of the block that costs new computation. The other 6 are dict keys the
+exporter already builds and discards, so **the entire 1.18 µs/pair marginal cost of
+this widening is one always-NaN column**. Dropping it would take the name block from
+"close to free" to *actually* free — 34 features at 0.00 µs/pair — at no measurable
+F1 cost.
+
+It ships anyway, because the decision above was to take the block whole and the cost
+is 0.5% of a candidate pair either way. But that is a deliberate call, not an
+oversight, and it is the obvious thing to revisit first. Pinned by
+`test_route_prefix_match_is_almost_always_nan`, which fails in **either** direction:
+if the label base gains enough highway data to make the feature real, re-measure it;
+if it goes to 0%, `canonicalize_route_name()` probably broke.
+
+The general lesson for §3's ranking method: solo LOO delta measures whether a feature
+*helps*, and says nothing about whether it is *populated*. A column that is NaN
+everywhere scores exactly like a column that is present and useless. The other 16
+candidates should be spot-checked for fill rate before any future tier is shipped on
+this ranking alone.
 
 ---
 
@@ -309,17 +343,23 @@ computing.
 
 ## 4. What to change if this is accepted
 
-Proposals only — nothing here was applied.
+**Applied 2026-08-07** for the name block (steps 1-4); step 5 is outstanding and
+step 6 stands as written. Kept in the original proposal voice so the reasoning is
+readable, with the outcome noted per step.
 
-1. `config.py::SPARK_PORTABLE_FEATURES` — add the chosen features. **Correction:**
-   an earlier draft of this section claimed "order matters: append rather than
-   insert". It does not. `export-spark-model` passes the list to `MLMatcher` as an
-   *exclusion* set (`cli/main.py:1313`), and `_extract_from_columns` then builds
-   `feature_names` in `FEATURE_COLUMNS` order. The manifest is written from
-   `matcher.feature_names` (`build_spark_model_manifest`), so the manifest always
-   reflects the true DMatrix order regardless of how this list is ordered. Position
-   in `SPARK_PORTABLE_FEATURES` is cosmetic; group the additions where they read
-   best.
+1. `config.py::SPARK_PORTABLE_FEATURES` — add the chosen features **in
+   `FEATURE_COLUMNS` order**. Order matters, but not for the reason an earlier
+   draft of this section gave ("the Spark scorer broadcasts the manifest list as
+   the DMatrix column order, so append rather than insert"). The mechanism is the
+   reverse: `export-spark-model` passes this list to `MLMatcher` as an *exclusion*
+   set (`cli/main.py:1313`), and `_extract_from_columns` rebuilds `feature_names`
+   in `FEATURE_COLUMNS` order, ignoring this list's ordering entirely. The manifest
+   is then written from `matcher.feature_names`. So the model is order-insensitive
+   here — but `tests/unit/test_shipped_spark_model.py` asserts
+   `manifest["features"] == SPARK_PORTABLE_FEATURES` as an **ordered list**
+   comparison, which fails the moment this list diverges from `FEATURE_COLUMNS`
+   order. Appending is exactly what breaks it. Pinned by
+   `test_spark_portable_features_follow_feature_columns_order`.
 2. Retune `SPARK_PORTABLE_XGB_PARAMS` for the new set:
    `uv run python scripts/tune_model.py --feature-set spark`. The current params
    were Optuna-tuned *for 28 features* on 2026-07-03; the tiers above

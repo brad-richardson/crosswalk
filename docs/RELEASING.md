@@ -46,6 +46,22 @@ forwards.
    uv run pytest tests/unit/test_shipped_spark_model.py -q
    ```
 
+   > **If you added to `SPARK_PORTABLE_FEATURES`, insert in `FEATURE_COLUMNS`
+   > order — do not append.** The `features` comparison above is an *ordered*
+   > list comparison, and the manifest is written from `matcher.feature_names`,
+   > which the exporter rebuilds in `FEATURE_COLUMNS` order regardless of how the
+   > config list is ordered. Appending therefore fails the lockstep test with a
+   > diff that reads like a stale export rather than an ordering mistake.
+   > `test_spark_portable_features_follow_feature_columns_order` catches it first.
+
+   Widening the Spark feature set also means **retuning**
+   `SPARK_PORTABLE_XGB_PARAMS` before the re-export — the committed values are
+   fitted to a specific feature count:
+
+   ```bash
+   uv run python scripts/tune_model.py --feature-set spark --trials 100
+   ```
+
 2. **Version bump** — update `version` in `pyproject.toml` AND `__version__` in
    `src/crosswalk/__init__.py` (keep them equal), then `uv lock`.
 
