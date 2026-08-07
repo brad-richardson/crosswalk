@@ -85,7 +85,7 @@ classification:
   source_classification:
     column: toiminn_lk
 quality_fingerprint:
-  computed_at: '2026-02-21T18:34:39.234477+00:00'
-  total_segments: 218792
-  name_coverage_ratio: 0.5079
-  class_coverage_ratio: 0.9999
+  computed_at: '2026-08-07T00:06:30.239782+00:00'
+  total_segments: 219129
+  name_coverage_ratio: 0.508
+  class_coverage_ratio: 1.0
