@@ -186,14 +186,11 @@ rewrote identical geometry with different WKB.
 
 ## Explicitly out of scope
 
-- **`TIER_PENALTIES` / `compute_class_similarity` constant changes.** Ablated
-  2026-08-07 across six variants; every one was flat or worse than baseline on
-  LOO macro-F1, including the two the empirical P(match) analysis most strongly
-  supported. The constants disagree with observed match rates, but correcting
-  them does not help — XGBoost has already learned to compensate. Recorded so
-  this is not re-derived later. Harness: `scripts/tier_penalty_evidence.py`.
+- **`TIER_PENALTIES` / `compute_class_similarity` constant changes — CLOSED,
+  do not re-derive.** See "Tier penalties: closed" below.
 - Overture reference re-fetch / release bump — deliberately pinned at
-  `2026-06-17.0` so this change is measurable in isolation.
+  `2026-06-17.0` so this change is measurable in isolation. (Lifted after this
+  work landed, to mint a new release partition for publishing.)
 
 ## Durable follow-up
 
@@ -298,3 +295,55 @@ destroyed it. One dataset (`us_boston_bike_network`) *improved* by +0.013.
   orphan.
 - **`test_loo_cv.py` under xdist** — `addopts = "-n auto"` makes every worker
   re-run the module-scoped fixture (~18 redundant 33-fold CV runs).
+
+## Tier penalties: closed
+
+Measured **twice**, with the second run removing every objection to the first.
+Both say the same thing: leave `TIER_PENALTIES` alone.
+
+| run | harness | features | verdict |
+|---|---|---|---|
+| 2026-08-07 (a) | co-holdout, 5 rounds | stale | no variant beat baseline |
+| 2026-08-07 (b) | true LOO, 33 folds | corrected | no variant beat baseline, by more |
+
+Run (b), against the backfilled store (baseline mean **0.8942**, the best of all
+six variants):
+
+| variant | changed pairs | road_good | road_poor | sidewalk | other | mean |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline (as-shipped) | 0 | 0.8822 | 0.9309 | 0.8647 | **0.8991** | **0.8942** |
+| A: veh↔bike 0.7→0.35 | 123 | +0.0038 | +0.0023 | +0.0046 | **−0.0509** | 0.8842 |
+| B: subclass-differs 0.85→0.35 | 103 | +0.0003 | −0.0038 | −0.0040 | −0.0155 | 0.8885 |
+| C: rank decay 0.2→0.1 | 1,305 | +0.0008 | −0.0034 | −0.0004 | −0.0130 | 0.8902 |
+| A+B | 226 | +0.0071 | 0.0000 | +0.0011 | −0.0417 | 0.8859 |
+| A+B+C | 1,531 | +0.0054 | −0.0061 | +0.0022 | −0.0329 | 0.8864 |
+
+**Variant A is the one to note.** It is the change the empirical P(match)
+analysis most strongly supported (observed vehicle↔bicycle match rate 0.350 vs
+the hand-coded 0.7), and it is the change that was selected for implementation.
+On corrected features it drops `other` by **−0.0509, to 0.8482 — decisively
+below the 0.88 floor**, roughly 3× that group's across-seed spread, so it is
+signal rather than noise.
+
+**Why "more correct" makes it worse.** `other` is the bike / hiking / trails
+group — exactly where vehicle↔bicycle class similarity carries the most weight.
+XGBoost has already learned to compensate for the miscalibrated constant;
+correcting the input breaks that compensation without giving the model a chance
+to relearn it. A constant that disagrees with observed match rates is not
+automatically a bug when a learned model sits downstream of it.
+
+If this is ever revisited, the only version worth trying is **changing the
+constant and retraining in the same step** — the ablation deliberately holds the
+model fixed, which is the right way to isolate the feature's effect but the
+wrong way to estimate the end-to-end effect.
+
+Harnesses: `scripts/tier_penalty_evidence.py` (evidence),
+`class_sim_ablation.py` (ablation, session scratchpad).
+
+### Side benefit: the backfill is independently validated here
+
+The ablation recomputes `class_similarity` from current raw data and compares it
+against the stored value. Before the backfill that disagreed on **1,183 pairs
+(21.6%)**; after, on **156** — and 160 of 5,487 pairs are ones this probe cannot
+resolve classes for at all, so the residual is essentially all measurement
+artifact. Stored features now agree with what current code computes.
