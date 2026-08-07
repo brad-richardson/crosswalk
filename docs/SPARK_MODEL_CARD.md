@@ -23,8 +23,13 @@ The full matcher model uses 83 features including topology (22), graphlet (2), c
 and additional shape features. The 34-feature subset was selected for Spark portability:
 
 **Included (34):** Computable from aligned geometry pairs alone, without graph topology or
-spatial index queries — *and* carrying their weight on measured F1. 45 of the 83 clear the
-first bar; these 34 clear both. See the Excluded split below:
+spatial index queries. 45 of the 83 clear that bar; these 34 are the subset selected for
+inclusion. Note what is *not* claimed: no tier in
+[research/spark_feature_expansion_2026-08-07.md](../research/spark_feature_expansion_2026-08-07.md)
+ablates a member of the original 28 — every tier is `base + additions` — so their individual
+contributions have never been measured. The 6 name features added 2026-08-07 and the 11
+exclusions below are backed by measurement; the original 28 inherit their membership from
+the first feasibility cut.
 
 | Category | Features | Count |
 |----------|----------|-------|
@@ -64,7 +69,7 @@ measured for F1 / size / latency in
 The **geometry block (10)** measures **−0.0034 LOO F1** for **16.24 µs/pair** as a tier,
 so it is out on its own numbers, not on portability:
 
-- **Additional shape/heading (5):** ref-side variants and deltas — low feature importance. Confirmed.
+- **Additional shape/heading (5):** ref-side variants and deltas — low feature importance. Not individually ablated; the geometry block *as a whole* (all 10) measures −0.0034 LOO F1, and the solo deltas for these five span −0.0017 to +0.0004.
 - **Vertex density (3):** Low discriminative power. Confirmed (`vertex_density_target` is the worst of all 17 at −0.0026).
 - **Angle histogram (1):** Correlated with heading_delta + buffer_iou. Confirmed (−0.0001).
 - **max_coverage (1):** `max(ref_coverage, target_coverage)` — derivable in SQL from columns the model already carries, and 4th by XGBoost gain in a 45-feature model. Still measures −0.0007: the splits do not transfer across datasets. A trap; see §3 of the research doc.
