@@ -5,8 +5,11 @@ The standard training gate (test_training.py) only measures within-distribution
 cross-validation (the only cross-dataset / spatial holdout eval) and asserts a
 macro-F1 floor per type group, so real cross-dataset regressions fail CI.
 
-The full LOO run (5 folds, all labeled datasets) takes ~15s locally, so we gate
-on the full run rather than a subset.
+The full LOO run is one fold per eligible dataset (33 as of 2026-08-07, since
+#474 made this a true leave-one-out), so we gate on the full run rather than a
+subset. It takes ~60s locally with ``-n 0``; note that the repo's default
+``addopts = "-n auto"`` makes every xdist worker re-run the module-scoped
+fixture, which is why this file is much slower under the default invocation.
 """
 
 import os
@@ -23,17 +26,46 @@ pytestmark = pytest.mark.skipif(
 
 # Per-type-group macro-F1 floors.
 #
-# Baseline measured 2026-07-02 on main (seed=42, cv_folds=5,
-# quality_threshold=0.5, DEFAULT_XGB_PARAMS), repo labels/:
-#   road_good: macro-F1 0.9093  (5 datasets evaluated, 777 labels)
-#   road_poor: macro-F1 0.9256  (4 datasets evaluated, 565 labels)
-#   sidewalk:  macro-F1 0.8714  (5 datasets evaluated, 661 labels)
-#   other:     macro-F1 0.9319  (4 datasets evaluated, 342 labels)
+# Baseline re-measured 2026-08-07 (seed=42, quality_threshold=0.5,
+# DEFAULT_XGB_PARAMS) after two changes that both moved these numbers: the
+# harness became a true leave-one-out (#474, 33 folds instead of 5 co-holdout
+# rounds) and every stored label feature was recomputed against current raw
+# data (the re-key + global backfill).
 #
-# Floors are (observed baseline - 0.05), rounded DOWN to 2 decimals. The
-# margin is deliberately generous: hyperparameter retuning and new labeled
-# datasets shift these numbers slightly, and the gate should catch real
-# cross-dataset regressions (multi-point drops), not parameter jitter.
+#   group      pre-backfill  post-backfill  delta
+#   road_good      0.8878        0.8832     -0.0046
+#   road_poor      0.9266        0.9244     -0.0022
+#   sidewalk       0.8714        0.8698     -0.0016
+#   other          0.8957        0.8891     -0.0066
+#
+# The uniform small drop is expected: some of the previously measured
+# performance rested on features computed against raw data that had since been
+# re-fetched. Corrected inputs score slightly lower and are the honest number.
+#
+# Floors were originally (baseline - 0.05) rounded DOWN to 2 decimals, and are
+# deliberately left UNCHANGED here so the gate keeps measuring against the
+# pre-backfill bar rather than being re-fitted to whatever we just produced.
+#
+# CAVEAT on `other` -- read this before "fixing" a failure in that group.
+# Its margin is now only +0.0011 (0.8891 vs 0.88), and its across-seed spread
+# widened from 0.0026 to 0.0168; at seed 7 it scores 0.8787, below the floor.
+# This test is seeded (SEED=42) and therefore deterministic, so it does not
+# flake -- but the next data change will likely trip `other` for reasons that
+# have nothing to do with that change. Per-dataset attribution (2026-08-07):
+#
+#   dataset                    n    pre s42  post s42   seed swing (s7-s42)
+#   ch_geneva_hiking_routes    50   0.6780    0.6667    0.0000 -> -0.0226
+#   co_bogota_bike_network     29   0.9825    0.9643    0.0000 -> -0.0188
+#   us_boston_bike_network     86   0.9487    0.9620    0.0000 ->  0.0000
+#   us_frisco_trails          177   0.9735    0.9634   -0.0101 ->  0.0000
+#
+# `other` is a macro-average over 4 datasets, so ch_geneva_hiking_routes at
+# ~0.67 (0.30 below the rest, and already that low BEFORE the backfill) is why
+# the group sits near its floor at all; co_bogota_bike_network's 29 labels are
+# why it is seed-sensitive. Neither is a code defect -- the fixes are more
+# labels for bogota bike and a data-quality look at geneva hiking. Note the
+# re-key is exonerated here: bogota bike had 100% of its labels geometrically
+# re-keyed and still scores 0.96, which a mis-key would have destroyed.
 MIN_GROUP_MACRO_F1 = {
     "road_good": 0.85,
     "road_poor": 0.87,
