@@ -7,8 +7,9 @@ over-broad: 17 then-excluded features also need nothing but the two aligned
 geometries and the two name structs the Spark job already holds to compute
 `name_levenshtein` / `sinuosity_ref` / `ref_coverage`.
 
-7 of those 17 (the name block) shipped on 2026-08-07 and the set is now 35. The
-other 10 (the geometry block) remain excluded on measured value, not feasibility.
+6 of those 17 (the name block minus the near-always-NaN `route_prefix_match`)
+shipped on 2026-08-07 and the set is now 34. The other 11 remain excluded on
+measured value, not feasibility.
 This module keeps proving the feasibility of all 17 regardless of which are
 currently shipped -- that is what makes the exclusion an argument about value.
 
@@ -96,6 +97,14 @@ ADDABLE_GEOMETRY_FEATURES = [
 ]
 
 ADDABLE_FEATURES = ADDABLE_NAME_FEATURES + ADDABLE_GEOMETRY_FEATURES
+
+# Of the 7 feasible name features, 6 shipped on 2026-08-07. `route_prefix_match`
+# did not: it is non-NaN on 1 of 5,532 stored labelled pairs (0.02%) because it
+# needs BOTH names to canonicalize to a route designation, and it is the only name
+# feature requiring a call of its own. Excluding it is what takes the block from
+# "1.18 us/pair" to literally free. See test_route_prefix_match_is_almost_always_nan.
+SPARSE_NAME_FEATURES = ["route_prefix_match"]
+SHIPPED_NAME_FEATURES = [f for f in ADDABLE_NAME_FEATURES if f not in SPARSE_NAME_FEATURES]
 
 # Derivable from columns the shipped Spark model already carries, with no
 # new geometry pass whatsoever: max(ref_coverage, target_coverage) and
@@ -338,18 +347,25 @@ def test_addable_features_are_declared_and_correctly_split():
     """The 17 feasible features are real, and the shipped/excluded split is the
     decision recorded in the research doc.
 
-    The name block ships (2026-08-07, +0.0033 LOO F1 at 1.18 us/pair); the
-    geometry block does not (-0.0034 LOO F1 at 16.24 us/pair). Both halves stay
-    listed here because the classification is about *feasibility*, which did not
-    change -- only the value verdict did.
+    6 of the 7 name features ship (2026-08-07, 0.00 us/pair -- they are dict keys
+    ``compute_name_similarity()`` already returns). ``route_prefix_match`` and the
+    10 geometry features do not. All 17 stay listed here because the classification
+    is about *feasibility*, which did not change -- only the value verdict did.
     """
     for feature in ADDABLE_FEATURES:
         assert feature in FEATURE_COLUMNS, f"{feature} is not a declared feature"
     assert len(ADDABLE_FEATURES) == len(set(ADDABLE_FEATURES)) == 17
+    assert sorted(SHIPPED_NAME_FEATURES + SPARSE_NAME_FEATURES) == sorted(ADDABLE_NAME_FEATURES)
 
-    for feature in ADDABLE_NAME_FEATURES:
+    for feature in SHIPPED_NAME_FEATURES:
         assert feature in SPARK_PORTABLE_FEATURES, (
             f"{feature} is part of the name block, which shipped 2026-08-07"
+        )
+    for feature in SPARSE_NAME_FEATURES:
+        assert feature not in SPARK_PORTABLE_FEATURES, (
+            f"{feature} is excluded for near-total NaN, not infeasibility -- "
+            "keeping it out is what makes the name block cost 0.00 us/pair. "
+            "See test_route_prefix_match_is_almost_always_nan before adding it."
         )
     for feature in ADDABLE_GEOMETRY_FEATURES:
         assert feature not in SPARK_PORTABLE_FEATURES, (
@@ -383,10 +399,11 @@ def test_spark_portable_features_follow_feature_columns_order():
 def test_excluded_features_partition_into_three_buckets():
     """Every excluded feature lands in exactly one bucket.
 
-    10 addable-geometry + 16 network-context + 22 topology = 48. A new feature
-    landing in FEATURE_COLUMNS without a Spark-feasibility verdict fails here,
-    which is the point: the classification has to stay exhaustive to be
-    trustworthy. The name block is absent because it now ships.
+    11 still-addable (10 geometry + route_prefix_match) + 16 network-context +
+    22 topology = 49. A new feature landing in FEATURE_COLUMNS without a
+    Spark-feasibility verdict fails here, which is the point: the classification
+    has to stay exhaustive to be trustworthy. The 6 shipped name features are
+    absent because they now ship.
     """
     excluded = [f for f in FEATURE_COLUMNS if f not in SPARK_PORTABLE_FEATURES]
     still_addable = [f for f in ADDABLE_FEATURES if f not in SPARK_PORTABLE_FEATURES]
@@ -398,11 +415,11 @@ def test_excluded_features_partition_into_three_buckets():
         f"stale: {sorted(set(buckets) - set(excluded))}"
     )
     assert (len(still_addable), len(CONTEXT_DEPENDENT_FEATURES), len(TOPOLOGY_FEATURES)) == (
-        10,
+        11,
         16,
         22,
     )
-    assert sorted(still_addable) == sorted(ADDABLE_GEOMETRY_FEATURES)
+    assert sorted(still_addable) == sorted(ADDABLE_GEOMETRY_FEATURES + SPARSE_NAME_FEATURES)
 
 
 def test_free_derived_features_need_no_new_computation(authoritative):
@@ -481,15 +498,6 @@ def test_offset_over_expected_halfwidth_ships_despite_sibling_category(authorita
         assert not math.isnan(features["offset_over_expected_halfwidth"])
 
 
-# ``route_prefix_match`` returns NaN unless BOTH names canonicalize to a
-# recognized route designation (I-90, US-101, SR-520). Street-name and sidewalk
-# layers essentially never carry those, so it is NaN on the entire 180-pair
-# fixture -- and, as test_route_prefix_match_is_almost_always_nan measures, on
-# all but 1 of the 5,532 stored labelled pairs. That is data sparsity, not a
-# broken computation, so it is exempted here rather than allowed to fail.
-SPARSE_BY_DATA_FEATURES = ["route_prefix_match"]
-
-
 def test_shipped_spark_features_are_also_context_free(authoritative):
     """Baseline check on the other side of the line.
 
@@ -500,13 +508,14 @@ def test_shipped_spark_features_are_also_context_free(authoritative):
     reaches a geometry end.) Without this, the NaN test above would pass just as
     happily if ``compute_pair_features`` were broken outright.
 
-    ``SPARSE_BY_DATA_FEATURES`` is exempted: those are NaN because the fixture's
-    road names do not exercise them, not because context was withheld.
+    No exemptions: every shipped feature must produce a real value somewhere in
+    the fixture. ``route_prefix_match`` is the one feasible name feature that
+    cannot clear this bar (NaN on all 180 pairs, and on all but 1 of the 5,532
+    stored labels), which is part of why it is not shipped.
     """
-    checked = [f for f in SPARK_PORTABLE_FEATURES if f not in SPARSE_BY_DATA_FEATURES]
-    computed = dict.fromkeys(checked, False)
+    computed = dict.fromkeys(SPARK_PORTABLE_FEATURES, False)
     for features in authoritative:
-        for feature in checked:
+        for feature in SPARK_PORTABLE_FEATURES:
             value = features[feature]
             if not (isinstance(value, float) and math.isnan(value)):
                 computed[feature] = True
@@ -519,23 +528,23 @@ def test_shipped_spark_features_are_also_context_free(authoritative):
 
 
 def test_route_prefix_match_is_almost_always_nan():
-    """Pin how sparse ``route_prefix_match`` actually is on the label base.
+    """Pin how sparse ``route_prefix_match`` is -- the reason it is not shipped.
 
     Measured 2026-08-07: non-NaN on **1 of 5,532** stored labelled pairs (0.02%),
     the single hit being in ``ca_toronto_roads``. It needs both sides to
-    canonicalize to a route designation, which street and sidewalk layers do not
-    carry.
+    canonicalize to a route designation (I-90, US-101, SR-520), which street and
+    sidewalk layers do not carry. XGBoost cannot split on a column that is missing
+    in 5,531 of 5,532 rows.
 
-    This matters because ``route_prefix_match`` is the *only* member of the name
-    block that costs new computation -- 1.18 us/pair, i.e. 100% of the block's
-    marginal cost -- while contributing a column XGBoost cannot split on. Dropping
-    it would make the whole widening free. It ships anyway because the name block
-    was taken whole (see the Decision section of the research doc), but that is a
-    deliberate call, not an oversight, and this test keeps the cost visible.
+    It is also the *only* member of the name block that costs new computation --
+    1.18 us/pair, i.e. 100% of the block's marginal cost, since the other 6 are
+    dict keys ``compute_name_similarity()`` already returns. Excluding it is
+    therefore what takes the widening from "close to free" to **0.00 us/pair**,
+    for a measured solo lift of +0.0002 LOO F1 (noise).
 
     Fails loudly in either direction: if the label base grows enough highway data
-    to make the feature useful, revisit; if it silently goes 100% NaN, the
-    canonicalizer probably broke.
+    to make the feature real, re-measure and reconsider shipping it; if it silently
+    goes 100% NaN, ``canonicalize_route_name()`` probably broke.
     """
     import glob
 
@@ -786,7 +795,7 @@ def test_tier_model_sizes_and_inference(tmp_path):
     A compact version of ``research/spark_feature_expansion.py`` (single seed,
     no LOO CV) so the size/latency side of the tradeoff is reproducible from the
     test suite. The two widened tiers bracket the decision space: the smallest
-    the shipped 35 and the 45 that adding the geometry block back would produce.
+    the shipped 34 and the 44 that adding the geometry block back would produce.
 
     Asserts only that widening the feature set does not blow up the artifact the
     Spark job has to ship -- the F1 verdict needs LOO CV over 5 seeds, which is
@@ -802,8 +811,8 @@ def test_tier_model_sizes_and_inference(tmp_path):
         pytest.skip("Labels directory not found — run from repo root")
 
     tiers = {
-        "shipped_35": list(SPARK_PORTABLE_FEATURES),
-        "plus_geometry_45": list(SPARK_PORTABLE_FEATURES) + ADDABLE_GEOMETRY_FEATURES,
+        "shipped_34": list(SPARK_PORTABLE_FEATURES),
+        "plus_geometry_44": list(SPARK_PORTABLE_FEATURES) + ADDABLE_GEOMETRY_FEATURES,
     }
 
     report = {}
@@ -845,5 +854,5 @@ def test_tier_model_sizes_and_inference(tmp_path):
             f"infer={row['us_per_row']:.2f}us/row"
         )
 
-    assert report["plus_geometry_45"]["n_features"] == 45
-    assert report["plus_geometry_45"]["model_kb"] < 4 * report["shipped_35"]["model_kb"]
+    assert report["plus_geometry_44"]["n_features"] == 44
+    assert report["plus_geometry_44"]["model_kb"] < 4 * report["shipped_34"]["model_kb"]

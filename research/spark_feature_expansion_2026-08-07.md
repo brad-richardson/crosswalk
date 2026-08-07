@@ -5,10 +5,10 @@
 The measurements below were taken with nothing shipped — `src/crosswalk/_model/*`,
 `config.py`, and `SPARK_PORTABLE_FEATURES` were untouched throughout, so every
 number is a clean read of the feature set as the only moving part. The name block
-was subsequently added (see the Decision section and §4), taking
-`SPARK_PORTABLE_FEATURES` from 28 to 35 with a hyperparameter retune. Nothing in
-§§1-3 has been re-run against that change; treat those tiers as measurements
-relative to the **28-feature** baseline, which is what they are.
+was subsequently added minus `route_prefix_match` (see the Decision section and
+§4), taking `SPARK_PORTABLE_FEATURES` from 28 to 34 with a hyperparameter retune.
+Nothing in §§1-3 has been re-run against that change; treat those tiers as
+measurements relative to the **28-feature** baseline, which is what they are.
 
 ## Recommendation in one line
 
@@ -19,13 +19,18 @@ Add **`has_name_target`** — one feature, zero marginal compute, **+0.0043 LOO 
 addable features are collectively worth nothing, and the 10 geometry ones are
 net negative.
 
-## Decision (2026-08-07): ship the 7 name features
+## Decision (2026-08-07): ship the name block, minus `route_prefix_match`
 
-**Not taken.** The call is to add the **full name block** — tier t2, 35 features,
-**+0.0033 LOO F1** at 1.18 µs/pair — rather than the single-feature tier this
-analysis recommends. The 10 geometry features are **not** added. The measurements
-below are unchanged; what follows is the reasoning for overriding the ranking they
-produce.
+**Not taken.** The call is to add the **name block** — 6 features, 34 total — rather
+than the single-feature tier this analysis recommends. The 10 geometry features are
+**not** added, and neither is `route_prefix_match` (see the implementation finding
+below, which landed after the reasoning that follows). The measurements below are
+unchanged; what follows is the reasoning for overriding the ranking they produce.
+
+The shipped set is therefore tier t2 minus one feature. t2 measured +0.0033 LOO F1
+at 1.18 µs/pair; dropping the one member that carries **all** of that cost and is
+NaN on 99.98% of pairs takes it to **0.00 µs/pair** — the widening is free in the
+literal sense.
 
 * **The gap between t2 and t2a is inside the noise.** t2a is 0.8783 ± 0.0011 and
   t2 is 0.8773 ± 0.0010. A 0.0010 difference against those bands is not a result.
@@ -39,10 +44,11 @@ produce.
   with none of the name context that would let the model condition on it. The
   full name block gives the flag its companions; it scores the same and rests on
   less.
-* **The name block is close to free.** 1.18 µs/pair marginal — 0.5% on top of the
-  224.03 µs the shipped 28 already spend — and that single `route_prefix_match`
-  call is the *only* new computation. The other 6 are keys in the
-  `compute_name_similarity()` dict that the exporter already builds and discards.
+* **The name block is free.** All 6 shipped members are keys in the
+  `compute_name_similarity()` dict that the exporter already builds and discards —
+  **0.00 µs/pair marginal**. A consumer already calling that function just stops
+  dropping them on the floor. (This was "1.18 µs/pair, 0.5%" while
+  `route_prefix_match` was included; excluding it is what makes the figure zero.)
 * **The geometry block is excluded on measurement, and that is the difference
   from t4.** t3 (geometry alone) is −0.0034; t4 (all 17) is +0.0034, statistically
   identical to t2's +0.0033. So the 10 geometry features contribute nothing while
@@ -53,9 +59,10 @@ produce.
 
 Consequences for the follow-up PR, on top of §4: `SPARK_PORTABLE_XGB_PARAMS` was
 Optuna-tuned for 28 features, so the retune (§4.2) is a required step rather than
-an optional one. The tf-data-platform coordination in §4.5 is 7 new columns rather
-than one, but all 7 are pure string ops on the resolved name pair — no new geometry
-work on the consumer side, and no new dependency (`jellyfish` and `rapidfuzz` are
+an optional one. The tf-data-platform coordination in §4.5 is 6 new columns rather
+than one, but all 6 are pure string ops on the resolved name pair — no new geometry
+work on the consumer side, no new call at all if the job already invokes
+`compute_name_similarity()`, and no new dependency (`jellyfish` and `rapidfuzz` are
 already core `crosswalk-py` deps).
 
 ### Found during implementation: `route_prefix_match` is 99.98% NaN
@@ -74,18 +81,51 @@ this widening is one always-NaN column**. Dropping it would take the name block 
 "close to free" to *actually* free — 34 features at 0.00 µs/pair — at no measurable
 F1 cost.
 
-It ships anyway, because the decision above was to take the block whole and the cost
-is 0.5% of a candidate pair either way. But that is a deliberate call, not an
-oversight, and it is the obvious thing to revisit first. Pinned by
-`test_route_prefix_match_is_almost_always_nan`, which fails in **either** direction:
-if the label base gains enough highway data to make the feature real, re-measure it;
-if it goes to 0%, `canonicalize_route_name()` probably broke.
+**It is therefore excluded**, and the shipped set is 34 rather than 35. The measured
+solo lift it gives up is +0.0002 LOO F1 — noise — and what it buys is a widening with
+no marginal compute at all. Pinned by `test_route_prefix_match_is_almost_always_nan`,
+which fails in **either** direction: if the label base gains enough highway data to
+make the feature real, re-measure and reconsider; if it goes to 0%,
+`canonicalize_route_name()` probably broke.
 
 The general lesson for §3's ranking method: solo LOO delta measures whether a feature
 *helps*, and says nothing about whether it is *populated*. A column that is NaN
 everywhere scores exactly like a column that is present and useless. The other 16
 candidates should be spot-checked for fill rate before any future tier is shipped on
 this ranking alone.
+
+### Also found during implementation: the retune needs ≥300 trials, checked on LOO
+
+§4.2 says to retune `SPARK_PORTABLE_XGB_PARAMS`, which is right, but understates how
+carefully. The first retune (100 trials, the count the 2026-07-03 tune used) selected a
+point that was **worse than not retuning at all**: LOO 0.8763 against 0.8777 for reusing
+the old 28-feature hyperparameters on the same 34 features, and ~30% slower to score.
+
+The cause is that `scripts/tune_model.py`'s epsilon-compact selection optimizes *inner-CV
+F1* — a within-distribution metric — and breaks ties on `n_estimators * max_depth`, a
+proxy that predicted +10% traversal cost for a point that measured ~40% slower. A
+shallow-wide shape (353 × 7) can win that rule while generalizing worse across datasets.
+The rule was not misapplied; the 100-trial search simply had not found a
+compact-and-general point.
+
+At 300 trials it did (168 × 9, CV F1 0.9270, cost 1512 — cheaper than the 28-feature
+model's 2240), and the rule's own pick was also the best of its eligible set on LOO
+(0.8837 vs 0.8811 / 0.8815 / 0.8801 for the next three cheapest, and 0.8823 for the
+best-CV-F1 trial). So the selection rule was **not** overridden and no LOO selection
+optimism was banked — the LOO scoring was a check, not a chooser.
+
+The measured end state, 5 seeds:
+
+| Config | Features | Params | LOO F1 | Δ |
+|---|---|---|---|---|
+| Before | 28 | 28-tuned | 0.8740 ± 0.0010 | — |
+| Feature change only | 34 | 28-tuned | 0.8775 ± 0.0008 | +0.0035 |
+| Shipped | 34 | 34-tuned (300 trials) | **0.8839 ± 0.0014** | **+0.0099** |
+
+Note the retune is worth more than the features (+0.0064 vs +0.0035) — the widening's
+real value was partly in forcing a search that had gone stale. Standing guidance, now in
+`config.py`: retune at ≥300 trials and sanity-check the selected point on LOO before
+shipping. CV F1 alone does not catch this.
 
 ---
 

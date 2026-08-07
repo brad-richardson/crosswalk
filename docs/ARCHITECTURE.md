@@ -32,7 +32,7 @@ the wheel, so `pip install crosswalk-py` needs zero training:
 | Artifact | What it is | Consumer |
 |----------|------------|----------|
 | `matcher_model_combined.joblib` | Full-feature (`config.FEATURE_COLUMNS`) calibrated model | Default `crosswalk stitch` and factory artifact (`config.bundled_model_path()`) |
-| `spark_model.json` + `spark_manifest.json` | Spark-portable 35-feature (`SPARK_PORTABLE_FEATURES`) XGBoost-native booster + manifest | Spark scoring jobs (tf-data-platform) via `matcher.spark` |
+| `spark_model.json` + `spark_manifest.json` | Spark-portable 34-feature (`SPARK_PORTABLE_FEATURES`) XGBoost-native booster + manifest | Spark scoring jobs (tf-data-platform) via `matcher.spark` |
 
 Both are kept in lockstep with `config.FEATURE_VERSION` by CI
 (`test_shipped_model.py`, `test_shipped_spark_model.py`) — a feature bump fails
@@ -46,7 +46,7 @@ retrain/reship.
 #### Spark-portable model shipping and consumption
 
 The Spark-portable model is a first-class shipped artifact: `matcher
-export-spark-model` trains the 35-feature pair-local subset (geometry + names;
+export-spark-model` trains the 34-feature pair-local subset (geometry + names;
 no topology, graph, or spatial-index features) and writes `model.json` + `manifest.json`;
 those are copied into the package as `spark_model.json` / `spark_manifest.json`
 and included in the wheel by `pyproject.toml`'s `[tool.hatch.build.targets.wheel]
