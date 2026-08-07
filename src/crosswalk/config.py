@@ -644,8 +644,13 @@ SPARK_PORTABLE_FEATURES = [
 # for Spark): cheapest trial by n_estimators * max_depth within 0.003 raw
 # CV F1 of the best — selected 168 trees x depth 9 (CV F1 0.9270) over the
 # best-F1 216 x 10 (CV F1 0.9292), trading 0.0022 CV F1 for a 1.43x cheaper
-# model. Better AND cheaper than the 28-feature predecessor on every axis:
-# CV F1 0.9216 -> 0.9270, cost 2240 -> 1512.
+# model. Cheaper than the 28-feature predecessor (cost 2240 -> 1512).
+#
+# Careful with the CV comparison: 0.9216 was measured on 2026-07-03, on the label
+# base BEFORE the #473 re-key/backfill, so "0.9216 -> 0.9270" mixes a data change
+# with a tuning change. The like-for-like 28-feature CV on the current label base
+# is 0.9182 +- 0.0019 (research/results/spark_feature_expansion_2026-08-07.json,
+# t0_baseline_28).
 #
 # WHY 300 TRIALS, not the 100 the previous tunes used. The 100-trial run of this
 # same search selected 353 x 7 (CV F1 0.9257, cost 2471) and that point was
@@ -659,8 +664,13 @@ SPARK_PORTABLE_FEATURES = [
 # arithmetic -- 353 x 7 genuinely was the cheapest eligible trial in that run --
 # the search just had not found a compact-and-general point yet. At 300 trials it
 # did, and the rule's own pick is also the best of its eligible set on LOO
-# (0.8837 vs 0.8811 / 0.8815 / 0.8801 for the next three cheapest), so no
-# LOO-based override was applied and no selection optimism was banked.
+# (0.8837 vs 0.8811 / 0.8815 / 0.8801 for the next three cheapest).
+#
+# Do NOT read that as "no selection optimism". The decision to discard the
+# 100-trial run and re-search at 300 was itself made on LOO, so the search budget
+# was tuned against the same 33-fold set the headline 0.8839 is reported on, and
+# seven candidates were LOO-scored with the argmax shipped. Treat 0.8839 as
+# optimistic by roughly the quoted +-. See docs/SPARK_MODEL_CARD.md.
 #
 # If a future feature change makes this list stale, retune at >= 300 trials and
 # sanity-check the selected point on LOO before shipping it. CV F1 alone will not

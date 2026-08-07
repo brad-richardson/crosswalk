@@ -90,9 +90,17 @@ not a permanent one.
 Six of the original 17 — `jaro_winkler`, `soundex`, `metaphone`, `has_name_ref`,
 `has_name_target`, `name_is_generic` — **now ship**. This card previously excluded them as
 "low marginal value given levenshtein + token_sort". Measured, the name block is worth
-**+0.0033 LOO F1** at **0.00 µs/pair**: every one is a key in the `compute_name_similarity()`
+**+0.0035 LOO F1** at **0.00 µs/pair**: every one is a key in the `compute_name_similarity()`
 dict that the exporter was already building and throwing away. A consumer already calling
-that function just stops discarding six values.
+that function just stops discarding six values. (+0.0033 is the *seven*-feature tier from
+the research sweep, which includes `route_prefix_match` at 1.18 µs/pair; +0.0035 is the six
+actually shipped, from the table below. Do not pair the seven-feature delta with the
+six-feature cost.)
+
+The 0.00 µs/pair holds **only if the consumer calls `crosswalk-py`**. If tf-data-platform
+reimplements name similarity, these are six new string operations, and note Spark SQL's
+built-in `soundex()` is not a drop-in — the repo applies it to a key content word after
+normalization. The research doc lists the consumer side as inferred, not verified.
 
 The largest single contributor is `has_name_target` (+0.0043 solo, 90% of the gap to the
 full 83-feature model). Its three biggest wins — `ke_nairobi_roads` +0.093,
@@ -111,8 +119,9 @@ block's marginal cost to zero.
 
 ### LOO before/after
 
-5 seeds, 33 folds, same harness as the research doc, isolating the feature change from the
-retune:
+Seeds 42, 1, 2, 3, 4; 33 folds; same harness as the research doc. Raw data:
+[`research/results/spark_name_block_loo_2026-08-07.json`](../research/results/spark_name_block_loo_2026-08-07.json),
+regenerate with `research/spark_name_block_loo.py`.
 
 | Config | Features | Params | LOO F1 | Δ |
 |---|---|---|---|---|
@@ -120,31 +129,62 @@ retune:
 | Feature change only | 34 | 28-tuned | 0.8775 ± 0.0008 | +0.0035 |
 | **This model** | **34** | **34-tuned** | **0.8839 ± 0.0014** | **+0.0099** |
 
-Per type group, before → after: `road_poor` 0.8767 → 0.9042, `road_good` 0.8803 → 0.8911,
-`other` 0.8499 → 0.8568, `sidewalk` 0.8700 → 0.8692 (flat). For reference the full
-83-feature local model scores 0.8788 on this metric.
+The ± is the spread of the five per-seed means — **seed noise only**. It does not cover
+label-base or harness variation, and it does not cover the selection effect described under
+"Why 300 trials" below.
 
-The retune contributes +0.0027 on top of the name block's +0.0030, for +0.0057 total — which
-puts the Spark model slightly *above* the full 83-feature local model's 0.8788 on this metric.
-Do not over-read that: the two are within ~0.001 of each other and the local model is not
-tuned for LOO.
+**A single-seed reproduction will come in low.** At seed 42 alone — the repo's canonical
+seed, what CI runs — the shipped config scores ≈0.8815, about 1.7σ under the five-seed mean.
+Quote the mean; don't be surprised by 0.881 from one run.
+
+Per type group, before → after (five-seed means): `road_poor` 0.8767 → 0.9042,
+`road_good` 0.8803 → 0.8911, `other` 0.8499 → 0.8568, `sidewalk` 0.8700 → 0.8692. The
+sidewalk figure is flat *on average* but not per seed — at seed 42 it is 0.8706 → 0.8645,
+a −0.0061 regression. For reference the full 83-feature local model scores 0.8788.
+
+The retune contributes **+0.0064** on top of the name block's **+0.0035**, for **+0.0099**
+total — which puts the Spark model above the full 83-feature local model's 0.8788 on this
+metric, by 0.0051.
+
+Do not over-read that gap. The local model is not tuned for LOO and got no comparable 300-trial
+search, so this compares a freshly-searched 34-feature model against a stale-tuned 83-feature
+one — and per the selection-effect note below, 0.8839 is itself optimistic. It says the Spark
+model is *competitive* on cross-dataset generalization, not better.
+
+(An earlier version of this paragraph read "+0.0027 / +0.0030 / +0.0057 ... within ~0.001".
+Those were the superseded **35**-feature numbers, left in place when the table above was
+updated to 34. The arithmetic did not match its own table for several commits.)
 
 ## Performance Comparison
 
-| Model | Features | Match F1 | Accuracy |
-|-------|----------|----------|----------|
-| Spark formula (hand-tuned) | 6 | 0.859 | 80.9% |
-| Previous Spark model (28-feat) | 28 | 0.909 | 89.2% |
-| **This model (34-feat)** | **34** | **0.924** | **90.8%** |
-| Full matcher model | 78 | 0.930 | 91.7% |
+| Model | Features | Match F1 | Accuracy | Measured on |
+|-------|----------|----------|----------|-------------|
+| Spark formula (hand-tuned) | 6 | 0.859 | 80.9% | 2026-07-03 label base |
+| Previous Spark model (28-feat) | 28 | 0.909 | 89.2% | 2026-07-03 label base |
+| **28-feat, current label base** | **28** | **0.920** | — | **current** |
+| **This model (34-feat)** | **34** | **0.924** | **90.8%** | **current** |
+| Full matcher model | 78 | 0.930 | 91.7% | 2026-07-03 label base |
+
+**Read the "measured on" column before quoting a delta.** The honest like-for-like
+comparison is the two bold rows: **0.920 → 0.924, about +0.004**. Comparing 0.909 to 0.924
+and calling it +0.015 is wrong — most of that gap is the #473 re-key/backfill of the label
+base, not this feature change. The 0.920 comes from
+[`research/results/spark_feature_expansion_2026-08-07.json`](../research/results/spark_feature_expansion_2026-08-07.json)
+(`t0_baseline_28`, raw holdout, 0.9194 ± 0.0018 over five seeds; 0.9201 at seed 42).
+
+Two further cautions on attributing even that +0.004 to the retune:
+
+* The same file's `t2_names_35` tier — the name block under the **old** hyperparameters —
+  already scores 0.9237 raw at seed 42. On holdout, the retune adds ≈nothing; its
+  contribution shows up on LOO, not here.
+* The CV comparison quoted elsewhere in this card (0.9216 → 0.9270) has the same defect in
+  reverse: 0.9216 is from the 2026-07-03 tuning run. The like-for-like committed 28-feature
+  CV on the current label base is 0.9182 ± 0.0019.
 
 **These rows are not all on the same footing — read the caveats before quoting the deltas.**
 
-* The 28-feature row was measured 2026-07-03. The label base has since been re-keyed and
-  fully backfilled (#473), so part of the 0.909 → 0.924 gap is corrected input data
-  rather than the added features, and part is the hyperparameter retune. For a
-  like-for-like comparison where the feature set is the *only* moving part, use the LOO
-  table below (0.8740 → 0.8775 for the features alone) or the 5-seed tier table in
+* For a comparison where the feature set is the *only* moving part, use the LOO table below
+  (0.8740 → 0.8775 for the features alone) or the 5-seed tier table in
   [research/spark_feature_expansion_2026-08-07.md](../research/spark_feature_expansion_2026-08-07.md).
 * The full-model row is the 78-feature model as it stood when this table was measured;
   the local model has since grown to 83 features, and the row has not been re-measured.
@@ -201,9 +241,13 @@ and breaks ties on `n_estimators * max_depth`, a proxy that predicted +10% trave
 for a point that measured ~40% slower under load. A shallow-wide shape can therefore win
 the rule while generalizing worse across datasets.
 
-At 300 trials the search found a compact-and-general point, and the rule's own pick is
-also the best of its eligible set on LOO, so no LOO-based override was applied and no
-selection optimism was banked:
+At 300 trials the search found a compact-and-general point, and the rule's own pick is also
+the best of its eligible set on LOO:
+
+Candidate scoring used **3 seeds (42, 1, 2)**, not the 5 used for the before/after table —
+which is why "34 features + 28-tuned params" reads 0.8777 here and 0.8775 there, and the
+shipped config 0.8837 here and 0.8839 there. Same configs, different seed sets. Raw data:
+[`research/results/spark_retune_candidates_2026-08-07.json`](../research/results/spark_retune_candidates_2026-08-07.json).
 
 | Candidate | LOO F1 | Shape | Cost |
 |---|---|---|---|
@@ -217,6 +261,25 @@ selection optimism was banked:
 **Retune at ≥300 trials and sanity-check the selected point on LOO before shipping it.**
 CV F1 alone does not catch this failure mode.
 
+**Honest accounting of the selection effect.** An earlier draft of this section claimed "no
+LOO-based override was applied and no selection optimism was banked". That is not
+supportable, and the correction matters more than the claim did:
+
+* The decision to discard the 100-trial run and re-search at 300 was itself made **on LOO**.
+  The trial count is a parameter of the selection procedure, and it was tuned against the
+  same 33-fold set reported as the headline generalization metric. The stopping rule was
+  effectively "search until LOO likes the answer."
+* Within the final run, seven candidates were LOO-scored and the argmax is reported. The gap
+  to the runner-up (0.8837 vs 0.8823) is about 1σ of the quoted band, and that band is seed
+  noise only — it does not price in taking a maximum over seven evaluations.
+* "The rule's own pick is also the best on LOO" is weaker evidence than it reads, because
+  that run was kept *because* it produced a good LOO number.
+
+Treat **0.8839 as optimistic by something on the order of the quoted ±**, not as a clean
+held-out estimate. The direction of the result is solid and reproduces at single seeds; the
+third decimal place is not something to bank. A genuinely clean number would need a search
+budget fixed in advance and a LOO evaluation run once, after selection.
+
 ## Inference Latency
 
 `.predict` on 1M random float32 rows, median of 7 runs, XGBoost `hist`, both models
@@ -228,9 +291,13 @@ Apple Silicon numbers:
 | Previous | 28 | 224 x 10 | 0.299 s | ~3.35M rows/sec | 1176 KB |
 | **This model** | **34** | **168 × 9** | **0.310 s** | **~3.22M rows/sec** | **1268 KB** |
 
-**Net cost: ~4% throughput, +8% artifact size.** Two effects cancel most of the way out —
-6 more columns to marshal into the DMatrix costs a few percent, while the smaller tree
-ensemble (traversal cost 1512 vs 2240) gives most of it back.
+**Net cost: +8% artifact size; throughput is a wash.** The −4% above is **inside run-to-run
+noise** and should not be quoted as a regression: repeat measurements on this box put the
+sign on both sides of zero (one interleaved run had the new model 7% *faster*). Two effects
+genuinely do oppose each other — 6 more columns to marshal into the DMatrix, against a
+smaller tree ensemble (traversal cost 1512 vs 2240) — but this benchmark cannot resolve
+which wins, and an earlier version of this paragraph asserted a mechanism at a precision the
+data does not support.
 
 Consumer-side feature computation adds **0.00 µs/pair**: all 6 added features are keys
 `compute_name_similarity()` already returns.

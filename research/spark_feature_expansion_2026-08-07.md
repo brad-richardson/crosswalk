@@ -112,10 +112,14 @@ The measured end state, 5 seeds:
 | Feature change only | 34 | 28-tuned | 0.8775 ± 0.0008 | +0.0035 |
 | Shipped | 34 | 34-tuned (300 trials) | **0.8839 ± 0.0014** | **+0.0099** |
 
-Note the retune is worth more than the features (+0.0064 vs +0.0035) — the widening's
-real value was partly in forcing a search that had gone stale. Standing guidance, now in
-`config.py`: retune at ≥300 trials and sanity-check the selected point on LOO before
-shipping. CV F1 alone does not catch this.
+Note the retune is worth more than the features (+0.0064 vs +0.0035) — but that split is
+**confounded**. The comparison is 34 features + a fresh 300-trial search against 28 features
++ a five-week-old 100-trial one. A fresh search on the 28-feature set was never run, so "the
+features helped" and "any fresh search helps" are not separated. §3's recommended tier (t2a,
+29 features, LOO 0.8783) was likewise never retuned — §5 lists that as explicitly not
+measured. The experiment that would settle it is a 300-trial retune of the 28-feature set,
+and it has not been run. Standing guidance, now in `config.py`: retune at >= 300 trials and
+sanity-check the selected point on LOO before shipping. CV F1 alone does not catch this.
 
 Consequences for the follow-up PR, on top of §4: `SPARK_PORTABLE_XGB_PARAMS` was
 Optuna-tuned for 28 features, so the retune (§4.2) is a required step rather than
