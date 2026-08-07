@@ -11,8 +11,9 @@ This module *proves* that by computation rather than by reading:
 :func:`compute_spark_addable_features` takes only ``(ref_geom, target_geom,
 ref_names, target_names)`` -- no STRtree, no connector graph, no topology dicts,
 no native-target degrees -- and reproduces the authoritative
-``compute_pair_features()`` output for all 17 columns bit-for-bit on real
-labelled pairs. The same fixture shows the genuinely context-dependent columns
+``compute_pair_features()`` output for all 17 columns on real labelled pairs --
+bit-for-bit for the 15 that vary across the fixture, and equal-but-degenerate for
+the 2 that are constant on it (see DEGENERATE_ON_FIXTURE). The same fixture shows the genuinely context-dependent columns
 (topology, graphlet, clustering, crossing angle, parallel sibling, endpoint
 proximity) collapsing to NaN when that context is withheld, which is what makes
 them un-addable regardless of importance score.
@@ -130,6 +131,25 @@ TOPOLOGY_FEATURES = FEATURE_CATEGORIES["Topology"]
 # exercises reversed alignments, partial coverage, and missing names.
 SAMPLE_DATASETS = ["us_boston_streets", "de_berlin_roads", "us_seattle_sidewalks"]
 SAMPLE_PAIRS_PER_DATASET = 60
+
+# Features that are legitimately CONSTANT across the whole fixture, so the parity
+# test below cannot distinguish a correct implementation from a stub returning
+# that constant. Measured 2026-08-07 on the 180-pair fixture:
+#   route_prefix_match  -- NaN on all 180 (needs a route designation on BOTH sides;
+#                          non-NaN on 1 of 5,532 stored labels repo-wide)
+#   name_is_generic     -- 0.0 on all 180 (no generic-pattern names in these three
+#                          urban street/sidewalk layers)
+# They are still compared for equality; the point is that "proven bit-for-bit" is
+# a strong claim for the other 15 and a weak one for these two. Pinned by
+# test_degenerate_fixture_features_are_exactly_the_known_two so the set cannot
+# grow silently. The fix, if it ever needs one, is a fourth sample dataset
+# carrying route designations and generic names -- that covers both.
+DEGENERATE_ON_FIXTURE = ["route_prefix_match", "name_is_generic"]
+
+
+def _repo_root() -> Path:
+    """Repo root, resolved from this file rather than the CWD."""
+    return Path(__file__).resolve().parent.parent
 
 
 # =============================================================================
@@ -256,8 +276,10 @@ def sample_pairs():
     from crosswalk.labeling.data_store import DataStore
 
     pairs = []
+    loaded = {}
     for dataset in SAMPLE_DATASETS:
         gdf = DataStore(dataset_id=dataset).gdf
+        loaded[dataset] = len(gdf)
         if len(gdf) == 0:
             continue
         gdf = gdf.head(SAMPLE_PAIRS_PER_DATASET)
@@ -281,8 +303,22 @@ def sample_pairs():
                 }
             )
 
-    if not pairs:
-        pytest.skip("No stored pair data under labels/data — run from repo root")
+    # DataStore._load swallows every exception and returns an empty frame, so an
+    # unmaterialized Git LFS pointer or a corrupt parquet reaches us as "no pairs"
+    # rather than an error. Without this assert that silently skips the whole
+    # module -- or worse, passes at reduced coverage if only one of the three
+    # datasets failed. Fail loudly: every claim in this file rests on the fixture
+    # being complete.
+    expected = len(SAMPLE_DATASETS) * SAMPLE_PAIRS_PER_DATASET
+    assert len(pairs) == expected, (
+        f"Fixture is incomplete: {len(pairs)} pairs, expected {expected}. "
+        f"Rows loaded per dataset: {loaded}. A zero means "
+        "labels/data/dataset=<name>/data.parquet is missing, is an unmaterialized "
+        "Git LFS pointer, or failed to parse (DataStore._load swallows the "
+        "exception). Run `git lfs pull` from the repo root. Asserted rather than "
+        "skipped because a partial fixture still passes every test here while "
+        "proving much less."
+    )
     return pairs
 
 
@@ -334,8 +370,13 @@ def test_addable_features_are_currently_excluded():
     for feature in ADDABLE_FEATURES:
         assert feature in FEATURE_COLUMNS, f"{feature} is not a declared feature"
         assert feature not in SPARK_PORTABLE_FEATURES, f"{feature} already ships"
-    assert len(ADDABLE_FEATURES) == 17
-    assert len(set(ADDABLE_FEATURES)) == 17
+    assert len(ADDABLE_FEATURES) == len(set(ADDABLE_FEATURES)) == 17, (
+        f"Expected 17 distinct addable features, got {len(ADDABLE_FEATURES)} "
+        f"({len(set(ADDABLE_FEATURES))} distinct). If a feature genuinely became "
+        "Spark-addable, add it to ADDABLE_NAME_FEATURES or ADDABLE_GEOMETRY_FEATURES, "
+        "prove it in test_addable_features_match_authoritative_computation, and update "
+        "the counts in research/spark_feature_expansion_2026-08-07.md."
+    )
 
 
 def test_excluded_features_partition_into_three_buckets():
@@ -353,10 +394,13 @@ def test_excluded_features_partition_into_three_buckets():
         f"Unclassified: {sorted(set(excluded) - set(buckets))}; "
         f"stale: {sorted(set(buckets) - set(excluded))}"
     )
-    assert (len(ADDABLE_FEATURES), len(CONTEXT_DEPENDENT_FEATURES), len(TOPOLOGY_FEATURES)) == (
-        17,
-        16,
-        22,
+    counts = (len(ADDABLE_FEATURES), len(CONTEXT_DEPENDENT_FEATURES), len(TOPOLOGY_FEATURES))
+    assert counts == (17, 16, 22), (
+        f"Bucket sizes are {counts}, expected (17, 16, 22). The partition assert above "
+        "still passed, so every excluded feature is classified -- meaning a feature "
+        "MOVED between buckets, which changes its Spark-feasibility verdict. Re-derive "
+        "the affected claim in research/spark_feature_expansion_2026-08-07.md before "
+        "updating these numbers."
     )
 
 
@@ -384,6 +428,12 @@ def test_addable_features_match_authoritative_computation(sample_pairs, authorit
     name structs, all 17 columns come out identical to the value the full
     pipeline stores. Exact equality (not approx) because both paths run the same
     helpers on the same aligned sublines.
+
+    Caveat, pinned by test_degenerate_fixture_features_are_exactly_the_known_two:
+    2 of the 17 are constant across this fixture, so for those this asserts
+    agreement on a single value rather than across a distribution. A stub
+    returning that constant would pass. The claim is strong for 15 and weak for
+    ``route_prefix_match`` / ``name_is_generic``.
     """
     mismatches = []
     for pair, expected in zip(sample_pairs, authoritative, strict=True):
@@ -400,13 +450,54 @@ def test_addable_features_match_authoritative_computation(sample_pairs, authorit
     assert not mismatches, f"Geometry-only path diverged on {len(mismatches)}: {mismatches[:5]}"
 
 
+def test_degenerate_fixture_features_are_exactly_the_known_two(authoritative):
+    """Pin which addable features are constant across the fixture.
+
+    The parity test compares all 17 columns, but a column taking the same value on
+    all 180 pairs cannot distinguish a correct implementation from a stub
+    returning that constant -- returning ``float("nan")`` for
+    ``route_prefix_match``, or ``0.0`` for ``name_is_generic``, passes it. So
+    "proven bit-for-bit" is a strong claim for 15 of the 17 and a weak one for
+    these two, and that distinction belongs in the codebase rather than in a
+    reviewer's head.
+
+    Fails if the degenerate set grows (a new feature became untestable here) or
+    shrinks (the fixture now exercises one -- upgrade the claim).
+    """
+    constant = []
+    for feature in ADDABLE_FEATURES:
+        values = [f[feature] for f in authoritative]
+        first = values[0]
+        first_nan = isinstance(first, float) and math.isnan(first)
+        if all(
+            (first_nan and isinstance(v, float) and math.isnan(v)) or (not first_nan and v == first)
+            for v in values
+        ):
+            constant.append(feature)
+
+    assert sorted(constant) == sorted(DEGENERATE_ON_FIXTURE), (
+        f"Constant-on-fixture features changed: {sorted(constant)}, expected "
+        f"{sorted(DEGENERATE_ON_FIXTURE)}. GROWN => the parity proof covers fewer "
+        "features than claimed; add a sample dataset exercising the new one. "
+        "SHRUNK => the fixture now varies it, so drop it from DEGENERATE_ON_FIXTURE "
+        "and strengthen the claim in the module docstring."
+    )
+
+
 def test_context_dependent_features_nan_without_network_context(authoritative):
     """Withholding the spatial index / connector graph NaNs the other features.
 
-    Complement to the test above: it is not that everything is computable
-    per-pair. These 16 columns have no value at all without a network-wide
-    structure, so they cannot follow the 17 into a Spark UDF however useful they
-    are locally.
+    Complement to the test above, but NOT the same class of evidence, and the
+    difference matters. ``compute_pair_features`` branches on ``is not None`` for
+    graphlet data and sibling context and falls back to NaN defaults, so this is
+    substantially true by construction: it asserts the function returns its
+    documented no-context default when given no context.
+
+    What it is good for is the one-way direction -- if a feature listed here ever
+    starts computing without network context, it was misclassified and belongs in
+    the addable set. That is worth guarding. What it is NOT is proof of
+    infeasibility on a par with the parity test above, which actually recomputes
+    17 columns from a bare pair. Do not cite it as such.
     """
     checked = CONTEXT_DEPENDENT_FEATURES + list(TOPOLOGY_FEATURES)
     always_nan = dict.fromkeys(checked, True)
@@ -473,7 +564,7 @@ def _load_research_module():
     """
     import importlib.util
 
-    path = Path(__file__).resolve().parent.parent / "research" / "spark_feature_expansion.py"
+    path = _repo_root() / "research" / "spark_feature_expansion.py"
     if not path.exists():
         pytest.skip(f"{path} not found — run from repo root")
     spec = importlib.util.spec_from_file_location("spark_feature_expansion", path)
@@ -489,22 +580,42 @@ def test_loo_harness_reproduces_eval_utils_on_full_feature_set():
     Every LOO number in the research writeup comes from ``loo_f1``, which
     reimplements the fold construction rather than calling ``run_loo_by_type_cv``
     (that function has no feature-subset knob). A reimplementation is only worth
-    as much as its parity check: if it drifts from ``eval_utils`` -- fold
-    composition, the MIN_LOO_LABELS filter, dedup, per-fold ``scale_pos_weight``,
-    the METRIC_AVERAGE choice -- the whole tier table silently stops meaning what
-    it says.
+    as much as its parity check: if it drifts from ``eval_utils`` the whole tier
+    table silently stops meaning what it says.
 
-    Run on the smallest eligible datasets so this stays a parity check rather
-    than a second full sweep; the code under test does not branch on dataset
-    size, and both harnesses see the identical pre-filtered frame.
+    The input frame is deliberately doctored to exercise branches real data does
+    not. Verified by mutation 2026-08-07 -- each of these, applied to ``loo_f1``,
+    fails this test:
+
+    * fold composition (train on same type_group only)
+    * per-fold ``scale_pos_weight`` (pin to 1.0)
+    * ``METRIC_AVERAGE`` ("binary" -> "macro")
+    * column selection (truncate ``cols``)
+    * the ``xgb_params is None`` check (-> truthiness, so ``{}`` would silently
+      fall through to SPARK_PORTABLE_XGB_PARAMS)
+    * the ``MIN_LOO_LABELS`` filter -- guarded by ``truncated`` below
+    * the dedup call -- guarded by ``dup`` below
+
+    The last two need that help: all 33 real datasets have zero duplicate pairs,
+    and the smallest still hold 29+ labels, far above MIN_LOO_LABELS. An earlier
+    version of this docstring claimed to pin them and did not. Note the dedup
+    guard catches *removing* the dedup (row count diverges); it does not pin
+    ``keep="last"`` vs ``keep="first"``, which would need the flipped label to
+    move a fold metric and is not guaranteed on one row in fifty.
+
+    Trained with a deliberately tiny booster on both sides -- parity is about fold
+    construction and metric computation, not model quality, and the full-size
+    default made this the second-most expensive test in the repo under ``-n auto``.
     """
+    import pandas as pd
+
     from crosswalk.config import FEATURE_COLUMNS
     from crosswalk.eval_utils import MIN_LOO_LABELS, run_loo_by_type_cv
     from crosswalk.labeling.label_store import LabelStore
 
-    labels_dir = Path("labels")
+    labels_dir = _repo_root() / "labels"
     if not labels_dir.exists():
-        pytest.skip("Labels directory not found — run from repo root")
+        pytest.skip(f"Labels directory not found at {labels_dir}")
 
     module = _load_research_module()
 
@@ -512,23 +623,45 @@ def test_loo_harness_reproduces_eval_utils_on_full_feature_set():
     labels = labels[labels["label"].isin({"match", "no_match"})]
     counts = labels.groupby("dataset").size()
     eligible = counts[counts >= MIN_LOO_LABELS].sort_values()
-    if len(eligible) < 3:
+    if len(eligible) < 5:
         pytest.skip(f"Only {len(eligible)} datasets clear MIN_LOO_LABELS — nothing to compare")
-    subset = labels[labels["dataset"].isin(eligible.index[:6])].copy()
 
-    # xgb_params={} pins DEFAULT_XGB_PARAMS on both sides; loo_f1 would otherwise
-    # default to SPARK_PORTABLE_XGB_PARAMS and the comparison would be vacuous.
-    mine = module.loo_f1(subset, list(FEATURE_COLUMNS), seed=42, xgb_params={})
-    theirs = run_loo_by_type_cv(labels=subset, seed=42).to_frame()
+    subset = labels[labels["dataset"].isin(list(eligible.index[:4]))].copy()
+
+    # Guard the MIN_LOO_LABELS filter: a real dataset cut below the threshold.
+    # Both harnesses must drop it, so it must NOT appear as a fold. Reuse an
+    # existing dataset name so build_type_groups can still classify it.
+    truncated_name = eligible.index[4]
+    truncated = labels[labels["dataset"] == truncated_name].head(MIN_LOO_LABELS - 1)
+    assert len(truncated) == MIN_LOO_LABELS - 1
+
+    # Guard the dedup: one exact (gers_id, target_id, dataset) repeat with the
+    # label flipped, so dropping the dedup changes that fold's row count.
+    dup = subset.iloc[[0]].copy()
+    dup["label"] = "no_match" if dup.iloc[0]["label"] == "match" else "match"
+
+    subset = pd.concat([subset, truncated, dup], ignore_index=True)
+
+    # Tiny booster, identical on both sides. Both harnesses merge these over
+    # DEFAULT_XGB_PARAMS, so the comparison stays apples-to-apples.
+    cheap = {"n_estimators": 24, "max_depth": 3}
+
+    mine = module.loo_f1(subset, list(FEATURE_COLUMNS), seed=42, xgb_params=cheap, n_jobs=2)
+    theirs = run_loo_by_type_cv(labels=subset, seed=42, xgb_params=cheap).to_frame()
 
     assert mine["loo_n_folds"] == len(theirs), (
         f"Fold count diverged: harness ran {mine['loo_n_folds']}, eval_utils ran {len(theirs)}"
     )
-
-    reference = theirs.set_index("dataset")
-    assert {r["dataset"] for r in mine["loo_rows"]} == set(reference.index), (
+    evaluated = {r["dataset"] for r in mine["loo_rows"]}
+    assert evaluated == set(theirs["dataset"]), (
         "Harness and eval_utils evaluated different datasets"
     )
+    assert truncated_name not in evaluated, (
+        f"{truncated_name} was cut to {MIN_LOO_LABELS - 1} labels and must be filtered "
+        "by MIN_LOO_LABELS, but it was evaluated as a fold"
+    )
+
+    reference = theirs.set_index("dataset")
     for row in mine["loo_rows"]:
         expected = reference.loc[row["dataset"]]
         assert row["type_group"] == expected["type_group"], row["dataset"]
@@ -670,73 +803,13 @@ def test_addable_feature_marginal_cost(sample_pairs):
     )
 
 
-@pytest.mark.slow
-def test_tier_model_sizes_and_inference(tmp_path):
-    """Train three tiers; report holdout F1, artifact size, and inference cost.
-
-    A compact version of ``research/spark_feature_expansion.py`` (single seed,
-    no LOO CV) so the size/latency side of the tradeoff is reproducible from the
-    test suite. The two widened tiers bracket the decision space: the smallest
-    one worth measuring (28 + ``has_name_target``, zero marginal compute) and
-    every feasible feature at once.
-
-    Asserts only that widening the feature set does not blow up the artifact the
-    Spark job has to ship -- the F1 verdict needs LOO CV over 5 seeds, which is
-    what the research script is for. Nothing here endorses a tier.
-    """
-    import xgboost as xgb
-
-    from crosswalk.config import SPARK_PORTABLE_XGB_PARAMS
-    from crosswalk.matching.ml import MLMatcher
-
-    labels_dir = Path("labels")
-    if not labels_dir.exists():
-        pytest.skip("Labels directory not found — run from repo root")
-
-    tiers = {
-        "baseline_28": list(SPARK_PORTABLE_FEATURES),
-        "plus_has_name_target_29": list(SPARK_PORTABLE_FEATURES) + ["has_name_target"],
-        "all_feasible_45": list(SPARK_PORTABLE_FEATURES) + ADDABLE_FEATURES,
-    }
-
-    report = {}
-    for name, features in tiers.items():
-        keep = set(features)
-        matcher = MLMatcher()
-        metrics = matcher.train(
-            labels_dir=labels_dir,
-            test_size=0.2,
-            binary=True,
-            exclude_features=[f for f in FEATURE_COLUMNS if f not in keep],
-            seed=42,
-            **SPARK_PORTABLE_XGB_PARAMS,
-        )
-        model_path = tmp_path / f"{name}.json"
-        matcher.model.get_booster().save_model(str(model_path))
-
-        booster = xgb.Booster()
-        booster.load_model(str(model_path))
-        batch = np.random.default_rng(0).random((50_000, len(features)), dtype=np.float32)
-        booster.predict(xgb.DMatrix(batch[:1024]))  # warm up
-        start = time.perf_counter()
-        booster.predict(xgb.DMatrix(batch))
-        elapsed = time.perf_counter() - start
-
-        report[name] = {
-            "n_features": len(matcher.feature_names),
-            "cv_f1": metrics["cv_f1_mean"],
-            "test_f1": metrics["test_f1_production"],
-            "model_kb": model_path.stat().st_size / 1024,
-            "us_per_row": elapsed / len(batch) * 1e6,
-        }
-
-    print("")
-    for name, row in report.items():
-        print(
-            f"  {name:16s} n={row['n_features']:3d} cv_f1={row['cv_f1']:.4f} "
-            f"test_f1={row['test_f1']:.4f} model={row['model_kb']:7.1f}KB "
-            f"infer={row['us_per_row']:.2f}us/row"
-        )
-
-    assert report["all_feasible_45"]["n_features"] == 45
-    assert report["all_feasible_45"]["model_kb"] < 4 * report["baseline_28"]["model_kb"]
+# NOTE: a `test_tier_model_sizes_and_inference` used to live here, training three
+# feature tiers and printing an F1/size/latency table. Removed 2026-08-07: it was
+# the most expensive test in the repo under the default `-n auto` (three
+# concurrent XGBoost trainings at n_jobs=-1 oversubscribe OpenMP across xdist
+# workers -- this file went 6s -> ~10min with it present), and its only assertions
+# were `n_features == 45`, already implied by the partition test, and
+# `model_kb < 4 * baseline_kb` against a measured ratio of 1.03: ~290% slack, so it
+# could not fire short of a catastrophic regression. The table it printed is the
+# real deliverable and `research/spark_feature_expansion.py` already produces it
+# with more seeds and LOO CV. Cost without detection is not a test.
