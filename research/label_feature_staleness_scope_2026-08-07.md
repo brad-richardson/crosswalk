@@ -1,6 +1,6 @@
 # Label-feature staleness: scope for a global backfill + retrain
 
-**Date:** 2026-08-07 · **Status:** scoped, not executed · **Decision needed before starting**
+**Date:** 2026-08-07 · **Status:** EXECUTED — see "Outcome" at the bottom
 
 ## The problem
 
@@ -202,3 +202,99 @@ nothing records *which inputs* produced them, so re-fetching raw data silently
 invalidates the store — which is how 21.6% accumulated unnoticed. A cheap fix:
 record a raw-input fingerprint alongside `feature_version` and have `backfill
 --dry-run` (or CI) report partitions whose inputs have moved.
+
+## Outcome (all steps executed 2026-08-07)
+
+Landed as one unit on `fix/rekey-orphaned-labels` (#473), because the re-key,
+the backfill and the retrain are entangled by the fingerprint lockstep: changing
+stored features changes `labeled_data_sha256`, so shipping them without a
+retrain fails CI by construction.
+
+| step | result |
+|---|---|
+| 2. re-key | 493/511 rows recovered (96.5%), `41a0e83` |
+| 3. backfill | 34 datasets, 5,531 rows, **skipped=0** — no silent label loss, `db2bae0` |
+| 4. measure | **95.1% of rows touched, 69 of 83 features moved** |
+| 5. re-measure LOO | uniform small drop, see below |
+| 6. retrain + reship | holdout 90.6%, CV F1 0.923 ± 0.011, `fb6397d` |
+| 7. floors | **left unchanged** (see below) |
+| 8. Boston + gate | **PASS** — F1 0.9143 ≥ 0.83, exact 0.5847 ≥ 0.5 |
+
+### The staleness was far worse than the 21.6% lower bound
+
+Step 4 finally measured what step 1 could only infer. `class_similarity`
+disagreement (21.6%) was a *lower bound* on a much larger problem: **95.1% of
+label rows had at least one feature change**, across **69 of 83 features**. The
+drift was dominated not by the class features that surfaced it but by graph
+topology — `graphlet_similarity` (5,023 rows), `endpoint_degree_similarity`
+(4,461) — exactly the features a target re-fetch would disturb and exactly the
+ones the `class_similarity` probe was blind to.
+
+### LOO moved down slightly, and that is the honest number
+
+True-LOO macro-F1, seed 42, pre- vs post-backfill:
+
+| group | pre | post | delta |
+|---|---:|---:|---:|
+| road_good | 0.8878 | 0.8832 | −0.0046 |
+| road_poor | 0.9266 | 0.9244 | −0.0022 |
+| sidewalk | 0.8714 | 0.8698 | −0.0016 |
+| other | 0.8957 | 0.8891 | −0.0066 |
+
+Per the standing decision, floors were **not** re-fitted to these numbers — the
+gate keeps measuring against the pre-backfill bar. The drop is small, uniform,
+and in the expected direction: some previously measured performance rested on
+features computed against raw data that had since been re-fetched.
+
+### `other` straddles its floor, for reasons that predate this work
+
+`other` retains a margin of only **+0.0011** and its across-seed spread widened
+0.0026 → 0.0168 (at seed 7 it scores 0.8787, *below* floor). The regression test
+is seeded, so it will not flake — but the next data change will likely trip it
+for unrelated reasons. Per-dataset attribution:
+
+| dataset | n | pre s42 | post s42 | seed swing (s7−s42) |
+|---|---:|---:|---:|---|
+| ch_geneva_hiking_routes | 50 | 0.6780 | 0.6667 | 0.0000 → −0.0226 |
+| co_bogota_bike_network | 29 | 0.9825 | 0.9643 | 0.0000 → −0.0188 |
+| us_boston_bike_network | 86 | 0.9487 | 0.9620 | 0.0000 → 0.0000 |
+| us_frisco_trails | 177 | 0.9735 | 0.9634 | −0.0101 → 0.0000 |
+
+`other` is a macro-average over 4 datasets. `ch_geneva_hiking_routes` at ~0.67 —
+0.30 below its groupmates, and already that low *before* the backfill — is why
+the group sits near its floor at all; `co_bogota_bike_network`'s 29 labels are
+why it is seed-sensitive. Neither is a code defect.
+
+**The re-key is exonerated by this table.** `co_bogota_bike_network` had 100% of
+its labels geometrically re-keyed and still scores 0.96; a mis-key would have
+destroyed it. One dataset (`us_boston_bike_network`) *improved* by +0.013.
+
+### Boston before/after (both models verified loaded by fingerprint)
+
+| Metric | Before | After | Delta |
+|---|---:|---:|---:|
+| Matched | 10,460 | 10,475 | +15 |
+| Review | 66 | 45 | −21 |
+| Unmatched | 318 | 324 | +6 |
+| Bridge matches | 14,641 | 14,600 | −41 |
+| Match groups | 2,934 | 2,928 | −6 |
+| Sliver edges dropped | 5,150 | 3,544 | −1,606 |
+
+## Follow-ups this created
+
+- **`ch_geneva_hiking_routes` needs a data-quality look** — it is the drag on
+  `other`, independent of this change. Note `ch_geneva_pedestrian_network` is
+  already queued as the top cross-mode spot-check (424 high-conf vehicle↔
+  pedestrian, 19.1%); same city, plausibly the same upstream problem, but that
+  is a hypothesis, not a finding.
+- **`co_bogota_bike_network` needs more labels** (29 → ~100) to stop being a
+  seed-sensitive quarter of a gated metric.
+- **18 unrecoverable orphaned labels** (amsterdam 13, utah 4, sg_footpaths 1)
+  need re-labeling or retirement.
+- **Raw-input fingerprint** (see "Durable follow-up" above) — this whole
+  exercise was only discovered by accident.
+- **`fetch.id_column` volatility audit** — Seattle survived its re-fetch because
+  it keys on a stable COMPKEY. Datasets without such a column are the ones that
+  orphan.
+- **`test_loo_cv.py` under xdist** — `addopts = "-n auto"` makes every worker
+  re-run the module-scoped fixture (~18 redundant 33-fold CV runs).
