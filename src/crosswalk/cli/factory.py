@@ -546,6 +546,22 @@ def publish(
         )
         raise typer.Exit(1)
 
+    # A real publish must name its own host. --site-url is baked into index.json
+    # (which the live dashboard links from) and into the credibility page's query
+    # examples, so falling back to the placeholder silently ships dead links --
+    # which is exactly what happened on 2026-08-07 and had to be re-published.
+    # Dry runs still default, so the examples keep their shape while iterating.
+    if not dry_run and not site_url:
+        console.print(
+            "[red]--site-url is required with --no-dry-run.[/red] It is written into "
+            "index.json and the credibility page's query examples, and the default is a "
+            "deliberately invalid placeholder. Pass the public base URL of the published "
+            "tree, e.g.\n\n"
+            "    crosswalk factory publish --all --no-dry-run \\\n"
+            "        --site-url https://pub-<id>.r2.dev\n"
+        )
+        raise typer.Exit(2)
+
     gate_floors = load_gate_floors(PROJECT_ROOT / "mbench" / "datasets.toml")
     report = assemble_staging(
         factory_root=root,

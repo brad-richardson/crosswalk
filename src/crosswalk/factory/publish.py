@@ -48,9 +48,21 @@ INDEX_HTML = "index.html"
 CHECKSUMS_TXT = "checksums.txt"
 BRIDGES_PREFIX = "bridges"
 
-# Default public base URL used in the generated query examples. Overridden by
-# ``--site-url``; this placeholder makes the examples copy-pasteable in shape.
-DEFAULT_SITE_URL = "https://bridges.example.com"
+# Placeholder public base URL, so the generated query examples have the right
+# SHAPE in a dry run without anyone having chosen a host yet. Overridden by
+# ``--site-url``.
+#
+# It deliberately uses the .invalid TLD (RFC 2606 -- guaranteed never resolvable)
+# rather than an example.com-style name. The previous default,
+# "https://bridges.example.com", shipped to production once: a real publish ran
+# without --site-url, and the placeholder rendered as a normal-looking link in
+# the live dashboard footer and in the credibility page's query examples. A
+# plausible-looking dead URL is worse than an obviously broken one, because
+# nothing about it invites a second look.
+#
+# `publish --no-dry-run` now refuses to run unless --site-url is passed
+# explicitly, so this value can no longer reach a published artifact at all.
+DEFAULT_SITE_URL = "https://REPLACE-WITH-YOUR-HOST.invalid"
 
 # Overture release used in the generated geometry-join example. Deliberately NOT
 # the bridge release: Overture's S3 bucket only keeps recent releases, so old
