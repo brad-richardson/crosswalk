@@ -14,9 +14,29 @@ import xgboost as xgb
 from crosswalk.config import SPARK_PORTABLE_FEATURES, SPARK_PORTABLE_XGB_PARAMS
 
 
-@pytest.fixture
-def exported_model(tmp_path):
-    """Train and export a Spark-portable model to a temp directory."""
+@pytest.fixture(scope="module")
+def exported_model(tmp_path_factory):
+    """Train and export a Spark-portable model to a temp directory.
+
+    Module-scoped: this trains a full XGBoost model, and all tests in this file
+    consume it read-only. As a function-scoped fixture it retrained once per
+    test -- 6 trainings for 6 assertions, ~115s of measured setup.
+
+    Scope alone is not enough under the repo default ``-n auto``: xdist's default
+    ``--dist load`` scatters the tests across workers and each worker re-runs the
+    fixture. ``--dist loadscope`` (set in ``addopts``) keeps the group on one
+    worker, so this runs exactly once -- 79s of setup plus six ~0.03s calls.
+
+    Note what this does and does not buy. It removes redundant *work*; it does
+    not necessarily shorten the job, because those trainings were already running
+    concurrently. Measured end to end the suite is roughly wall-clock neutral.
+    The reason to do it is that six identical trainings is waste that scales with
+    worker count, not that the clock moves.
+
+    (These six are methods of one class, so loadscope groups them by CLASS. It
+    groups by module only for bare test functions -- see the addopts comment.)
+    """
+    tmp_path = tmp_path_factory.mktemp("spark_export")
     from crosswalk.config import FEATURE_COLUMNS
     from crosswalk.matching.ml import MLMatcher
     from crosswalk.model_export import build_spark_model_manifest

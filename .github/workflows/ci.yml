@@ -68,6 +68,12 @@ jobs:
         run: uv run crosswalk train
       - name: Run tests
         run: uv run pytest tests/ -v --cov=crosswalk --cov-report=xml
+      - name: Run performance tests (serial)
+        # tests/performance asserts wall-clock budgets, so it self-skips on xdist
+        # workers (tests/performance/conftest.py) and is run here on its own with
+        # -n0. ~10s for all 42. Under the parallel run these measured whatever
+        # else was co-scheduled and flaked accordingly.
+        run: uv run pytest tests/performance -v -n0 --cov=crosswalk --cov-append --cov-report=xml
       - name: Upload coverage (optional)
         uses: codecov/codecov-action@v4
         with:

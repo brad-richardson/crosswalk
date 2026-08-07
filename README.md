@@ -427,6 +427,10 @@ factory workflow:
 # Run tests
 pytest tests/
 
+# Timing-sensitive performance tests skip under the default parallel run
+# (tests/performance/conftest.py); run them serially:
+pytest tests/performance -n0
+
 # Format and lint
 ruff format src/ tests/ && ruff check src/ tests/
 ```
