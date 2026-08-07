@@ -222,7 +222,7 @@ remaining rows are open follow-ups.
 |---|---|
 | `us_boston_bike_network` → quality_hold | **done** — `quality_hold` block in `datasets/us_boston_bike_network.yaml` (since 2026-08-06) |
 | `co_bogota_roads` → quality_hold | **done** — `quality_hold` block in `datasets/co_bogota_roads.yaml` (since 2026-08-06) |
-| `fi_helsinki_roads` → fix class mapping | **partially done** — `fetch.class_mapping` now maps `toiminn_lk: 8` to `path` instead of `service`. `class_mapping` is applied at *fetch* time (`fetch/target.py:293`) and baked into `data/raw/`, so this is **inert until Helsinki is re-fetched**. Nothing detects the resulting yaml/parquet drift automatically. Re-fetch → re-run factory → re-run `scripts/cross_mode_audit.py`, then spot-check the residual footway↔residential (1,230) and path↔residential (1,372) slices |
+| `fi_helsinki_roads` → fix class mapping | **done, executed 2026-08-07** — mapping fixed, re-fetched, factory re-run, re-audited. See "Helsinki re-fetch" below. Cross-mode largely resolved, but the re-run exposed a model-side regression that needs a decision |
 | `ch_geneva_pedestrian_network` spot-check | open (highest-priority remaining) |
 | everything else in the table above | open |
 
@@ -234,6 +234,86 @@ carry `linkkityyp = 8` (*kevyen liikenteen väylä*, the combined foot/cycle way
 `linkkityyp` 10/13/14/15 = *huolto-/pelastustie*, *huoltoaukko*) and correctly
 stays mapped to `service`. `path` is the right target for 8 because the class is
 shared foot+cycle, so neither `footway` nor `cycleway` fits.
+
+## Helsinki re-fetch and re-audit (2026-08-07)
+
+Executed: `crosswalk data fetch target fi_helsinki_roads --force` →
+`crosswalk factory run fi_helsinki_roads -j 12 --force` (reference **not**
+re-fetched; still the pinned `2026-06-17.0` Overture segments) →
+`scripts/cross_mode_audit.py`.
+
+### The delta is almost purely the mapping fix
+
+Helsinki was last fetched 2026-02-21, so a re-fetch risks conflating the mapping
+change with upstream Digiroad drift. Decomposed by recomputing what the old
+parquet's classes *would* have been under the new mapping (the old file still
+carries `source_tags.toiminn_lk`):
+
+| Effect | Magnitude |
+|---|---|
+| Class-mapping fix, isolated on old rows | **57,900** rows `service` → `path` |
+| Upstream id churn since 2026-02-21 | 124 removed, 147 added (**0.06%**) |
+| Upstream class drift on the 218,982 retained ids | **0 rows** |
+
+Resulting distribution: `service` 58,094 → 196 (exactly the `toiminn_lk = 9`
+maintenance-access rows, correctly retained), `path` 0 → 57,907.
+
+### Cross-mode: resolved, as predicted
+
+| Metric | Before | After |
+|---|---:|---:|
+| matches | 227,481 | 214,529 |
+| xmode / xmode hi | 62,872 / 58,073 | 54,327 / 51,378 |
+| **xveh / xveh hi** | 62,872 / **58,073** | 6,750 / **5,270** |
+| **xveh hi %** | **25.53%** | **2.46%** |
+
+Helsinki is no longer the worst dataset in the audit (co_bogota_roads now leads).
+The remaining 51,378 `xmode hi` is dominated by `cycleway ↔ path` (47,577) — the
+benign shared-use vocabulary overlap the audit describes, now correctly typed as
+a soft ped↔bike flag instead of a vehicular one. The residual **5,270 high-conf
+vehicular** cross-mode (`cycleway↔residential` 1,508, `path↔residential` 1,280,
+`footway↔residential` 1,114, `cycleway↔tertiary` 1,008) is the slice the original
+audit predicted would need a normal spot-check. **That spot-check is still open.**
+
+### But the re-run exposed a model regression — open decision
+
+Correcting the class *cost* match coverage:
+
+| Metric | Before | After | Delta |
+|---|---:|---:|---:|
+| n_matched | 198,326 | 196,278 | −2,048 |
+| n_review | 10,983 | 2,995 | −7,988 |
+| n_unmatched | 9,797 | 19,856 | +10,059 |
+| targets with ≥1 match | 197,650 | 196,252 | −1,398 |
+
+4,058 targets lost a match and 2,660 gained one. Of the 1,883 lost targets that
+were the remapped class-8 rows, only **394 lost a match to a vehicular ref** (the
+defect being correctly rejected) — **1,489 lost a match to a cycleway/path/footway
+ref**, which is a regression, not a fix.
+
+Diagnosis of the largest regression cohort (1,308 targets, old-`service`↔`cycleway`,
+previously matched at mean confidence 0.84 / median 0.873):
+
+- The pairs are **not** lost to candidate generation: 1,316 of 1,329 survive as
+  scored candidates, and the scorer still labels 1,094 of them `match`.
+- Their **confidence fell from 0.84 to 0.72 mean**, and at that level the
+  optimizer no longer selects them — 1,163 of the 1,308 targets drop out of the
+  bridge entirely; only 145 remain, as `review`.
+
+So the shipped XGBoost model scores `path`↔`cycleway` **worse** than
+`service`↔`cycleway` — it prefers the incorrect class. That is a model artifact,
+not a reason to restore wrong source data, but it has two consequences:
+
+1. **Helsinki's stored label features are now stale.** `class` feeds the semantic/
+   class-similarity features, so every labeled Helsinki pair in `labels/features/`
+   was computed against `service`. A `crosswalk backfill` pass for
+   `fi_helsinki_roads` is required before those labels are trained on again.
+2. **The model was partly trained on the mislabeled data.** Retraining after the
+   backfill is the principled fix for the confidence drop; until then Helsinki
+   ships ~1,400 fewer matched targets (89.6% vs 90.5% match rate) in exchange for
+   removing 52,803 high-confidence vehicular cross-mode matches.
+
+Neither is done — both need a decision on sequencing against the publish backlog.
 
 **Cross-cutting**: the defect concentrates where a ped/bike/trail dataset
 overlaps a dense road network (bogota pattern) — and the audit's `xveh hi`
