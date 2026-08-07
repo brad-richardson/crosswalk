@@ -1,11 +1,18 @@
-"""Demo + guard for widening SPARK_PORTABLE_FEATURES beyond the shipped 28.
+"""Demo + guard for the boundary of SPARK_PORTABLE_FEATURES.
 
-`crosswalk export-spark-model` ships 28 of the 83 FEATURE_COLUMNS, on the stated
-rationale that they are "the subset computable from aligned geometry pairs (no
-topology, graph, or spatial-index features required)". That rationale is
-over-broad: 17 excluded features also need nothing but the two aligned
+`crosswalk export-spark-model` ships a subset of the 83 FEATURE_COLUMNS, on the
+stated rationale that they are "the subset computable from aligned geometry pairs
+(no topology, graph, or spatial-index features required)". That rationale was
+over-broad: 17 then-excluded features also need nothing but the two aligned
 geometries and the two name structs the Spark job already holds to compute
 `name_levenshtein` / `sinuosity_ref` / `ref_coverage`.
+
+6 of those 17 shipped on 2026-08-07 and the set is now 34: the name block minus
+`route_prefix_match`, which is out on fill rate (non-NaN on 1 of 5,532 stored
+labels -- see test_route_prefix_match_is_almost_always_nan). The other 11 remain
+excluded on measured value, not feasibility. This module keeps proving the
+feasibility of all 17 regardless of which currently ship -- that is what makes the
+exclusion an argument about value.
 
 This module *proves* that by computation rather than by reading:
 :func:`compute_spark_addable_features` takes only ``(ref_geom, target_geom,
@@ -92,6 +99,14 @@ ADDABLE_GEOMETRY_FEATURES = [
 ]
 
 ADDABLE_FEATURES = ADDABLE_NAME_FEATURES + ADDABLE_GEOMETRY_FEATURES
+
+# Of the 7 feasible name features, 6 shipped on 2026-08-07. `route_prefix_match`
+# did not: it is non-NaN on 1 of 5,532 stored labelled pairs (0.02%) because it
+# needs BOTH names to canonicalize to a route designation, and it is the only name
+# feature requiring a call of its own. Excluding it is what takes the block from
+# 1.18 us/pair to literally free.
+SPARSE_NAME_FEATURES = ["route_prefix_match"]
+SHIPPED_NAME_FEATURES = [f for f in ADDABLE_NAME_FEATURES if f not in SPARSE_NAME_FEATURES]
 
 # Derivable from columns the shipped 28-feature model already carries, with no
 # new geometry pass whatsoever: max(ref_coverage, target_coverage) and
@@ -365,11 +380,28 @@ def authoritative(sample_pairs):
 # =============================================================================
 
 
-def test_addable_features_are_currently_excluded():
-    """Sanity: the 17 proposed features are real, and none ships today."""
+def test_addable_features_are_declared_and_correctly_split():
+    """The 17 feasible features are real, and the shipped/excluded split is the
+    decision recorded in the research doc.
+
+    6 of the 7 name features ship (2026-08-07, 0.00 us/pair -- they are keys
+    ``compute_name_similarity()`` already returns). ``route_prefix_match`` and the
+    10 geometry features do not. All 17 stay listed here because the
+    classification is about *feasibility*, which did not change -- only the value
+    verdict did.
+    """
     for feature in ADDABLE_FEATURES:
         assert feature in FEATURE_COLUMNS, f"{feature} is not a declared feature"
-        assert feature not in SPARK_PORTABLE_FEATURES, f"{feature} already ships"
+    assert sorted(SHIPPED_NAME_FEATURES + SPARSE_NAME_FEATURES) == sorted(ADDABLE_NAME_FEATURES)
+    for feature in SHIPPED_NAME_FEATURES:
+        assert feature in SPARK_PORTABLE_FEATURES, (
+            f"{feature} is part of the name block, which shipped 2026-08-07"
+        )
+    for feature in SPARSE_NAME_FEATURES + ADDABLE_GEOMETRY_FEATURES:
+        assert feature not in SPARK_PORTABLE_FEATURES, (
+            f"{feature} is excluded on measured value; adding it needs a "
+            "re-measurement, not just a config edit"
+        )
     assert len(ADDABLE_FEATURES) == len(set(ADDABLE_FEATURES)) == 17, (
         f"Expected 17 distinct addable features, got {len(ADDABLE_FEATURES)} "
         f"({len(set(ADDABLE_FEATURES))} distinct). If a feature genuinely became "
@@ -379,29 +411,55 @@ def test_addable_features_are_currently_excluded():
     )
 
 
-def test_excluded_features_partition_into_three_buckets():
-    """Every one of the 55 excluded features lands in exactly one bucket.
+def test_spark_portable_features_follow_feature_columns_order():
+    """``SPARK_PORTABLE_FEATURES`` must be a FEATURE_COLUMNS-ordered subsequence.
 
-    17 addable + 16 network-context + 22 topology = 55. A new feature landing in
-    FEATURE_COLUMNS without a Spark-feasibility verdict fails here, which is the
-    point: the classification has to stay exhaustive to be trustworthy.
+    Subtle and easy to break. The exporter passes this list to ``MLMatcher`` as an
+    *exclusion* set, so ``_extract_from_columns`` rebuilds ``feature_names`` in
+    ``FEATURE_COLUMNS`` order and the model itself is indifferent to how this list
+    is ordered. But ``build_spark_model_manifest`` writes the manifest from
+    ``feature_names``, and ``tests/unit/test_shipped_spark_model.py`` compares
+    ``manifest["features"] == SPARK_PORTABLE_FEATURES`` as an **ordered list**.
+
+    So appending a new feature to the end of this list -- the obvious move, and
+    what an earlier draft of the research doc explicitly recommended -- breaks the
+    shipped-manifest test with a diff that looks like a re-export problem rather
+    than an ordering one. Fail here instead, with the reason.
+    """
+    expected = [f for f in FEATURE_COLUMNS if f in set(SPARK_PORTABLE_FEATURES)]
+    assert list(SPARK_PORTABLE_FEATURES) == expected, (
+        "SPARK_PORTABLE_FEATURES is not in FEATURE_COLUMNS order. Reorder it to "
+        f"match (insert in place, do not append):\n{expected}"
+    )
+
+
+def test_excluded_features_partition_into_three_buckets():
+    """Every excluded feature lands in exactly one bucket.
+
+    11 still-addable (10 geometry + route_prefix_match) + 16 network-context +
+    22 topology = 49. A new feature landing in FEATURE_COLUMNS without a
+    Spark-feasibility verdict fails here, which is the point: the classification
+    has to stay exhaustive to be trustworthy. The 6 shipped name features are
+    absent because they now ship.
     """
     excluded = [f for f in FEATURE_COLUMNS if f not in SPARK_PORTABLE_FEATURES]
-    buckets = ADDABLE_FEATURES + CONTEXT_DEPENDENT_FEATURES + list(TOPOLOGY_FEATURES)
+    still_addable = [f for f in ADDABLE_FEATURES if f not in SPARK_PORTABLE_FEATURES]
+    buckets = still_addable + CONTEXT_DEPENDENT_FEATURES + list(TOPOLOGY_FEATURES)
 
     assert len(buckets) == len(set(buckets)), "A feature was classified twice"
     assert sorted(buckets) == sorted(excluded), (
         f"Unclassified: {sorted(set(excluded) - set(buckets))}; "
         f"stale: {sorted(set(buckets) - set(excluded))}"
     )
-    counts = (len(ADDABLE_FEATURES), len(CONTEXT_DEPENDENT_FEATURES), len(TOPOLOGY_FEATURES))
-    assert counts == (17, 16, 22), (
-        f"Bucket sizes are {counts}, expected (17, 16, 22). The partition assert above "
+    counts = (len(still_addable), len(CONTEXT_DEPENDENT_FEATURES), len(TOPOLOGY_FEATURES))
+    assert counts == (11, 16, 22), (
+        f"Bucket sizes are {counts}, expected (11, 16, 22). The partition assert above "
         "still passed, so every excluded feature is classified -- meaning a feature "
         "MOVED between buckets, which changes its Spark-feasibility verdict. Re-derive "
         "the affected claim in research/spark_feature_expansion_2026-08-07.md before "
         "updating these numbers."
     )
+    assert sorted(still_addable) == sorted(ADDABLE_GEOMETRY_FEATURES + SPARSE_NAME_FEATURES)
 
 
 def test_free_derived_features_need_no_new_computation(authoritative):
@@ -448,6 +506,52 @@ def test_addable_features_match_authoritative_computation(sample_pairs, authorit
                 mismatches.append((pair["dataset"], feature, want, got))
 
     assert not mismatches, f"Geometry-only path diverged on {len(mismatches)}: {mismatches[:5]}"
+
+
+def test_route_prefix_match_is_almost_always_nan():
+    """Pin how sparse ``route_prefix_match`` is -- the reason it is not shipped.
+
+    Measured 2026-08-07: non-NaN on **1 of 5,532** stored labelled pairs (0.02%),
+    the single hit being in ``ca_toronto_roads``. It needs both sides to
+    canonicalize to a route designation (I-90, US-101, SR-520), which street and
+    sidewalk layers do not carry. XGBoost cannot split on a column that is missing
+    in 5,531 of 5,532 rows.
+
+    It is also the *only* member of the name block that costs new computation --
+    1.18 us/pair, i.e. 100% of the block's marginal cost, since the other 6 are
+    dict keys ``compute_name_similarity()`` already returns. Excluding it is
+    therefore what takes the widening from "close to free" to **0.00 us/pair**,
+    for a measured solo lift of +0.0002 LOO F1 (noise).
+
+    Fails loudly in either direction: if the label base grows enough highway data
+    to make the feature real, re-measure and reconsider shipping it; if it silently
+    goes 100% NaN, ``canonicalize_route_name()`` probably broke.
+    """
+    import glob
+
+    import pandas as pd
+
+    paths = glob.glob(str(_repo_root() / "labels" / "features" / "dataset=*" / "data.parquet"))
+    if not paths:
+        pytest.skip("No feature store found — run from repo root")
+
+    total = non_nan = 0
+    for path in paths:
+        try:
+            df = pd.read_parquet(path, columns=["route_prefix_match"])
+        except Exception:  # partition predates the feature
+            continue
+        total += len(df)
+        non_nan += int(df["route_prefix_match"].notna().sum())
+
+    assert total > 1000, f"Only {total} rows found — feature store looks truncated"
+    rate = non_nan / total
+    assert 0 < rate < 0.01, (
+        f"route_prefix_match non-NaN rate is {rate:.4%} ({non_nan}/{total}), outside the "
+        "expected 'present but vanishingly rare' band. If it rose, the feature may now be "
+        "worth its 1.18 us/pair and the name block should be re-measured. If it hit zero, "
+        "check canonicalize_route_name()."
+    )
 
 
 def test_degenerate_fixture_features_are_exactly_the_known_two(authoritative):
@@ -527,10 +631,10 @@ def test_offset_over_expected_halfwidth_ships_despite_sibling_category(authorita
         assert not math.isnan(features["offset_over_expected_halfwidth"])
 
 
-def test_shipped_28_are_also_context_free(authoritative):
+def test_shipped_spark_features_are_also_context_free(authoritative):
     """Baseline check on the other side of the line.
 
-    None of the 28 already-shipping features secretly depends on withheld
+    None of the already-shipping Spark features secretly depends on withheld
     context either -- every one produces a real value on at least some pairs
     with no index, graph, or topology available. (Individual NaNs are legitimate
     data signals: an unnamed segment, a name with no digits, an alignment that
@@ -725,8 +829,9 @@ def test_addable_feature_marginal_cost(sample_pairs):
     Only genuinely new work counts. The alignment, the aligned sublines, and the
     coordinate extraction are already paid by the shipped 28 (``ref_coverage``,
     ``min_length_m``, ``sinuosity_ref`` all need them), as are
-    ``compute_name_similarity`` (which computes all 10 name metrics and discards
-    7) and the target-side ``sinuosity`` / ``heading_consistency`` /
+    ``compute_name_similarity`` (which returns 12 keys covering 8 of the 10
+    name features, and whose 6 discarded ones are exactly what shipped
+    2026-08-07) and the target-side ``sinuosity`` / ``heading_consistency`` /
     ``shape_complexity``. So the marginal cost is:
 
     * names: one extra ``compute_route_prefix_match`` call -- the other 6 name
@@ -808,7 +913,7 @@ def test_addable_feature_marginal_cost(sample_pairs):
 # the most expensive test in the repo under the default `-n auto` (three
 # concurrent XGBoost trainings at n_jobs=-1 oversubscribe OpenMP across xdist
 # workers -- this file went 6s -> ~10min with it present), and its only assertions
-# were `n_features == 45`, already implied by the partition test, and
+# were `n_features == 44`, already implied by the partition test, and
 # `model_kb < 4 * baseline_kb` against a measured ratio of 1.03: ~290% slack, so it
 # could not fire short of a catastrophic regression. The table it printed is the
 # real deliverable and `research/spark_feature_expansion.py` already produces it

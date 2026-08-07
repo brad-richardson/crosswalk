@@ -1,4 +1,4 @@
-# Spark-Portable 28-Feature XGBoost Model
+# Spark-Portable 34-Feature XGBoost Model
 
 ## Purpose
 
@@ -8,33 +8,35 @@ Designed for distributed inference in Spark via broadcast booster + pandas_udf.
 ## Model Details
 
 - **Algorithm:** XGBoost binary classifier
-- **Trees:** 224, max_depth 10 (Optuna + epsilon-compact selection; the full local model uses 170)
-- **Holdout match F1:** 0.909 (seed-42 segment-aware holdout, never seen during tuning)
-- **CV F1 (match class):** 0.922 ± 0.008 (5-fold segment-aware cross-validation, training rows only)
-- **Predict throughput:** ~1.8M rows/sec single-node (see Inference Latency below)
-- **Training data:** 5,430 labeled pairs across 34 datasets (after filtering hausdorff > 1000m)
+- **Trees:** 168, max_depth 9 (Optuna + epsilon-compact selection; the full local model uses 170)
+- **Holdout match F1:** 0.924 raw / 0.922 production (seed-42 segment-aware holdout, never seen during tuning)
+- **CV F1 (match class):** 0.927 ± 0.011 (5-fold segment-aware cross-validation, training rows only)
+- **LOO-by-type F1:** 0.884 ± 0.001 (33-fold leave-one-dataset-out — the cross-dataset metric, and the one this model is selected on; see below)
+- **Predict throughput:** ~3.2M rows/sec single-node (see Inference Latency below)
+- **Training data:** 5,428 labeled pairs across 33 datasets (5,457 match/no_match rows loaded, 29 dropped by the hausdorff>1000m validation; `LabelStore.load_all` returns 5,487 rows / 34 datasets before the 30 `unsure` labels are filtered)
 - **Feature version:** 2026-07-07.2
-- **Exported:** 2026-07-03
+- **Exported:** 2026-08-07
 
-## Why 28 Features (not 83)
+## Why 34 Features (not 83)
 
 The full matcher model uses 83 features including topology (22), graphlet (2), clustering (3),
-and additional name/shape features. The 28-feature subset was selected for Spark portability:
+and additional shape features. The 34-feature subset was selected for Spark portability:
 
-**Included (28):** Computable from aligned geometry pairs alone, without graph topology or
-spatial index queries. 45 of the 83 clear that bar; these 28 are the subset selected for
+**Included (34):** Computable from aligned geometry pairs alone, without graph topology or
+spatial index queries. 45 of the 83 clear that bar; these 34 are the subset selected for
 inclusion. Note what is *not* claimed: no tier in
 [research/spark_feature_expansion_2026-08-07.md](../research/spark_feature_expansion_2026-08-07.md)
-ablates a member of the 28 — every tier is `base + additions` — so their individual
-contributions have never been measured. The 17 exclusions below are backed by
-measurement; these 28 inherit their membership from the original feasibility cut.
+ablates a member of the original 28 — every tier is `base + additions` — so their individual
+contributions have never been measured. The 6 name features added 2026-08-07 and the 11
+exclusions below are backed by measurement; the original 28 inherit their membership from
+the first feasibility cut.
 
 | Category | Features | Count |
 |----------|----------|-------|
 | Hausdorff variants | hausdorff_distance_m, hausdorff_p95_m, mean_hausdorff_distance_m | 3 |
 | Buffer IoU | buffer_iou_5m, buffer_iou_15m | 2 |
 | Heading/Alignment | heading_delta, collinear_gap_ratio, edge_distance_rmse_m | 3 |
-| Name similarity | name_levenshtein, name_token_sort, name_numeric_match | 3 |
+| Name similarity | name_levenshtein, name_jaro_winkler, name_token_sort, name_soundex, name_metaphone, has_name_ref, has_name_target, name_is_generic, name_numeric_match | 9 |
 | Class | class_similarity | 1 |
 | Lateral offset | lateral_offset_m, lateral_offset_iqr_m, lateral_offset_p95_m | 3 |
 | Coverage | ref_coverage, target_coverage, min_coverage, coverage_ratio | 4 |
@@ -45,7 +47,7 @@ measurement; these 28 inherit their membership from the original feasibility cut
 | Parallel sibling | offset_over_expected_halfwidth | 1 |
 | Intersection overlap | post_node_continuation_m, endpoint_heading_divergence | 2 |
 
-**Excluded (55)**, for two different reasons. Read the split carefully — it is the
+**Excluded (49)**, for two different reasons. Read the split carefully — it is the
 part of this card that is easiest to get wrong, and `config.py` got it wrong until
 2026-08-07.
 
@@ -58,78 +60,252 @@ structure that does not exist per candidate row:
 - **Crossing angle (4):** Require spatial index of neighboring segments
 - **Parallel sibling (4 of 5):** Require spatial index for nearby same-name segments
 
-*Excluded on measured value, not feasibility (17).* These need nothing but the two
-aligned geometries and the two name structs — the Spark job already holds both.
-Proven computable bit-for-bit from a bare pair in
-`tests/test_spark_feature_expansion.py`; measured for F1 / size / latency in
-[research/spark_feature_expansion_2026-08-07.md](../research/spark_feature_expansion_2026-08-07.md):
+*Excluded on measured value, not feasibility (11).* These need nothing but the two
+aligned geometries and the two name structs — the Spark job already holds both. Proven
+computable bit-for-bit from a bare pair in `tests/test_spark_feature_expansion.py`;
+measured for F1 / size / latency in
+[research/spark_feature_expansion_2026-08-07.md](../research/spark_feature_expansion_2026-08-07.md).
 
-- **Additional name (7 of 10):** jaro_winkler, soundex, metaphone, has_name_*, name_is_generic, route_prefix_match. 6 of the 7 are already computed by `compute_name_similarity()` and discarded by the exporter — marginal cost 0.00 µs/pair. The "low marginal value given levenshtein + token_sort" verdict holds for the block as a whole (+0.0033 LOO F1), but **not** for `has_name_target`, which is worth +0.0043 on its own.
-- **Additional shape/heading (5):** ref-side variants and deltas — low feature importance. Not individually ablated; the geometry block *as a whole* (all 10 below) measures −0.0034 LOO F1, and the solo deltas for these five span −0.0017 to +0.0004.
+The **geometry block (10)** measures **−0.0034 LOO F1** for **16.24 µs/pair** as a tier,
+so it is out on its own numbers, not on portability:
+
+- **Additional shape/heading (5):** ref-side variants and deltas — low feature importance. Not individually ablated; the geometry block *as a whole* (all 10) measures −0.0034 LOO F1, and the solo deltas for these five span −0.0017 to +0.0004.
 - **Vertex density (3):** Low discriminative power. Confirmed (`vertex_density_target` is the worst of all 17 at −0.0026).
 - **Angle histogram (1):** Correlated with heading_delta + buffer_iou. Confirmed (−0.0001).
 - **max_coverage (1):** `max(ref_coverage, target_coverage)` — derivable in SQL from columns the model already carries, and 4th by XGBoost gain in a 45-feature model. Still measures −0.0007: the splits do not transfer across datasets. A trap; see §3 of the research doc.
 
+**`route_prefix_match` (1)** is out for a different reason again — it is **non-NaN on 1 of
+5,532 labelled pairs (0.02%)**. It returns NaN unless *both* names canonicalize to a
+recognized route designation (I-90, US-101, SR-520), which street and sidewalk layers do
+not carry; XGBoost cannot split on a column missing in 5,531 of 5,532 rows. It is also the
+only name feature needing a call of its own, so excluding it is precisely what makes the
+name block cost **0.00 µs/pair**. Solo lift given up: +0.0002 (noise). Pinned by
+`test_route_prefix_match_is_almost_always_nan`; revisit if the label base gains highway data.
+
+Re-check as the label base grows. The geometry block losing is a 5,457-label result,
+not a permanent one.
+
+### The name block, added 2026-08-07
+
+Six of the original 17 — `jaro_winkler`, `soundex`, `metaphone`, `has_name_ref`,
+`has_name_target`, `name_is_generic` — **now ship**. This card previously excluded them as
+"low marginal value given levenshtein + token_sort". Measured, the name block is worth
+**+0.0035 LOO F1** at **0.00 µs/pair**: every one is a key in the `compute_name_similarity()`
+dict that the exporter was already building and throwing away. A consumer already calling
+that function just stops discarding six values. (+0.0033 is the *seven*-feature tier from
+the research sweep, which includes `route_prefix_match` at 1.18 µs/pair; +0.0035 is the six
+actually shipped, from the table below. Do not pair the seven-feature delta with the
+six-feature cost.)
+
+The 0.00 µs/pair holds **only if the consumer calls `crosswalk-py`**. If tf-data-platform
+reimplements name similarity, these are six new string operations, and note Spark SQL's
+built-in `soundex()` is not a drop-in — the repo applies it to a key content word after
+normalization. The research doc lists the consumer side as inferred, not verified.
+
+The largest single contributor is `has_name_target` (+0.0043 solo, 90% of the gap to the
+full 83-feature model). Its three biggest wins — `ke_nairobi_roads` +0.093,
+`tn_tunis_ml_roads` +0.050, `co_bogota_bike_network` +0.039 — are all target layers with
+`name_coverage_ratio = 0.0`: the flag lets the model read "this name comparison is
+uninformative" instead of treating a neutral-filled `name_levenshtein` as weak evidence.
+That is the regime a Spark job scoring arbitrary layers spends most of its time in.
+`ch_geneva_pedestrian_network` also has zero name coverage and *regressed* by 0.056, so
+this is a strong pattern with a real counterexample, not a law.
+
+The block was taken as a block rather than as `has_name_target` alone: the two score the same
+within noise, and a lone indicator flag with none of its companion name context is the more
+overfit selection, not the safer one. `route_prefix_match` is the one member left out, on the
+fill-rate grounds described in the Excluded section above — dropping it is what takes the
+block's marginal cost to zero.
+
+### LOO before/after
+
+Seeds 42, 1, 2, 3, 4; 33 folds; same harness as the research doc. Raw data:
+[`research/results/spark_name_block_loo_2026-08-07.json`](../research/results/spark_name_block_loo_2026-08-07.json),
+regenerate with `research/spark_name_block_loo.py`.
+
+| Config | Features | Params | LOO F1 | Δ |
+|---|---|---|---|---|
+| Before | 28 | 28-tuned | 0.8740 ± 0.0010 | — |
+| Feature change only | 34 | 28-tuned | 0.8775 ± 0.0008 | +0.0035 |
+| **This model** | **34** | **34-tuned** | **0.8839 ± 0.0014** | **+0.0099** |
+
+The ± is the spread of the five per-seed means — **seed noise only**. It does not cover
+label-base or harness variation, and it does not cover the selection effect described under
+"Why 300 trials" below.
+
+**A single-seed reproduction will come in low.** At seed 42 alone — the repo's canonical
+seed, what CI runs — the shipped config scores ≈0.8815, about 1.7σ under the five-seed mean.
+Quote the mean; don't be surprised by 0.881 from one run.
+
+Per type group, before → after (five-seed means): `road_poor` 0.8767 → 0.9042,
+`road_good` 0.8803 → 0.8911, `other` 0.8499 → 0.8568, `sidewalk` 0.8700 → 0.8692. The
+sidewalk figure is flat *on average* but not per seed — at seed 42 it is 0.8706 → 0.8645,
+a −0.0061 regression. For reference the full 83-feature local model scores 0.8788.
+
+The retune contributes **+0.0064** on top of the name block's **+0.0035**, for **+0.0099**
+total — which puts the Spark model above the full 83-feature local model's 0.8788 on this
+metric, by 0.0051.
+
+Do not over-read that gap. The local model is not tuned for LOO and got no comparable 300-trial
+search, so this compares a freshly-searched 34-feature model against a stale-tuned 83-feature
+one — and per the selection-effect note below, 0.8839 is itself optimistic. It says the Spark
+model is *competitive* on cross-dataset generalization, not better.
+
+(An earlier version of this paragraph read "+0.0027 / +0.0030 / +0.0057 ... within ~0.001".
+Those were the superseded **35**-feature numbers, left in place when the table above was
+updated to 34. The arithmetic did not match its own table for several commits.)
+
 ## Performance Comparison
 
-| Model | Features | Match F1 | Accuracy |
-|-------|----------|----------|----------|
-| Spark formula (hand-tuned) | 6 | 0.859 | 80.9% |
-| **This model (28-feat)** | **28** | **0.909** | **89.2%** |
-| Full matcher model | 78 | 0.930 | 91.7% |
+| Model | Features | Match F1 | Accuracy | Measured on |
+|-------|----------|----------|----------|-------------|
+| Spark formula (hand-tuned) | 6 | 0.859 | 80.9% | 2026-07-03 label base |
+| Previous Spark model (28-feat) | 28 | 0.909 | 89.2% | 2026-07-03 label base |
+| **28-feat, current label base** | **28** | **0.920** | — | **current** |
+| **This model (34-feat)** | **34** | **0.924** | **90.8%** | **current** |
+| Full matcher model | 78 | 0.930 | 91.7% | 2026-07-03 label base |
 
-The full-model row is the 78-feature model as it stood when this table was measured;
-the local model has since grown to 83 features, and the row has not been re-measured.
-For a same-protocol comparison against the current 83-feature model, see the tier table
-in [research/spark_feature_expansion_2026-08-07.md](../research/spark_feature_expansion_2026-08-07.md).
+**Read the "measured on" column before quoting a delta.** The honest like-for-like
+comparison is the two bold rows: **0.920 → 0.924, about +0.004**. Comparing 0.909 to 0.924
+and calling it +0.015 is wrong — most of that gap is the #473 re-key/backfill of the label
+base, not this feature change. The 0.920 comes from
+[`research/results/spark_feature_expansion_2026-08-07.json`](../research/results/spark_feature_expansion_2026-08-07.json)
+(`t0_baseline_28`, raw holdout, 0.9194 ± 0.0018 over five seeds; 0.9201 at seed 42).
 
-The 28- and 78-feature rows are honest seed-42 holdout metrics (hyperparameters tuned
-leakage-free, holdout never seen during tuning). Earlier versions of this card quoted
-0.932 for the 28-feature model — that figure came from hyperparameters tuned with the
-holdout included, so it was mildly optimistic; most of the drop to 0.909 is bias removal
-(the best leakage-free trial scores 0.912 on the holdout), plus ~0.002 traded away by the
-epsilon-compact selection for ~1.3x faster inference. The 28-feature model captures ~98%
-of the full model's match F1 with ~36% of the features.
+Two further cautions on attributing even that +0.004 to the retune:
+
+* The same file's `t2_names_35` tier — the name block under the **old** hyperparameters —
+  already scores 0.9237 raw at seed 42. On holdout, the retune adds ≈nothing; its
+  contribution shows up on LOO, not here.
+* The CV comparison quoted elsewhere in this card (0.9216 → 0.9270) has the same defect in
+  reverse: 0.9216 is from the 2026-07-03 tuning run. The like-for-like committed 28-feature
+  CV on the current label base is 0.9182 ± 0.0019.
+
+**These rows are not all on the same footing — read the caveats before quoting the deltas.**
+
+* For a comparison where the feature set is the *only* moving part, use the LOO table below
+  (0.8740 → 0.8775 for the features alone) or the 5-seed tier table in
+  [research/spark_feature_expansion_2026-08-07.md](../research/spark_feature_expansion_2026-08-07.md).
+* The full-model row is the 78-feature model as it stood when this table was measured;
+  the local model has since grown to 83 features, and the row has not been re-measured.
+  The research doc's reference tier puts the current 83-feature model at 0.9268 holdout /
+  0.8788 LOO.
+
+All rows are honest seed-42 holdout metrics (hyperparameters tuned leakage-free, holdout
+never seen during tuning). Earlier versions of this card quoted 0.932 for the 28-feature
+model — that figure came from hyperparameters tuned with the holdout included, so it was
+mildly optimistic. The 34-feature model captures ~99% of the full model's match F1 with
+~41% of the features, and on the cross-dataset LOO metric it scores *above* the full
+model (0.8839 vs 0.8788) — which says more about the full model not being tuned for LOO
+than about the Spark model being better, and should not be over-read.
 
 ## Hyperparameters (Optuna-tuned)
 
 ```
-n_estimators: 224
-learning_rate: 0.013
-max_depth: 10
-min_child_weight: 2
-subsample: 0.802
-colsample_bytree: 0.966
-gamma: 0.602
-reg_alpha: 1.544
-reg_lambda: 2.188
-max_bin: 343
-scale_pos_weight: 0.635  (computed from training labels, not tuned)
+n_estimators: 168
+learning_rate: 0.023
+max_depth: 9
+min_child_weight: 1
+subsample: 0.671
+colsample_bytree: 0.802
+gamma: 0.233
+reg_alpha: 0.595
+reg_lambda: 0.032
+max_bin: 164
+scale_pos_weight: 0.648  (computed from training labels, not tuned)
 ```
 
-Tuned 2026-07-03 with `scripts/tune_model.py --feature-set spark` (100 Optuna trials,
+Retuned 2026-08-07 with `scripts/tune_model.py --feature-set spark` (**300** Optuna trials,
 TPESampler seed=42) using the leakage-free protocol: the seed-42 holdout is discarded
 before tuning and the objective is mean match F1 over an inner GroupKFold (segment-aware)
 cross-validation on the training portion only, minus a size penalty of 0.00001 F1 per
 tree above 100. Because inference speed is critical for the Spark deployment, the final
 params come from **epsilon-compact selection**: among all trials within 0.003 raw CV F1
 of the best, the one with the lowest traversal cost (`n_estimators * max_depth`) is
-selected — here 224 trees x depth 10 (CV F1 0.9216) over the best-F1 trial's
-310 x 10 (CV F1 0.9242). Source of truth: `SPARK_PORTABLE_XGB_PARAMS` in `config.py`.
+selected — here 168 trees x depth 9 (CV F1 0.9270) over the best-F1 trial's
+216 x 10 (CV F1 0.9292). Source of truth: `SPARK_PORTABLE_XGB_PARAMS` in `config.py`.
+
+The retune was **required** by the widening, not an optimization pass: the prior values
+were fitted to 28 features on 2026-07-03. It landed on a point better and cheaper than
+the old one on every axis — CV F1 0.9216 → 0.9270, traversal cost 2240 → 1512 — so the
+name block was not paid for with accuracy or model complexity.
+
+### Why 300 trials, and why CV F1 alone is not enough
+
+The **100-trial** run of this identical search selected 353 x 7 (CV F1 0.9257, cost
+2471), and that point was **worse than doing nothing**: LOO F1 0.8763 against 0.8777 for
+simply reusing the old 28-feature hyperparameters on this feature set, and ~30% slower to
+score. The rule's arithmetic was correct — 353 x 7 really was the cheapest eligible trial
+in that run — but epsilon-compact optimizes *inner-CV F1*, a within-distribution metric,
+and breaks ties on `n_estimators * max_depth`, a proxy that predicted +10% traversal cost
+for a point that measured ~40% slower under load. A shallow-wide shape can therefore win
+the rule while generalizing worse across datasets.
+
+At 300 trials the search found a compact-and-general point, and the rule's own pick is also
+the best of its eligible set on LOO:
+
+Candidate scoring used **3 seeds (42, 1, 2)**, not the 5 used for the before/after table —
+which is why "34 features + 28-tuned params" reads 0.8777 here and 0.8775 there, and the
+shipped config 0.8837 here and 0.8839 there. Same configs, different seed sets. Raw data:
+[`research/results/spark_retune_candidates_2026-08-07.json`](../research/results/spark_retune_candidates_2026-08-07.json).
+
+| Candidate | LOO F1 | Shape | Cost |
+|---|---|---|---|
+| Old 28-tuned params (control) | 0.8777 ± 0.0010 | 224 × 10 | 2240 |
+| **Selected (trial 139)** | **0.8837 ± 0.0018** | **168 × 9** | **1512** |
+| 2nd cheapest eligible | 0.8811 ± 0.0014 | 157 × 10 | 1570 |
+| 4th cheapest eligible | 0.8815 ± 0.0010 | 163 × 10 | 1630 |
+| 3rd cheapest eligible | 0.8801 ± 0.0017 | 179 × 9 | 1611 |
+| Best-CV-F1 trial | 0.8823 ± 0.0007 | 216 × 10 | 2160 |
+
+**Retune at ≥300 trials and sanity-check the selected point on LOO before shipping it.**
+CV F1 alone does not catch this failure mode.
+
+**Honest accounting of the selection effect.** An earlier draft of this section claimed "no
+LOO-based override was applied and no selection optimism was banked". That is not
+supportable, and the correction matters more than the claim did:
+
+* The decision to discard the 100-trial run and re-search at 300 was itself made **on LOO**.
+  The trial count is a parameter of the selection procedure, and it was tuned against the
+  same 33-fold set reported as the headline generalization metric. The stopping rule was
+  effectively "search until LOO likes the answer."
+* Within the final run, seven candidates were LOO-scored and the argmax is reported. The gap
+  to the runner-up (0.8837 vs 0.8823) is about 1σ of the quoted band, and that band is seed
+  noise only — it does not price in taking a maximum over seven evaluations.
+* "The rule's own pick is also the best on LOO" is weaker evidence than it reads, because
+  that run was kept *because* it produced a good LOO number.
+
+Treat **0.8839 as optimistic by something on the order of the quoted ±**, not as a clean
+held-out estimate. The direction of the result is solid and reproduces at single seeds; the
+third decimal place is not something to bank. A genuinely clean number would need a search
+budget fixed in advance and a LOO evaluation run once, after selection.
 
 ## Inference Latency
 
-`.predict` on the seed-42 holdout features tiled to 1M rows (float32, 28 features),
-median of 5 runs, single node (Apple Silicon, XGBoost `hist`):
+`.predict` on 1M random float32 rows, median of 7 runs, XGBoost `hist`, both models
+benchmarked head-to-head on the same idle Linux box. This table supersedes the earlier
+Apple Silicon numbers:
 
-| Params | Trees x depth | 1M rows | Throughput |
-|--------|--------------|---------|------------|
-| Old (leaky-tuned) | 200 x 8 | 0.44 s | ~2.3M rows/sec |
-| **Selected (this model)** | **224 x 10** | **0.56 s** | **~1.8M rows/sec** |
+| Model | Features | Trees x depth | 1M rows | Throughput | Artifact |
+|-------|----------|--------------|---------|------------|----------|
+| Previous | 28 | 224 x 10 | 0.299 s | ~3.35M rows/sec | 1176 KB |
+| **This model** | **34** | **168 × 9** | **0.310 s** | **~3.22M rows/sec** | **1268 KB** |
 
-Absolute numbers are machine-specific; the ratio is what matters. The best-F1
-leakage-free trial (310 x 10, 0.73 s, ~1.4M rows/sec) was rejected by the
-epsilon-compact selection as ~1.3x slower for +0.002 holdout F1.
+**Net cost: +8% artifact size; throughput is a wash.** The −4% above is **inside run-to-run
+noise** and should not be quoted as a regression: repeat measurements on this box put the
+sign on both sides of zero (one interleaved run had the new model 7% *faster*). Two effects
+genuinely do oppose each other — 6 more columns to marshal into the DMatrix, against a
+smaller tree ensemble (traversal cost 1512 vs 2240) — but this benchmark cannot resolve
+which wins, and an earlier version of this paragraph asserted a mechanism at a precision the
+data does not support.
+
+Consumer-side feature computation adds **0.00 µs/pair**: all 6 added features are keys
+`compute_name_similarity()` already returns.
+
+⚠️ **Benchmark under load and you will get nonsense.** Interim measurements taken on this
+box while an Optuna search and a LOO sweep were running reported 1.18M and 0.93M rows/sec
+for these same two artifacts — a 3x understatement that also inverted the ranking's
+magnitude. Only quote throughput measured on an idle machine.
 
 ## How to Reproduce
 
@@ -138,7 +314,7 @@ epsilon-compact selection as ~1.3x slower for +0.002 holdout F1.
 uv run crosswalk export-spark-model
 ```
 
-This uses `SPARK_PORTABLE_FEATURES` from `config.py` (inclusive list of the 28 features)
+This uses `SPARK_PORTABLE_FEATURES` from `config.py` (inclusive list of the 34 features)
 to train a model excluding all topology/graph/spatial-index features, then exports as
 XGBoost-native JSON + manifest.
 

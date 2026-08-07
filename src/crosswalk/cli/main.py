@@ -1276,10 +1276,10 @@ def register_commands(app: typer.Typer) -> None:
     ):
         """Train and export a Spark-portable XGBoost model for Overture matching.
 
-        Trains on config.SPARK_PORTABLE_FEATURES (28 of 83) and exports as
+        Trains on config.SPARK_PORTABLE_FEATURES (34 of 83) and exports as
         XGBoost-native JSON loadable by the Spark MatchLayerToNetworkV2 job.
 
-        Those 28 are a value-selected subset of the ~45 features computable from
+        Those 34 are a value-selected subset of the ~45 features computable from
         aligned geometry pairs alone; being omitted does not mean a feature is
         infeasible in Spark. See research/spark_feature_expansion_2026-08-07.md.
 
@@ -1319,7 +1319,7 @@ def register_commands(app: typer.Typer) -> None:
             f"[dim]Excluding {len(exclude_features)} features requiring topology/graph/spatial-index[/dim]"
         )
 
-        # Train with Spark-portable hyperparams (tuned for 28-feature subset)
+        # Train with Spark-portable hyperparams (tuned for the 34-feature subset)
         matcher = MLMatcher()
         metrics = matcher.train(
             labels_dir=labels_dir,

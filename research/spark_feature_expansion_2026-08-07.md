@@ -1,9 +1,15 @@
 # Widening the Spark-portable feature set: what is actually addable, and what it buys
 
-**Date:** 2026-08-07 · **Status:** research + demo. **No shipped artifact was
-modified** — `src/crosswalk/_model/*`, `config.py`, and
-`SPARK_PORTABLE_FEATURES` are untouched. Everything below is a proposal plus the
-measurement that supports it.
+**Date:** 2026-08-07 · **Status:** research + demo, **now applied.**
+
+The measurements below were taken with nothing shipped — `src/crosswalk/_model/*`,
+`config.py`, and `SPARK_PORTABLE_FEATURES` were untouched throughout, so every
+number is a clean read of the feature set as the only moving part. The name block
+minus `route_prefix_match` was subsequently added, taking
+`SPARK_PORTABLE_FEATURES` from 28 to 34 with a hyperparameter retune and a reship
+of the Spark artifacts. Nothing in §§1-3 has been re-run against that change;
+treat those tiers as measurements relative to the **28-feature** baseline, which
+is what they are.
 
 ## Recommendation in one line
 
@@ -19,9 +25,12 @@ net negative.
 **Not taken.** The call is to add the **name block** — 6 features, 34 total —
 rather than the single-feature tier this analysis recommends. The 10 geometry
 features are **not** added, and neither is `route_prefix_match` (see the fill-rate
-finding below). Implemented in a follow-up PR, not this one; the measurements
-below were all taken with nothing shipped. What follows is the reasoning for
-overriding the ranking they produce.
+finding below). The measurements below were all taken with nothing shipped. What follows is the
+reasoning for overriding the ranking they produce.
+
+The shipped set is tier t2 minus one feature. t2 measured +0.0033 LOO F1 at
+1.18 µs/pair; dropping the one member that carries **all** of that cost and is
+NaN on 99.98% of pairs takes it to **0.00 µs/pair**.
 
 * **The gap between t2 and t2a is inside the noise.** t2a is 0.8783 ± 0.0011 and
   t2 is 0.8773 ± 0.0010. A 0.0010 difference against those bands is not a result.
@@ -46,7 +55,7 @@ overriding the ranking they produce.
   costing 16.24 µs/pair — 93% of the marginal compute of "all 17" for 0.0001 of
   F1. Cheap is not the same as worth adding, and this is the tier where that
   distinction has teeth. Revisit per §4.6 as the label base grows: the block
-  losing is a 5,487-label result, not a permanent one.
+  losing is a 5,457-label result, not a permanent one.
 
 ### Why `route_prefix_match` is excluded: it is 99.98% NaN
 
@@ -74,6 +83,43 @@ therefore strong for 15 of the 17 and weak for those two.
 everywhere scores exactly like one that is present and useless. The other 16
 candidates should be fill-rate checked before any future tier ships on that
 ranking alone.
+
+### Also found during implementation: the retune needs ≥300 trials, checked on LOO
+
+§4.2 says to retune `SPARK_PORTABLE_XGB_PARAMS`, which is right, but understates how
+carefully. The first retune (100 trials, the count the 2026-07-03 tune used) selected a
+point that was **worse than not retuning at all**: LOO 0.8763 against 0.8777 for reusing
+the old 28-feature hyperparameters on the same 34 features, and ~30% slower to score.
+
+The cause is that `scripts/tune_model.py`'s epsilon-compact selection optimizes *inner-CV
+F1* — a within-distribution metric — and breaks ties on `n_estimators * max_depth`, a
+proxy that predicted +10% traversal cost for a point that measured ~40% slower. A
+shallow-wide shape (353 × 7) can win that rule while generalizing worse across datasets.
+The rule was not misapplied; the 100-trial search simply had not found a
+compact-and-general point.
+
+At 300 trials it did (168 × 9, CV F1 0.9270, cost 1512 — cheaper than the 28-feature
+model's 2240), and the rule's own pick was also the best of its eligible set on LOO
+(0.8837 vs 0.8811 / 0.8815 / 0.8801 for the next three cheapest, and 0.8823 for the
+best-CV-F1 trial). So the selection rule was **not** overridden and no LOO selection
+optimism was banked — the LOO scoring was a check, not a chooser.
+
+The measured end state, 5 seeds:
+
+| Config | Features | Params | LOO F1 | Δ |
+|---|---|---|---|---|
+| Before | 28 | 28-tuned | 0.8740 ± 0.0010 | — |
+| Feature change only | 34 | 28-tuned | 0.8775 ± 0.0008 | +0.0035 |
+| Shipped | 34 | 34-tuned (300 trials) | **0.8839 ± 0.0014** | **+0.0099** |
+
+Note the retune is worth more than the features (+0.0064 vs +0.0035) — but that split is
+**confounded**. The comparison is 34 features + a fresh 300-trial search against 28 features
++ a five-week-old 100-trial one. A fresh search on the 28-feature set was never run, so "the
+features helped" and "any fresh search helps" are not separated. §3's recommended tier (t2a,
+29 features, LOO 0.8783) was likewise never retuned — §5 lists that as explicitly not
+measured. The experiment that would settle it is a 300-trial retune of the 28-feature set,
+and it has not been run. Standing guidance, now in `config.py`: retune at >= 300 trials and
+sanity-check the selected point on LOO before shipping. CV F1 alone does not catch this.
 
 Consequences for the follow-up PR, on top of §4: `SPARK_PORTABLE_XGB_PARAMS` was
 Optuna-tuned for 28 features, so the retune (§4.2) is a required step rather than
@@ -213,7 +259,7 @@ uv run python research/spark_feature_expansion.py --seeds 42,1,2,3,4 \
   (0.8783 vs 0.8788) — **90% of the gap for one free column**. It also gives the
   best holdout F1 of any tier except the 83-feature reference (0.9260).
 * **More is worse.** Every tier that adds features on top of `has_name_target`
-  scores lower on LOO. At 5,487 labels the model does not have the data to use
+  scores lower on LOO. At 5,457 evaluated labels the model does not have the data to use
   them, and they dilute.
 * **The geometry block is a net negative** (−0.0034 LOO) and is the part that
   actually costs inference time and model size. The model card's "low
@@ -356,7 +402,9 @@ computing.
 
 ## 4. What to change if this is accepted
 
-Proposals only — nothing here was applied.
+**Applied 2026-08-07** (steps 1-4); step 5 is outstanding and step 6 stands as
+written. Kept in the original proposal voice so the reasoning reads in order,
+with outcomes noted per step.
 
 1. `config.py::SPARK_PORTABLE_FEATURES` — add the chosen features **in
    `FEATURE_COLUMNS` order**. Order matters, but not for the reason an earlier
@@ -404,7 +452,7 @@ Proposals only — nothing here was applied.
   free. Per-dataset pairing keeps the comparison tight, but individual solo
   deltas carry more noise than the tier deltas; the recommendation was confirmed
   at 5 seeds as its own tier (t2a).
-* **Parity/demo fixture — 180 pairs** (60 each from 3 datasets), not all 5,487.
+* **Parity/demo fixture — 180 pairs** (60 each from 3 datasets), not all 5,457.
   Parity is exact equality, so a mismatch would surface at any sample size; 180
   was enough to exercise reversed alignments, partial coverage, and missing names.
 * **Feature-cost timings — single-pair Python loop**, not the batched pipeline.
