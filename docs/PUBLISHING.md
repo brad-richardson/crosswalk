@@ -335,6 +335,13 @@ overwrite identical bytes idempotently.
 4. Dry-run first: `crosswalk factory publish --all --site-url https://<your-host>`
    → inspect the summary + `data/publish_staging/index.html`.
 5. Go live: `crosswalk factory publish --all --no-dry-run --site-url https://<your-host>`.
+
+   `--site-url` is **required** with `--no-dry-run` (the command exits 2 without
+   it). It is baked into `index.json` — which the live dashboard reads and links
+   from — and into this page's query examples, so omitting it publishes dead
+   links rather than failing. That happened on 2026-08-07 and needed a
+   re-publish; the top-level `index.json` / `index.html` are mutable, so the fix
+   did not require `--force`, but the guard exists so it cannot recur.
 6. Apply the **R2 CORS policy** below (required for the browser data browser to
    range-read the Parquet cross-origin).
 
