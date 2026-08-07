@@ -13,7 +13,7 @@ Designed for distributed inference in Spark via broadcast booster + pandas_udf.
 - **CV F1 (match class):** 0.922 ± 0.008 (5-fold segment-aware cross-validation, training rows only)
 - **Predict throughput:** ~1.8M rows/sec single-node (see Inference Latency below)
 - **Training data:** 5,430 labeled pairs across 34 datasets (after filtering hausdorff > 1000m)
-- **Feature version:** 2026-02-16.1
+- **Feature version:** 2026-07-07.2
 - **Exported:** 2026-07-03
 
 ## Why 28 Features (not 83)
@@ -22,8 +22,12 @@ The full matcher model uses 83 features including topology (22), graphlet (2), c
 and additional name/shape features. The 28-feature subset was selected for Spark portability:
 
 **Included (28):** Computable from aligned geometry pairs alone, without graph topology or
-spatial index queries — *and* carrying their weight on measured F1. 45 of the 83 clear the
-first bar; these 28 clear both. See the Excluded split below:
+spatial index queries. 45 of the 83 clear that bar; these 28 are the subset selected for
+inclusion. Note what is *not* claimed: no tier in
+[research/spark_feature_expansion_2026-08-07.md](../research/spark_feature_expansion_2026-08-07.md)
+ablates a member of the 28 — every tier is `base + additions` — so their individual
+contributions have never been measured. The 17 exclusions below are backed by
+measurement; these 28 inherit their membership from the original feasibility cut.
 
 | Category | Features | Count |
 |----------|----------|-------|
@@ -61,7 +65,7 @@ Proven computable bit-for-bit from a bare pair in
 [research/spark_feature_expansion_2026-08-07.md](../research/spark_feature_expansion_2026-08-07.md):
 
 - **Additional name (7 of 10):** jaro_winkler, soundex, metaphone, has_name_*, name_is_generic, route_prefix_match. 6 of the 7 are already computed by `compute_name_similarity()` and discarded by the exporter — marginal cost 0.00 µs/pair. The "low marginal value given levenshtein + token_sort" verdict holds for the block as a whole (+0.0033 LOO F1), but **not** for `has_name_target`, which is worth +0.0043 on its own.
-- **Additional shape/heading (5):** ref-side variants and deltas — low feature importance. Confirmed: the geometry block measures −0.0034 LOO F1.
+- **Additional shape/heading (5):** ref-side variants and deltas — low feature importance. Not individually ablated; the geometry block *as a whole* (all 10 below) measures −0.0034 LOO F1, and the solo deltas for these five span −0.0017 to +0.0004.
 - **Vertex density (3):** Low discriminative power. Confirmed (`vertex_density_target` is the worst of all 17 at −0.0026).
 - **Angle histogram (1):** Correlated with heading_delta + buffer_iou. Confirmed (−0.0001).
 - **max_coverage (1):** `max(ref_coverage, target_coverage)` — derivable in SQL from columns the model already carries, and 4th by XGBoost gain in a 45-feature model. Still measures −0.0007: the splits do not transfer across datasets. A trap; see §3 of the research doc.

@@ -14,13 +14,14 @@ Add **`has_name_target`** — one feature, zero marginal compute, **+0.0043 LOO 
 addable features are collectively worth nothing, and the 10 geometry ones are
 net negative.
 
-## Decision (2026-08-07): ship the 7 name features
+## Decision (2026-08-07): ship the name block minus `route_prefix_match`
 
-**Not taken.** The call is to add the **full name block** — tier t2, 35 features,
-**+0.0033 LOO F1** at 1.18 µs/pair — rather than the single-feature tier this
-analysis recommends. The 10 geometry features are **not** added. The measurements
-below are unchanged; what follows is the reasoning for overriding the ranking they
-produce.
+**Not taken.** The call is to add the **name block** — 6 features, 34 total —
+rather than the single-feature tier this analysis recommends. The 10 geometry
+features are **not** added, and neither is `route_prefix_match` (see the fill-rate
+finding below). Implemented in a follow-up PR, not this one; the measurements
+below were all taken with nothing shipped. What follows is the reasoning for
+overriding the ranking they produce.
 
 * **The gap between t2 and t2a is inside the noise.** t2a is 0.8783 ± 0.0011 and
   t2 is 0.8773 ± 0.0010. A 0.0010 difference against those bands is not a result.
@@ -34,10 +35,11 @@ produce.
   with none of the name context that would let the model condition on it. The
   full name block gives the flag its companions; it scores the same and rests on
   less.
-* **The name block is close to free.** 1.18 µs/pair marginal — 0.5% on top of the
-  224.03 µs the shipped 28 already spend — and that single `route_prefix_match`
-  call is the *only* new computation. The other 6 are keys in the
-  `compute_name_similarity()` dict that the exporter already builds and discards.
+* **The 6 shipped name features are free.** Every one is a key in the
+  `compute_name_similarity()` dict that the exporter already builds and discards —
+  **0.00 µs/pair marginal**. A consumer already calling that function just stops
+  dropping them. (`route_prefix_match` is the 7th and the only one needing a call
+  of its own, at 1.18 µs/pair; excluding it is what makes this figure zero.)
 * **The geometry block is excluded on measurement, and that is the difference
   from t4.** t3 (geometry alone) is −0.0034; t4 (all 17) is +0.0034, statistically
   identical to t2's +0.0033. So the 10 geometry features contribute nothing while
@@ -46,11 +48,39 @@ produce.
   distinction has teeth. Revisit per §4.6 as the label base grows: the block
   losing is a 5,487-label result, not a permanent one.
 
+### Why `route_prefix_match` is excluded: it is 99.98% NaN
+
+This analysis measured its *value* (+0.0002 solo, noise) and its *cost* (1.18
+µs/pair) but never checked how often it produces a value at all. It returns NaN
+unless **both** names canonicalize to a recognized route designation (I-90,
+US-101, SR-520), and street/sidewalk layers do not carry those. Measured across
+the whole feature store: **non-NaN on 1 of 5,532 stored labelled pairs (0.02%)**,
+the single hit in `ca_toronto_roads`. XGBoost cannot split on that.
+
+It is also the only member of the block that costs new computation, so excluding
+it takes the widening from "close to free" to **actually free** — 34 features at
+0.00 µs/pair. Pinned by `test_route_prefix_match_is_almost_always_nan` in the
+follow-up PR, which fails in either direction.
+
+The same sparsity makes it degenerate in this PR's parity fixture: it is NaN on
+all 180 sample pairs, so `test_addable_features_match_authoritative_computation`
+compares it against a constant and a stub returning NaN would pass. Pinned by
+`test_degenerate_fixture_features_are_exactly_the_known_two`, together with
+`name_is_generic` (constant 0.0 on the same fixture). The "bit-for-bit" claim is
+therefore strong for 15 of the 17 and weak for those two.
+
+**Method lesson for §3's ranking:** a solo LOO delta measures whether a feature
+*helps* and says nothing about whether it is *populated*. A column that is NaN
+everywhere scores exactly like one that is present and useless. The other 16
+candidates should be fill-rate checked before any future tier ships on that
+ranking alone.
+
 Consequences for the follow-up PR, on top of §4: `SPARK_PORTABLE_XGB_PARAMS` was
 Optuna-tuned for 28 features, so the retune (§4.2) is a required step rather than
-an optional one. The tf-data-platform coordination in §4.5 is 7 new columns rather
-than one, but all 7 are pure string ops on the resolved name pair — no new geometry
-work on the consumer side, and no new dependency (`jellyfish` and `rapidfuzz` are
+an optional one. The tf-data-platform coordination in §4.5 is 6 new columns rather
+than one, but all 6 are pure string ops on the resolved name pair — no new geometry
+work on the consumer side, no new call at all if the job already invokes
+`compute_name_similarity()`, and no new dependency (`jellyfish` and `rapidfuzz` are
 already core `crosswalk-py` deps).
 
 ---
@@ -81,7 +111,7 @@ partition the 55 exclusions exactly — a new feature cannot land in
 | Name similarity | 7 | **Addable.** Pure string ops on the resolved variant pair. |
 | Per-geometry / pair-geometry | 10 | **Addable.** One extra pass over the aligned sublines. |
 | Topology | 22 | Not addable — Overture connectors projected onto both sides + the target network's own endpoint-cluster Union-Find. |
-| Endpoint/Connectivity | 3 | Not addable — `scipy.cKDTree` over **every** endpoint in the target layer (`spatial_context.py`, `EndpointIndex.kdtree`). |
+| Endpoint/Connectivity | 3 | Not addable — `scipy.cKDTree` over **every** endpoint in the target layer (`spatial_context.py`, `SpatialContextIndex.kdtree`). |
 | Crossing angle | 4 | Not addable — STRtree over the whole Overture layer. |
 | Parallel sibling | 4 | Not addable — corridor/sibling search over an STRtree. |
 | Graphlet | 2 | Not addable — connector graph. |
@@ -102,11 +132,14 @@ partition the 55 exclusions exactly — a new feature cannot land in
    still not worth adding — see §3.)
 
 3. **6 of the 7 name features are already computed and thrown away.**
-   `compute_name_similarity()` (`semantic.py:316`) returns all 10 name metrics
-   in one call. The exporter keeps `name_levenshtein` and `name_token_sort` and
-   discards `jaro_winkler`, `soundex`, `metaphone`, `has_name_ref`,
-   `has_name_target`, `name_is_generic`. Only `route_prefix_match` is a separate
-   call. **If the Spark job calls into `crosswalk-py`** (which is how the
+   `compute_name_similarity()` (`semantic.py:316`) returns 12 keys in one call,
+   covering **8 of the 10** `Name Similarity` features. The exporter keeps
+   `name_levenshtein` and `name_token_sort` and discards `jaro_winkler`,
+   `soundex`, `metaphone`, `has_name_ref`, `has_name_target`, `name_is_generic`.
+   The other **two** name features are separate calls:
+   `compute_name_numeric_match()` (`compute.py:354`, already shipped) and
+   `compute_route_prefix_match()` (`compute.py:358`). So the free-by-construction
+   set is the 6 discarded keys, not all 7 excluded name features. **If the Spark job calls into `crosswalk-py`** (which is how the
    booster and manifest are already consumed — `crosswalk/spark.py`), the
    recommended feature costs literally zero: it is a dict key currently dropped
    on the floor.
@@ -127,7 +160,7 @@ partition the 55 exclusions exactly — a new feature cannot land in
 6. **The repo already disagrees with itself about *why* these 17 are out.**
    `cli/main.py:1279` and `config.py:549-550` claim infeasibility ("no graph
    topology, no spatial indexes, no connector data required").
-   `docs/SPARK_MODEL_CARD.md:44-53` gives *value* reasons for exactly these 17
+   `docs/SPARK_MODEL_CARD.md:50-53` gives *value* reasons for exactly these 17
    ("low marginal value given levenshtein + token_sort", "low feature
    importance", "low discriminative power", "correlated with heading_delta +
    buffer_iou"). The model card is the honest one; the CLI/config comment is
@@ -141,7 +174,10 @@ partition the 55 exclusions exactly — a new feature cannot land in
 All tiers trained with `SPARK_PORTABLE_XGB_PARAMS` and the same grouped-holdout
 protocol `crosswalk export-spark-model` uses, so the **only** moving part is the
 feature set. Every number is mean ± population std over **5 seeds**
-(42, 1, 2, 3, 4), full label set (5,487 labels / 34 datasets).
+(42, 1, 2, 3, 4), full label set. `LabelStore.load_all` returns 5,487 rows /
+34 datasets; after dropping 30 `unsure` labels the trained and evaluated set is
+**5,457 match/no_match rows across 33 datasets**, which is why the LOO run has 33
+folds rather than 34.
 
 * `cv_f1` — GroupKFold CV over training rows (what `export-spark-model` prints).
 * `test_f1` — production holdout F1 (calibrated, `settings.scoring_match_threshold`).
@@ -297,9 +333,20 @@ already carries. It is the single feature this investigation was most likely to
 recommend on importance alone. It measures **−0.0007 solo** and **−0.0014 as
 part of the free-derived tier**. Gain importance says the trees split on it
 often; LOO CV says those splits do not transfer to unseen datasets. Its
-per-dataset spread is the widest in the set (`sg_singapore_footpaths` +0.036,
-`br_sao_paulo_roads` −0.043) — consistent with learning dataset-specific
-segmentation ratios. **Do not add it.**
+per-dataset spread is wide (`sg_singapore_footpaths` +0.036, `br_sao_paulo_roads`
+−0.043, range 0.079) — consistent with learning dataset-specific segmentation
+ratios. **Do not add it.**
+
+**Correction (2026-08-07):** an earlier draft called that spread "the widest in
+the set". It is not — it ranks **2nd of 17**. The widest is `has_name_target` at
+0.150 (`ke_nairobi_roads` +0.089, `ch_geneva_pedestrian_network` −0.060), 1.9×
+wider. So "widest spread ⇒ learning dataset-specific behaviour ⇒ do not add"
+cannot be the argument against `max_coverage`, because it would rule out the
+feature this analysis recommends. The honest version: spread alone is not a
+reason to reject, and `max_coverage` is rejected on its **mean** (−0.0007 solo,
+−0.0014 in-tier), not its variance. §2 already discloses `has_name_target`'s
+spread and its counterexample; the case for it is mean-plus-mechanism, and the
+same standard has to apply here.
 
 This is the general shape of the result: **feasibility was never the binding
 constraint — label volume is.** All 17 are computable; only one is worth
@@ -311,15 +358,20 @@ computing.
 
 Proposals only — nothing here was applied.
 
-1. `config.py::SPARK_PORTABLE_FEATURES` — add the chosen features. **Correction:**
-   an earlier draft of this section claimed "order matters: append rather than
-   insert". It does not. `export-spark-model` passes the list to `MLMatcher` as an
-   *exclusion* set (`cli/main.py:1313`), and `_extract_from_columns` then builds
-   `feature_names` in `FEATURE_COLUMNS` order. The manifest is written from
-   `matcher.feature_names` (`build_spark_model_manifest`), so the manifest always
-   reflects the true DMatrix order regardless of how this list is ordered. Position
-   in `SPARK_PORTABLE_FEATURES` is cosmetic; group the additions where they read
-   best.
+1. `config.py::SPARK_PORTABLE_FEATURES` — add the chosen features **in
+   `FEATURE_COLUMNS` order**. Order matters, but not for the reason an earlier
+   draft of this section gave ("the Spark scorer broadcasts the manifest list as
+   the DMatrix column order, so append rather than insert"), and a second draft
+   was wrong the other way ("position is cosmetic"). The mechanism:
+   `export-spark-model` passes this list to `MLMatcher` as an *exclusion* set
+   (the `exclude_features` line in `cli/main.py`), and `_extract_from_columns`
+   rebuilds `feature_names` in `FEATURE_COLUMNS` order, ignoring this list's
+   ordering entirely — so the **model** is order-insensitive. But
+   `build_spark_model_manifest` writes the manifest from `feature_names`, and
+   `tests/unit/test_shipped_spark_model.py` compares
+   `manifest["features"] == SPARK_PORTABLE_FEATURES` as an **ordered list**.
+   Appending is exactly what breaks it, with a diff that reads like a stale
+   export rather than an ordering mistake.
 2. Retune `SPARK_PORTABLE_XGB_PARAMS` for the new set:
    `uv run python scripts/tune_model.py --feature-set spark`. The current params
    were Optuna-tuned *for 28 features* on 2026-07-03; the tiers above
@@ -346,8 +398,8 @@ Proposals only — nothing here was applied.
 
 ## 5. What was sampled rather than run in full
 
-* **Tier sweep** — run in full: 8 tiers × 5 seeds, all 5,487 labels / 34
-  datasets, 33 LOO folds each. Nothing sampled.
+* **Tier sweep** — run in full: 8 tiers × 5 seeds, the whole label set (5,457
+  evaluated rows / 33 datasets), 33 LOO folds each. Nothing sampled.
 * **Per-feature ranking — 3 seeds** (42, 1, 2) rather than 5, to keep the box
   free. Per-dataset pairing keeps the comparison tight, but individual solo
   deltas carry more noise than the tier deltas; the recommendation was confirmed
