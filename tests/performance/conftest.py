@@ -15,7 +15,22 @@ reliably instead of intermittently. A flaky timing assertion is worse than no
 assertion, because it trains everyone to re-run until green.
 
 So: skip under xdist, with a reason that says exactly how to run them. CI runs
-them in a dedicated serial step (``ci.yml``), which takes ~10s for all 42.
+them in a dedicated serial step (``ci.yml``), which takes ~10s for all 42, and
+CLAUDE.md documents the local invocation.
+
+**This guard is scoped by DIRECTORY, not by property.** Wall-clock assertions
+living outside ``tests/performance/`` still run in the parallel suite and still
+have the pathology described above. Known remaining, as of 2026-08-07:
+
+* ``tests/unit/test_spatial_context.py`` -- five ``elapsed <`` budgets
+* ``tests/unit/test_relational.py`` -- one ``elapsed < 8``
+* ``tests/test_spark_feature_expansion.py`` -- a us/pair budget
+
+They are left alone deliberately: each is a small guard inside a mostly-functional
+module, and moving them here would drag unrelated tests out of the parallel run.
+If any of them starts flaking, the fix is to move the assertion, not to widen this
+filter -- a property-based marker (e.g. ``@pytest.mark.timing``) would be the
+cleaner shape if this list grows.
 """
 
 from __future__ import annotations
@@ -53,6 +68,6 @@ def pytest_collection_modifyitems(config, items):
     if not os.environ.get("PYTEST_XDIST_WORKER"):
         return
     for item in items:
-        path = Path(str(getattr(item, "path", None) or item.fspath)).resolve()
+        path = Path(str(item.path)).resolve()
         if path == _HERE or _HERE in path.parents:
             item.add_marker(_XDIST_SKIP)

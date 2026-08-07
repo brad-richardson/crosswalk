@@ -709,7 +709,8 @@ def test_loo_harness_reproduces_eval_utils_on_full_feature_set():
 
     Trained with a deliberately tiny booster on both sides -- parity is about fold
     construction and metric computation, not model quality, and the full-size
-    default made this the second-most expensive test in the repo under ``-n auto``.
+    default made this one of the most expensive tests in the repo under the
+    parallel default.
     """
     import pandas as pd
 
@@ -910,7 +911,7 @@ def test_addable_feature_marginal_cost(sample_pairs):
 
 # NOTE: a `test_tier_model_sizes_and_inference` used to live here, training three
 # feature tiers and printing an F1/size/latency table. Removed 2026-08-07: it was
-# the most expensive test in the repo under the default `-n auto` (three
+# the most expensive test in the repo under the parallel default (three
 # concurrent XGBoost trainings at n_jobs=-1 oversubscribe OpenMP across xdist
 # workers -- this file went 6s -> ~10min with it present), and its only assertions
 # were `n_features == 44`, already implied by the partition test, and

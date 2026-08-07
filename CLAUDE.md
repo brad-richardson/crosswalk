@@ -264,6 +264,11 @@ uv run ruff format src/ tests/ && uv run ruff check src/ tests/
 # Run all tests
 uv run pytest tests/ -v
 
+# Run the timing-sensitive performance tests (they SKIP under the default
+# `-n auto` -- see tests/performance/conftest.py -- so `pytest tests/` alone
+# reports 42 skips, not failures, if you break one)
+uv run pytest tests/performance -n0
+
 # Run training regression tests (if ML changes)
 uv run pytest tests/regression/test_training.py -v
 ```

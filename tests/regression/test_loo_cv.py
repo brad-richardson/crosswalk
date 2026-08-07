@@ -7,9 +7,10 @@ macro-F1 floor per type group, so real cross-dataset regressions fail CI.
 
 The full LOO run is one fold per eligible dataset (33 as of 2026-08-07, since
 #474 made this a true leave-one-out), so we gate on the full run rather than a
-subset. It takes ~60s locally with ``-n 0``; note that the repo's default
-``addopts = "-n auto"`` makes every xdist worker re-run the module-scoped
-fixture, which is why this file is much slower under the default invocation.
+subset. It takes ~60s locally with ``-n 0``. The repo default is
+``-n auto --dist loadscope``, which keeps this module on one worker so the
+module-scoped fixture below runs once rather than once per worker -- that was
+previously the reason this file was far slower under the default invocation.
 """
 
 import os
