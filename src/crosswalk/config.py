@@ -562,7 +562,7 @@ SEMANTIC_FEATURES = [
 # not feasibility:
 #
 #   * 10 geometry features -- -0.0034 LOO F1 as a tier, 16.24 us/pair. Re-check as
-#     the label base grows; the block losing is a 5,487-label result.
+#     the label base grows; the block losing is a 5,457-label result.
 #   * `route_prefix_match` -- non-NaN on 1 of 5,532 stored labelled pairs (0.02%);
 #     it needs BOTH names to canonicalize to a route designation (I-90, US-101),
 #     which street and sidewalk layers do not carry. XGBoost cannot split on that,

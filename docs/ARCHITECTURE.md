@@ -32,7 +32,7 @@ the wheel, so `pip install crosswalk-py` needs zero training:
 | Artifact | What it is | Consumer |
 |----------|------------|----------|
 | `matcher_model_combined.joblib` | Full-feature (`config.FEATURE_COLUMNS`) calibrated model | Default `crosswalk stitch` and factory artifact (`config.bundled_model_path()`) |
-| `spark_model.json` + `spark_manifest.json` | Spark-portable 34-feature (`SPARK_PORTABLE_FEATURES`) XGBoost-native booster + manifest | Spark scoring jobs (tf-data-platform) via `matcher.spark` |
+| `spark_model.json` + `spark_manifest.json` | Spark-portable 34-feature (`SPARK_PORTABLE_FEATURES`) XGBoost-native booster + manifest | Spark scoring jobs (tf-data-platform) via `crosswalk.spark` |
 
 Both are kept in lockstep with `config.FEATURE_VERSION` by CI
 (`test_shipped_model.py`, `test_shipped_spark_model.py`) — a feature bump fails
@@ -52,7 +52,7 @@ those are copied into the package as `spark_model.json` / `spark_manifest.json`
 and included in the wheel by `pyproject.toml`'s `[tool.hatch.build.targets.wheel]
 artifacts` rule.
 
-A Spark job consumes them with **no heavy imports** — `matcher.spark` touches
+A Spark job consumes them with **no heavy imports** — `crosswalk.spark` touches
 only the stdlib at import time (numpy is lazy, imported inside
 `apply_calibration`), so `import matcher.spark` never pulls in
 shapely/geopandas/xgboost/pandas:

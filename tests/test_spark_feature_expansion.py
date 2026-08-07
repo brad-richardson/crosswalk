@@ -380,8 +380,16 @@ def authoritative(sample_pairs):
 # =============================================================================
 
 
-def test_addable_features_are_currently_excluded():
-    """Sanity: the 17 proposed features are real, and none ships today."""
+def test_addable_features_are_declared_and_correctly_split():
+    """The 17 feasible features are real, and the shipped/excluded split is the
+    decision recorded in the research doc.
+
+    6 of the 7 name features ship (2026-08-07, 0.00 us/pair -- they are keys
+    ``compute_name_similarity()`` already returns). ``route_prefix_match`` and the
+    10 geometry features do not. All 17 stay listed here because the
+    classification is about *feasibility*, which did not change -- only the value
+    verdict did.
+    """
     for feature in ADDABLE_FEATURES:
         assert feature in FEATURE_COLUMNS, f"{feature} is not a declared feature"
     assert sorted(SHIPPED_NAME_FEATURES + SPARSE_NAME_FEATURES) == sorted(ADDABLE_NAME_FEATURES)
@@ -400,6 +408,28 @@ def test_addable_features_are_currently_excluded():
         "Spark-addable, add it to ADDABLE_NAME_FEATURES or ADDABLE_GEOMETRY_FEATURES, "
         "prove it in test_addable_features_match_authoritative_computation, and update "
         "the counts in research/spark_feature_expansion_2026-08-07.md."
+    )
+
+
+def test_spark_portable_features_follow_feature_columns_order():
+    """``SPARK_PORTABLE_FEATURES`` must be a FEATURE_COLUMNS-ordered subsequence.
+
+    Subtle and easy to break. The exporter passes this list to ``MLMatcher`` as an
+    *exclusion* set, so ``_extract_from_columns`` rebuilds ``feature_names`` in
+    ``FEATURE_COLUMNS`` order and the model itself is indifferent to how this list
+    is ordered. But ``build_spark_model_manifest`` writes the manifest from
+    ``feature_names``, and ``tests/unit/test_shipped_spark_model.py`` compares
+    ``manifest["features"] == SPARK_PORTABLE_FEATURES`` as an **ordered list**.
+
+    So appending a new feature to the end of this list -- the obvious move, and
+    what an earlier draft of the research doc explicitly recommended -- breaks the
+    shipped-manifest test with a diff that looks like a re-export problem rather
+    than an ordering one. Fail here instead, with the reason.
+    """
+    expected = [f for f in FEATURE_COLUMNS if f in set(SPARK_PORTABLE_FEATURES)]
+    assert list(SPARK_PORTABLE_FEATURES) == expected, (
+        "SPARK_PORTABLE_FEATURES is not in FEATURE_COLUMNS order. Reorder it to "
+        f"match (insert in place, do not append):\n{expected}"
     )
 
 
@@ -429,6 +459,7 @@ def test_excluded_features_partition_into_three_buckets():
         "the affected claim in research/spark_feature_expansion_2026-08-07.md before "
         "updating these numbers."
     )
+    assert sorted(still_addable) == sorted(ADDABLE_GEOMETRY_FEATURES + SPARSE_NAME_FEATURES)
 
 
 def test_free_derived_features_need_no_new_computation(authoritative):
@@ -500,7 +531,7 @@ def test_route_prefix_match_is_almost_always_nan():
 
     import pandas as pd
 
-    paths = glob.glob("labels/features/dataset=*/data.parquet")
+    paths = glob.glob(str(_repo_root() / "labels" / "features" / "dataset=*" / "data.parquet"))
     if not paths:
         pytest.skip("No feature store found — run from repo root")
 
@@ -600,10 +631,10 @@ def test_offset_over_expected_halfwidth_ships_despite_sibling_category(authorita
         assert not math.isnan(features["offset_over_expected_halfwidth"])
 
 
-def test_shipped_28_are_also_context_free(authoritative):
+def test_shipped_spark_features_are_also_context_free(authoritative):
     """Baseline check on the other side of the line.
 
-    None of the 28 already-shipping features secretly depends on withheld
+    None of the already-shipping Spark features secretly depends on withheld
     context either -- every one produces a real value on at least some pairs
     with no index, graph, or topology available. (Individual NaNs are legitimate
     data signals: an unnamed segment, a name with no digits, an alignment that
@@ -798,8 +829,9 @@ def test_addable_feature_marginal_cost(sample_pairs):
     Only genuinely new work counts. The alignment, the aligned sublines, and the
     coordinate extraction are already paid by the shipped 28 (``ref_coverage``,
     ``min_length_m``, ``sinuosity_ref`` all need them), as are
-    ``compute_name_similarity`` (which computes all 10 name metrics and discards
-    7) and the target-side ``sinuosity`` / ``heading_consistency`` /
+    ``compute_name_similarity`` (which returns 12 keys covering 8 of the 10
+    name features, and whose 6 discarded ones are exactly what shipped
+    2026-08-07) and the target-side ``sinuosity`` / ``heading_consistency`` /
     ``shape_complexity``. So the marginal cost is:
 
     * names: one extra ``compute_route_prefix_match`` call -- the other 6 name
@@ -881,7 +913,7 @@ def test_addable_feature_marginal_cost(sample_pairs):
 # the most expensive test in the repo under the default `-n auto` (three
 # concurrent XGBoost trainings at n_jobs=-1 oversubscribe OpenMP across xdist
 # workers -- this file went 6s -> ~10min with it present), and its only assertions
-# were `n_features == 45`, already implied by the partition test, and
+# were `n_features == 44`, already implied by the partition test, and
 # `model_kb < 4 * baseline_kb` against a measured ratio of 1.03: ~290% slack, so it
 # could not fire short of a catastrophic regression. The table it printed is the
 # real deliverable and `research/spark_feature_expansion.py` already produces it

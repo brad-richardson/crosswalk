@@ -36,6 +36,7 @@
     "endpoint_heading_divergence"
   ],
   "n_features": 34,
+  "contract_version": "34f-5f053f5dbaf3",
   "n_estimators": 168,
   "threshold": 0.5,
   "is_binary": true,
@@ -67,10 +68,10 @@
     "schema_version": 1,
     "source_commit": {
       "available": true,
-      "sha": "99e7b8af59d27d065a4fe3293e25468913a87b55",
+      "sha": "c0c8744095a3a16004d2ee78505ce8674e7da874",
       "worktree_state_available": true,
       "tracked_dirty": true,
-      "tracked_change_count": 9,
+      "tracked_change_count": 2,
       "untracked_present": false,
       "untracked_count": 0
     },

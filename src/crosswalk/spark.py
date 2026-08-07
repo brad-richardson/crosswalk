@@ -16,13 +16,37 @@ lockstep with ``config.FEATURE_VERSION`` by
 
 Typical Spark use::
 
-    from crosswalk.spark import spark_model_json, spark_manifest, apply_calibration
+    from crosswalk.spark import (
+        spark_model_json, spark_manifest, apply_calibration, check_feature_columns
+    )
 
     manifest = spark_manifest()
     features = manifest["features"]          # broadcast; column order matters
+    check_feature_columns(df.columns, manifest)   # fail fast, see below
     booster.load_model(bytearray(spark_model_json().encode()))
     # ... score to raw P(match), then optionally:
     calibrated = apply_calibration(raw_scores, manifest["calibration"])
+
+.. warning::
+
+   **Feeding too FEW columns does not raise — it silently mis-scores.** XGBoost
+   only errors when a DMatrix has *more* columns than the booster expects; with
+   fewer it pads and predicts happily. The booster carries no feature names
+   (``booster.feature_names is None``), so it cannot self-check either.
+
+   This matters because the feature list grows by **insertion**, not appending:
+   it is kept in ``config.FEATURE_COLUMNS`` order, so the 6 name features added
+   on 2026-08-07 landed at indices 9 and 11-15. A consumer pinned to the older
+   28-column list therefore misaligns every column from index 9 onward rather
+   than merely missing the new ones. Measured on the toy rows in
+   ``tests/integration/test_spark_sedona_e2e.py``, an obvious non-match scored
+   **0.033 correctly and 0.321 through a stale 28-column vector** — a 10x
+   inflation, well across a 0.5 threshold, with no error raised anywhere.
+
+   Always select columns *by name in* ``manifest["features"]`` order, and call
+   :func:`check_feature_columns` at job start so a wheel upgrade fails loudly
+   instead of quietly degrading. ``manifest["contract_version"]`` changes
+   whenever the feature list changes, so a consumer can also pin on it.
 """
 
 from __future__ import annotations
@@ -89,3 +113,44 @@ def apply_calibration(scores: Any, knots: dict[str, Any]) -> np.ndarray:
     x_thresholds = np.asarray(knots["x_thresholds"], dtype=np.float64)
     y_thresholds = np.asarray(knots["y_thresholds"], dtype=np.float64)
     return np.interp(np.asarray(scores, dtype=np.float64), x_thresholds, y_thresholds)
+
+
+class FeatureContractError(ValueError):
+    """Raised when a consumer's columns do not satisfy the manifest contract."""
+
+
+def check_feature_columns(columns: Any, manifest: dict[str, Any] | None = None) -> list[str]:
+    """Validate that ``columns`` can supply every feature the booster expects.
+
+    Call this once at job start. It exists because the failure it catches is
+    otherwise **silent**: an ``xgboost.DMatrix`` with fewer columns than the
+    booster was trained on predicts without error, and the shipped booster
+    carries no feature names to cross-check against. See the module docstring
+    for the measured 10x mis-scoring this produces.
+
+    Args:
+        columns: Any iterable of column names (e.g. ``spark_df.columns``).
+        manifest: Parsed manifest; loaded via :func:`spark_manifest` if omitted.
+
+    Returns:
+        The manifest's feature list, in the order the scorer must supply it.
+        Use the return value to select columns -- ``df.select(*returned)`` --
+        so ordering comes from the manifest rather than the caller.
+
+    Raises:
+        FeatureContractError: if any required feature is absent from ``columns``.
+    """
+    manifest = spark_manifest() if manifest is None else manifest
+    features = list(manifest["features"])
+    available = set(columns)
+    missing = [f for f in features if f not in available]
+    if missing:
+        raise FeatureContractError(
+            f"{len(missing)} of {len(features)} required features are missing from the "
+            f"input columns: {missing}. This would NOT have raised at predict time -- "
+            "XGBoost silently accepts an under-wide DMatrix and the resulting scores are "
+            "wrong, not merely degraded. Emit every feature in "
+            "manifest['features'] (contract_version "
+            f"{manifest.get('contract_version', 'unknown')}), or pin an older crosswalk-py."
+        )
+    return features

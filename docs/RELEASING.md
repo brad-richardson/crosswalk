@@ -59,8 +59,17 @@ forwards.
    fitted to a specific feature count:
 
    ```bash
-   uv run python scripts/tune_model.py --feature-set spark --trials 100
+   uv run python scripts/tune_model.py --feature-set spark --trials 300
    ```
+
+   > **Use >= 300 trials, and sanity-check the selected point on LOO before
+   > shipping it.** A 100-trial run of this exact search (the count used through
+   > 2026-07-03) selected a point that was *worse than not retuning at all*:
+   > LOO-by-type F1 0.8763 against 0.8777 for simply reusing the previous feature
+   > set's hyperparameters, and ~30% slower to score. Epsilon-compact selection
+   > optimizes inner-CV F1 -- a within-distribution metric -- and breaks ties on
+   > `n_estimators * max_depth`, a proxy that mispredicted traversal cost by 4x on
+   > that trial. CV F1 alone does not catch this.
 
 2. **Version bump** — update `version` in `pyproject.toml` AND `__version__` in
    `src/crosswalk/__init__.py` (keep them equal), then `uv lock`.

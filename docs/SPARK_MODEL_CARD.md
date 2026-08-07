@@ -13,7 +13,7 @@ Designed for distributed inference in Spark via broadcast booster + pandas_udf.
 - **CV F1 (match class):** 0.927 ± 0.011 (5-fold segment-aware cross-validation, training rows only)
 - **LOO-by-type F1:** 0.884 ± 0.001 (33-fold leave-one-dataset-out — the cross-dataset metric, and the one this model is selected on; see below)
 - **Predict throughput:** ~3.2M rows/sec single-node (see Inference Latency below)
-- **Training data:** 5,428 labeled pairs across 34 datasets (5,457 loaded, 29 dropped by validation)
+- **Training data:** 5,428 labeled pairs across 33 datasets (5,457 match/no_match rows loaded, 29 dropped by the hausdorff>1000m validation; `LabelStore.load_all` returns 5,487 rows / 34 datasets before the 30 `unsure` labels are filtered)
 - **Feature version:** 2026-07-07.2
 - **Exported:** 2026-08-07
 
@@ -82,7 +82,7 @@ only name feature needing a call of its own, so excluding it is precisely what m
 name block cost **0.00 µs/pair**. Solo lift given up: +0.0002 (noise). Pinned by
 `test_route_prefix_match_is_almost_always_nan`; revisit if the label base gains highway data.
 
-Re-check as the label base grows. The geometry block losing is a 5,487-label result,
+Re-check as the label base grows. The geometry block losing is a 5,457-label result,
 not a permanent one.
 
 ### The name block, added 2026-08-07
