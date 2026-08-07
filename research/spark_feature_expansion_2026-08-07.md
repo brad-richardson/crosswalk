@@ -14,17 +14,18 @@ Add **`has_name_target`** — one feature, zero marginal compute, **+0.0043 LOO 
 addable features are collectively worth nothing, and the 10 geometry ones are
 net negative.
 
-## Decision (2026-08-07): ship all 17, not the one
+## Decision (2026-08-07): ship the 7 name features
 
-**Not taken.** The call is to add **all 17** — tier t4, 45 features, **+0.0034
-LOO F1** — rather than the single-feature tier this analysis recommends. The
-measurements below are unchanged; what follows is the reasoning for overriding
-the ranking they produce.
+**Not taken.** The call is to add the **full name block** — tier t2, 35 features,
+**+0.0033 LOO F1** at 1.18 µs/pair — rather than the single-feature tier this
+analysis recommends. The 10 geometry features are **not** added. The measurements
+below are unchanged; what follows is the reasoning for overriding the ranking they
+produce.
 
-* **The gap between the two options is inside the noise.** t2a is 0.8783 ± 0.0011
-  and t4 is 0.8774 ± 0.0016. A 0.0009 difference against those bands is not a
-  result. This analysis is entitled to say "all 17 beats the 28-feature baseline";
-  it is not entitled to say "one feature beats 17".
+* **The gap between t2 and t2a is inside the noise.** t2a is 0.8783 ± 0.0011 and
+  t2 is 0.8773 ± 0.0010. A 0.0010 difference against those bands is not a result.
+  This analysis is entitled to say "the name block beats the 28-feature baseline";
+  it is not entitled to say "one of its features beats the other six".
 * **A lone `has_name_target` is the more overfit choice, not the safer one.**
   §2 already concedes the +0.0043 "rests on a handful of datasets" and has a real
   counterexample (`ch_geneva_pedestrian_network`, −0.056). Selecting the single
@@ -33,23 +34,24 @@ the ranking they produce.
   with none of the name context that would let the model condition on it. The
   full name block gives the flag its companions; it scores the same and rests on
   less.
-* **Cost is not a constraint at this scale.** All 17 cost 17.43 µs/pair marginal
-  (7.8% on top of the 224.03 µs the shipped 28 already spend), 24 KB of model, and
-  0.15 µs/row of inference — inside the measurement noise on the last two. There
-  is no budget being defended by keeping them out.
-* **What this gives up:** the 10 geometry features are, on this label base, dead
-  weight — t2 (all 7 name features, 35 total) measures +0.0033, statistically the
-  same as t4's +0.0034, for 1.18 µs/pair instead of 17.43. Everything the geometry
-  block buys is currently zero. It is included on the same small-data reasoning as
-  §4.6: the block losing is a 5,487-label result, not a permanent one, and the
-  17.43 µs is affordable.
+* **The name block is close to free.** 1.18 µs/pair marginal — 0.5% on top of the
+  224.03 µs the shipped 28 already spend — and that single `route_prefix_match`
+  call is the *only* new computation. The other 6 are keys in the
+  `compute_name_similarity()` dict that the exporter already builds and discards.
+* **The geometry block is excluded on measurement, and that is the difference
+  from t4.** t3 (geometry alone) is −0.0034; t4 (all 17) is +0.0034, statistically
+  identical to t2's +0.0033. So the 10 geometry features contribute nothing while
+  costing 16.24 µs/pair — 93% of the marginal compute of "all 17" for 0.0001 of
+  F1. Cheap is not the same as worth adding, and this is the tier where that
+  distinction has teeth. Revisit per §4.6 as the label base grows: the block
+  losing is a 5,487-label result, not a permanent one.
 
 Consequences for the follow-up PR, on top of §4: `SPARK_PORTABLE_XGB_PARAMS` was
-Optuna-tuned for 28 features and the retune (§4.2) matters more at 45 than at 29,
-so it is a required step rather than an optional one. The tf-data-platform
-coordination in §4.5 also gets materially larger — 17 new columns instead of one,
-and the geometry half is genuinely new computation on the consumer side rather
-than a discarded dict key.
+Optuna-tuned for 28 features, so the retune (§4.2) is a required step rather than
+an optional one. The tf-data-platform coordination in §4.5 is 7 new columns rather
+than one, but all 7 are pure string ops on the resolved name pair — no new geometry
+work on the consumer side, and no new dependency (`jellyfish` and `rapidfuzz` are
+already core `crosswalk-py` deps).
 
 ---
 
@@ -309,9 +311,15 @@ computing.
 
 Proposals only — nothing here was applied.
 
-1. `config.py::SPARK_PORTABLE_FEATURES` — append `"has_name_target"` (and
-   optionally `"has_name_ref"`). Order matters: the Spark scorer broadcasts the
-   manifest list as the DMatrix column order, so append rather than insert.
+1. `config.py::SPARK_PORTABLE_FEATURES` — add the chosen features. **Correction:**
+   an earlier draft of this section claimed "order matters: append rather than
+   insert". It does not. `export-spark-model` passes the list to `MLMatcher` as an
+   *exclusion* set (`cli/main.py:1313`), and `_extract_from_columns` then builds
+   `feature_names` in `FEATURE_COLUMNS` order. The manifest is written from
+   `matcher.feature_names` (`build_spark_model_manifest`), so the manifest always
+   reflects the true DMatrix order regardless of how this list is ordered. Position
+   in `SPARK_PORTABLE_FEATURES` is cosmetic; group the additions where they read
+   best.
 2. Retune `SPARK_PORTABLE_XGB_PARAMS` for the new set:
    `uv run python scripts/tune_model.py --feature-set spark`. The current params
    were Optuna-tuned *for 28 features* on 2026-07-03; the tiers above
