@@ -158,3 +158,55 @@ def test_shipped_spark_model_loads_and_predicts(shipped_manifest):
     pred = booster.predict(dmatrix)
     assert pred.shape == (1,)
     assert np.isfinite(pred[0])
+
+
+def test_shipped_booster_tree_count_matches_manifest(shipped_manifest):
+    """Tie the booster to the manifest by TREE COUNT, not just feature count.
+
+    ``test_shipped_spark_model_loads_and_predicts`` already checks
+    ``num_features``, but that is the only model<->manifest link, and it is blind
+    to the most likely reship mistake: retune the hyperparameters, update
+    ``config`` and re-export ``manifest.json``, and forget to re-copy
+    ``model.json``. When the feature count is unchanged -- which it is for any
+    pure retune -- every other gate in this file still passes and the shipped
+    manifest simply lies about the artifact beside it.
+
+    ``num_boosted_rounds()`` closes that: it is read off the booster itself and
+    ``n_estimators`` is written from the trained estimator's params, so a stale
+    pairing diverges here.
+    """
+    import xgboost as xgb
+
+    from crosswalk.spark import spark_model_json
+
+    booster = xgb.Booster()
+    booster.load_model(bytearray(spark_model_json().encode()))
+    assert booster.num_boosted_rounds() == shipped_manifest["n_estimators"], (
+        f"Shipped booster has {booster.num_boosted_rounds()} trees but the manifest "
+        f"declares n_estimators={shipped_manifest['n_estimators']} — model.json and "
+        f"manifest.json are from different exports. {_RESHIP}"
+    )
+
+
+def test_shipped_manifest_declares_a_feature_contract_version(shipped_manifest):
+    """The manifest must carry a ``contract_version`` derived from the feature list.
+
+    This is what a downstream consumer pins or diffs on. It has to be present and
+    has to actually track the shipped feature list, or it is worse than nothing --
+    a consumer would pin a constant and believe it was protected.
+
+    Why it matters: XGBoost accepts a DMatrix with FEWER columns than the booster
+    expects and predicts without raising, and the booster carries no feature
+    names. The feature list also grows by insertion (it is kept in
+    FEATURE_COLUMNS order), so a consumer on a stale list misaligns columns
+    rather than merely dropping them. See crosswalk.spark.check_feature_columns.
+    """
+    from crosswalk.model_export import _feature_contract_version
+
+    declared = shipped_manifest.get("contract_version")
+    assert declared, f"Shipped Spark manifest has no contract_version. {_RESHIP}"
+    expected = _feature_contract_version(list(shipped_manifest["features"]))
+    assert declared == expected, (
+        f"contract_version {declared!r} does not match the manifest's own feature "
+        f"list (expected {expected!r}) — it is not tracking what it claims to. {_RESHIP}"
+    )
