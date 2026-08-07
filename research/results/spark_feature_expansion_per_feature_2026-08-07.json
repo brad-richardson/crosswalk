@@ -1,0 +1,282 @@
+[
+  {
+    "baseline_loo_f1": 0.874143830278646,
+    "seeds": [
+      42,
+      1,
+      2
+    ]
+  },
+  {
+    "feature": "has_name_target",
+    "loo_f1_mean": 0.8776713963151669,
+    "delta_vs_baseline": 0.0035275660365209484,
+    "n_datasets_better": 16,
+    "n_datasets_worse": 12,
+    "n_datasets_unchanged": 5,
+    "best_dataset": [
+      "ke_nairobi_roads",
+      0.08937671952782167
+    ],
+    "worst_dataset": [
+      "ch_geneva_pedestrian_network",
+      -0.060317460317460325
+    ]
+  },
+  {
+    "feature": "vertex_density_ratio",
+    "loo_f1_mean": 0.874875545223103,
+    "delta_vs_baseline": 0.0007317149444569464,
+    "n_datasets_better": 15,
+    "n_datasets_worse": 13,
+    "n_datasets_unchanged": 5,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.017812197853903977
+    ],
+    "worst_dataset": [
+      "us_usfs_lolo",
+      -0.01061415868172566
+    ]
+  },
+  {
+    "feature": "shape_complexity_ref",
+    "loo_f1_mean": 0.8745332089133743,
+    "delta_vs_baseline": 0.00038937863472836835,
+    "n_datasets_better": 12,
+    "n_datasets_worse": 14,
+    "n_datasets_unchanged": 7,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.012016922263352825
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.009405310081316842
+    ]
+  },
+  {
+    "feature": "name_is_generic",
+    "loo_f1_mean": 0.8743092607645848,
+    "delta_vs_baseline": 0.00016543048593887675,
+    "n_datasets_better": 14,
+    "n_datasets_worse": 12,
+    "n_datasets_unchanged": 7,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.011969815248503823
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.008033462886421261
+    ]
+  },
+  {
+    "feature": "route_prefix_match",
+    "loo_f1_mean": 0.8743092607645848,
+    "delta_vs_baseline": 0.00016543048593887675,
+    "n_datasets_better": 14,
+    "n_datasets_worse": 12,
+    "n_datasets_unchanged": 7,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.011969815248503823
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.008033462886421261
+    ]
+  },
+  {
+    "feature": "name_jaro_winkler",
+    "loo_f1_mean": 0.8742039868593646,
+    "delta_vs_baseline": 6.015658071867661e-05,
+    "n_datasets_better": 12,
+    "n_datasets_worse": 16,
+    "n_datasets_unchanged": 5,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.012016922263352825
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.009389492494707774
+    ]
+  },
+  {
+    "feature": "name_soundex",
+    "loo_f1_mean": 0.8741123991699186,
+    "delta_vs_baseline": -3.143110872742701e-05,
+    "n_datasets_better": 12,
+    "n_datasets_worse": 13,
+    "n_datasets_unchanged": 8,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.009049180327868944
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.01190943187866933
+    ]
+  },
+  {
+    "feature": "angle_histogram_similarity",
+    "loo_f1_mean": 0.8740625061134754,
+    "delta_vs_baseline": -8.1324165170721e-05,
+    "n_datasets_better": 12,
+    "n_datasets_worse": 12,
+    "n_datasets_unchanged": 9,
+    "best_dataset": [
+      "ke_nairobi_roads",
+      0.013873407256533077
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.018788473239948367
+    ]
+  },
+  {
+    "feature": "shape_complexity_delta",
+    "loo_f1_mean": 0.8739170941369537,
+    "delta_vs_baseline": -0.0002267361416922456,
+    "n_datasets_better": 13,
+    "n_datasets_worse": 13,
+    "n_datasets_unchanged": 7,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.011969815248503823
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.011814806425529678
+    ]
+  },
+  {
+    "feature": "heading_consistency_ref",
+    "loo_f1_mean": 0.873874865259543,
+    "delta_vs_baseline": -0.0002689650191028891,
+    "n_datasets_better": 11,
+    "n_datasets_worse": 16,
+    "n_datasets_unchanged": 6,
+    "best_dataset": [
+      "ke_nairobi_roads",
+      0.013873407256533077
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.02264203778715468
+    ]
+  },
+  {
+    "feature": "has_name_ref",
+    "loo_f1_mean": 0.8738568064371851,
+    "delta_vs_baseline": -0.000287023841460789,
+    "n_datasets_better": 11,
+    "n_datasets_worse": 15,
+    "n_datasets_unchanged": 7,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.011969815248503823
+    ],
+    "worst_dataset": [
+      "ch_geneva_pedestrian_network",
+      -0.01297149684246457
+    ]
+  },
+  {
+    "feature": "vertex_density_ref",
+    "loo_f1_mean": 0.8735901801538892,
+    "delta_vs_baseline": -0.0005536501247568662,
+    "n_datasets_better": 14,
+    "n_datasets_worse": 14,
+    "n_datasets_unchanged": 5,
+    "best_dataset": [
+      "ke_nairobi_roads",
+      0.01923893374882013
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.02129160170092559
+    ]
+  },
+  {
+    "feature": "max_coverage",
+    "loo_f1_mean": 0.8734666164438375,
+    "delta_vs_baseline": -0.0006772138348084813,
+    "n_datasets_better": 18,
+    "n_datasets_worse": 15,
+    "n_datasets_unchanged": 0,
+    "best_dataset": [
+      "sg_singapore_footpaths",
+      0.035681490998013654
+    ],
+    "worst_dataset": [
+      "br_sao_paulo_roads",
+      -0.04349720739540286
+    ]
+  },
+  {
+    "feature": "sinuosity_delta",
+    "loo_f1_mean": 0.8729458764125709,
+    "delta_vs_baseline": -0.0011979538660750928,
+    "n_datasets_better": 11,
+    "n_datasets_worse": 15,
+    "n_datasets_unchanged": 7,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.009049180327868944
+    ],
+    "worst_dataset": [
+      "ch_geneva_pedestrian_network",
+      -0.03285403708460288
+    ]
+  },
+  {
+    "feature": "name_metaphone",
+    "loo_f1_mean": 0.8726408831281213,
+    "delta_vs_baseline": -0.001502947150524694,
+    "n_datasets_better": 11,
+    "n_datasets_worse": 13,
+    "n_datasets_unchanged": 9,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.017812197853903977
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.0304430513389643
+    ]
+  },
+  {
+    "feature": "heading_consistency_delta",
+    "loo_f1_mean": 0.872449184521323,
+    "delta_vs_baseline": -0.0016946457573229548,
+    "n_datasets_better": 16,
+    "n_datasets_worse": 15,
+    "n_datasets_unchanged": 2,
+    "best_dataset": [
+      "fi_helsinki_roads",
+      0.011969815248503823
+    ],
+    "worst_dataset": [
+      "ke_nairobi_roads",
+      -0.0609417409241817
+    ]
+  },
+  {
+    "feature": "vertex_density_target",
+    "loo_f1_mean": 0.871528267141603,
+    "delta_vs_baseline": -0.0026155631370430176,
+    "n_datasets_better": 10,
+    "n_datasets_worse": 20,
+    "n_datasets_unchanged": 3,
+    "best_dataset": [
+      "sg_singapore_footpaths",
+      0.010292409445997852
+    ],
+    "worst_dataset": [
+      "co_bogota_roads",
+      -0.025997296573946116
+    ]
+  }
+]

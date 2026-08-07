@@ -546,9 +546,20 @@ SEMANTIC_FEATURES = [
 
 
 # Features included in Spark-portable models for Overture matching.
-# These are computable from aligned geometry pairs alone — no graph topology,
-# no spatial indexes, no connector data required.
 # Used by `crosswalk export-spark-model`. Inclusive list (won't break with feature drift).
+#
+# Spark-portability is a *necessary* condition for membership, not a sufficient
+# one: a feature qualifies if it needs nothing but the two aligned geometries and
+# the two Overture name structs — no graph topology, no spatial index, no
+# connector data. But 45 of the 83 FEATURE_COLUMNS clear that bar, not 28. This
+# list is the value-selected subset of them.
+#
+# Do NOT read an omission here as "infeasible in Spark". The 17 feasible-but-
+# omitted features are enumerated and proven computable from a bare pair (bit-for-
+# bit against `compute_pair_features`) in tests/test_spark_feature_expansion.py,
+# and measured for F1 / size / latency in
+# research/spark_feature_expansion_2026-08-07.md. That doc is the reason any given
+# one of them is out; `docs/SPARK_MODEL_CARD.md` carries the per-category verdicts.
 SPARK_PORTABLE_FEATURES = [
     # Geometry (distance/overlap)
     "hausdorff_distance_m",
