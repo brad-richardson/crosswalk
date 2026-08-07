@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 
 import pytest
 
@@ -50,9 +51,38 @@ def _java_available() -> bool:
     return shutil.which("java") is not None
 
 
+def _pyspark_needs_distutils() -> bool:
+    """True if this pyspark cannot build a DataFrame from pandas on this Python.
+
+    ``pyspark`` 3.5.x calls ``require_minimum_pandas_version()`` on every
+    ``createDataFrame(pandas_df)``, and that helper does
+    ``from distutils.version import LooseVersion``. ``distutils`` was removed in
+    Python 3.12 (PEP 632), so the call dies with a bare
+    ``ModuleNotFoundError: No module named 'distutils'`` from deep inside
+    pyspark -- which reads like a broken test rather than an unsupported
+    interpreter. ``pyproject.toml`` allows ``>=3.10`` and CI pins 3.11, so a
+    contributor on 3.12 with the [spark] extra and a JDK installed hits this.
+
+    Skip with a real explanation instead. Removable once the [spark] extra moves
+    to pyspark 4.x, which dropped the distutils import.
+    """
+    if sys.version_info < (3, 12):
+        return False
+    major = int(pyspark.__version__.split(".")[0])
+    return major < 4
+
+
 pytestmark = [
     pytest.mark.spark,
     pytest.mark.skipif(not _java_available(), reason="no JDK found (need Java for Spark)"),
+    pytest.mark.skipif(
+        _pyspark_needs_distutils(),
+        reason=(
+            f"pyspark {pyspark.__version__} needs distutils, removed in Python 3.12 "
+            f"(running {sys.version_info.major}.{sys.version_info.minor}). "
+            "Use Python 3.11 (what CI pins) or pyspark >= 4."
+        ),
+    ),
 ]
 
 # pyspark 3.5.x <-> apache-sedona 1.6.x. The shaded jar bundles Sedona + its
@@ -154,7 +184,13 @@ _MATCH_FEATURES = {
     "collinear_gap_ratio": 0.0,
     "edge_distance_rmse_m": 0.5,
     "name_levenshtein": 1.0,
+    "name_jaro_winkler": 1.0,
     "name_token_sort": 1.0,
+    "name_soundex": 1.0,
+    "name_metaphone": 1.0,
+    "has_name_ref": 1.0,
+    "has_name_target": 1.0,
+    "name_is_generic": 0.0,
     "name_numeric_match": 1.0,
     "class_similarity": 1.0,
     "lateral_offset_m": 0.5,
@@ -184,7 +220,13 @@ _NON_MATCH_FEATURES = {
     "collinear_gap_ratio": 5.0,
     "edge_distance_rmse_m": 300.0,
     "name_levenshtein": 0.0,
+    "name_jaro_winkler": 0.0,
     "name_token_sort": 0.0,
+    "name_soundex": 0.0,
+    "name_metaphone": 0.0,
+    "has_name_ref": 1.0,
+    "has_name_target": 1.0,
+    "name_is_generic": 0.0,
     "name_numeric_match": 0.0,
     "class_similarity": 0.0,
     "lateral_offset_m": 300.0,

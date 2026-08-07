@@ -343,7 +343,7 @@ def bundled_model_path() -> Path:
 def bundled_spark_model_path() -> Path:
     """Path to the Spark-portable XGBoost model shipped inside the package.
 
-    A committed XGBoost-native JSON booster (28 SPARK_PORTABLE_FEATURES) that
+    A committed XGBoost-native JSON booster (34 SPARK_PORTABLE_FEATURES) that
     Spark consumers (the tf-data-platform sister project) import straight from
     the wheel instead of hand-copying files. Its ``feature_version`` is kept in
     lockstep with ``FEATURE_VERSION`` by ``tests/unit/test_shipped_spark_model.py``.
@@ -546,9 +546,31 @@ SEMANTIC_FEATURES = [
 
 
 # Features included in Spark-portable models for Overture matching.
-# These are computable from aligned geometry pairs alone — no graph topology,
-# no spatial indexes, no connector data required.
 # Used by `crosswalk export-spark-model`. Inclusive list (won't break with feature drift).
+#
+# Spark-portability is a *necessary* condition for membership, not a sufficient
+# one: a feature qualifies if it needs nothing but the two aligned geometries and
+# the two Overture name structs — no graph topology, no spatial index, no
+# connector data. But 45 of the 83 FEATURE_COLUMNS clear that bar, not 34. This
+# list is the value-selected subset of them.
+#
+# Do NOT read an omission here as "infeasible in Spark". The 11 feasible-but-
+# omitted features are enumerated and proven computable from a bare pair (bit-for-
+# bit against `compute_pair_features`) in tests/test_spark_feature_expansion.py,
+# and measured for F1 / size / latency in
+# research/spark_feature_expansion_2026-08-07.md. They are out on measured value,
+# not feasibility:
+#
+#   * 10 geometry features -- -0.0034 LOO F1 as a tier, 16.24 us/pair. Re-check as
+#     the label base grows; the block losing is a 5,457-label result.
+#   * `route_prefix_match` -- non-NaN on 1 of 5,532 stored labelled pairs (0.02%);
+#     it needs BOTH names to canonicalize to a route designation (I-90, US-101),
+#     which street and sidewalk layers do not carry. XGBoost cannot split on that,
+#     and it is the only name feature that costs a separate call. Excluding it is
+#     what makes the name block free. Pinned by
+#     test_route_prefix_match_is_almost_always_nan.
+#
+# `docs/SPARK_MODEL_CARD.md` carries the per-category verdicts.
 SPARK_PORTABLE_FEATURES = [
     # Geometry (distance/overlap)
     "hausdorff_distance_m",
@@ -559,9 +581,31 @@ SPARK_PORTABLE_FEATURES = [
     "heading_delta",
     "collinear_gap_ratio",
     "edge_distance_rmse_m",
-    # Name similarity (top 3 by importance)
+    # Name similarity (9 of 10). These are exactly the features
+    # `compute_name_similarity()` already returns in a single call -- the exporter
+    # used to keep 3 and discard 6 -- so the marginal computation cost of the whole
+    # block is **0.00 us/pair**. It is free in the literal sense: a consumer already
+    # calling compute_name_similarity() just stops dropping 6 dict keys on the floor.
+    #
+    # `route_prefix_match` is the 10th and is deliberately NOT here: it is the only
+    # name feature needing a separate call, and it is non-NaN on 0.02% of the label
+    # base. Including it would have made this block cost 1.18 us/pair for a column
+    # XGBoost cannot split on. See the header comment above.
+    #
+    # ORDER: this list must stay in FEATURE_COLUMNS order. Not because the model
+    # cares -- the exporter passes this as an *exclusion* set and MLMatcher rebuilds
+    # feature_names in FEATURE_COLUMNS order -- but because
+    # test_shipped_spark_model.py asserts `manifest["features"] == this list` as an
+    # ordered comparison, and the manifest is written from feature_names. Pinned by
+    # test_spark_portable_features_follow_feature_columns_order.
     "name_levenshtein",
+    "name_jaro_winkler",
     "name_token_sort",
+    "name_soundex",
+    "name_metaphone",
+    "has_name_ref",
+    "has_name_target",
+    "name_is_generic",
     "name_numeric_match",
     # Class
     "class_similarity",
@@ -591,26 +635,57 @@ SPARK_PORTABLE_FEATURES = [
     "endpoint_heading_divergence",
 ]  # fmt: skip
 
-# XGBoost hyperparams tuned for the 28-feature Spark-portable model.
-# Tuned 2026-07-03 via `scripts/tune_model.py --feature-set spark` (Optuna,
-# 100 trials, TPESampler seed=42) with the leakage-free protocol: the seed-42
+# XGBoost hyperparams tuned for the 34-feature Spark-portable model.
+# Retuned 2026-08-07 via `scripts/tune_model.py --feature-set spark` (Optuna,
+# **300 trials**, TPESampler seed=42) with the leakage-free protocol: the seed-42
 # holdout was discarded before tuning and the search used inner GroupKFold CV
 # on the training portion only, with a size penalty of 0.00001 F1 per tree
 # above 100 n_estimators. Epsilon-compact selection (inference speed matters
 # for Spark): cheapest trial by n_estimators * max_depth within 0.003 raw
-# CV F1 of the best — selected 224 trees x depth 10 (CV F1 0.9216) over the
-# best-F1 310 x 10 (CV F1 0.9242).
+# CV F1 of the best — selected 168 trees x depth 9 (CV F1 0.9270) over the
+# best-F1 216 x 10 (CV F1 0.9292), trading 0.0022 CV F1 for a 1.43x cheaper
+# model. Cheaper than the 28-feature predecessor (cost 2240 -> 1512).
+#
+# Careful with the CV comparison: 0.9216 was measured on 2026-07-03, on the label
+# base BEFORE the #473 re-key/backfill, so "0.9216 -> 0.9270" mixes a data change
+# with a tuning change. The like-for-like 28-feature CV on the current label base
+# is 0.9182 +- 0.0019 (research/results/spark_feature_expansion_2026-08-07.json,
+# t0_baseline_28).
+#
+# WHY 300 TRIALS, not the 100 the previous tunes used. The 100-trial run of this
+# same search selected 353 x 7 (CV F1 0.9257, cost 2471) and that point was
+# *worse than doing nothing*: LOO-by-type F1 0.8763 against 0.8777 for simply
+# reusing the old 28-feature hyperparameters on this feature set, plus ~30%
+# slower to score. The epsilon-compact rule optimizes inner-CV F1 (a within-
+# distribution metric) and breaks ties on n_estimators * max_depth (a proxy that
+# predicted +10% traversal cost for a point that measured ~40% slower), so a
+# shallow-wide shape that fits the training distribution can win the rule while
+# generalizing worse across datasets. Nothing was wrong with the rule's
+# arithmetic -- 353 x 7 genuinely was the cheapest eligible trial in that run --
+# the search just had not found a compact-and-general point yet. At 300 trials it
+# did, and the rule's own pick is also the best of its eligible set on LOO
+# (0.8837 vs 0.8811 / 0.8815 / 0.8801 for the next three cheapest).
+#
+# Do NOT read that as "no selection optimism". The decision to discard the
+# 100-trial run and re-search at 300 was itself made on LOO, so the search budget
+# was tuned against the same 33-fold set the headline 0.8839 is reported on, and
+# seven candidates were LOO-scored with the argmax shipped. Treat 0.8839 as
+# optimistic by roughly the quoted +-. See docs/SPARK_MODEL_CARD.md.
+#
+# If a future feature change makes this list stale, retune at >= 300 trials and
+# sanity-check the selected point on LOO before shipping it. CV F1 alone will not
+# catch this failure mode.
 SPARK_PORTABLE_XGB_PARAMS: dict[str, float | int] = {
-    "n_estimators": 224,
-    "learning_rate": 0.01275299313255589,
-    "max_depth": 10,
-    "min_child_weight": 2,
-    "subsample": 0.8019037612739637,
-    "colsample_bytree": 0.9661600548038851,
-    "gamma": 0.6021730351738508,
-    "reg_alpha": 1.5439549237262677,
-    "reg_lambda": 2.1882487406505136,
-    "max_bin": 343,
+    "n_estimators": 168,
+    "learning_rate": 0.02322105347419542,
+    "max_depth": 9,
+    "min_child_weight": 1,
+    "subsample": 0.6711421539479665,
+    "colsample_bytree": 0.8017736781360522,
+    "gamma": 0.23315379541725903,
+    "reg_alpha": 0.5946412580164185,
+    "reg_lambda": 0.032016736500213416,
+    "max_bin": 164,
 }
 
 
