@@ -337,8 +337,18 @@ constant and retraining in the same step** — the ablation deliberately holds t
 model fixed, which is the right way to isolate the feature's effect but the
 wrong way to estimate the end-to-end effect.
 
-Harnesses: `scripts/tier_penalty_evidence.py` (evidence),
-`class_sim_ablation.py` (ablation, session scratchpad).
+Harnesses, both committed so this can be re-run rather than taken on trust:
+`scripts/tier_penalty_evidence.py` (the empirical P(match) evidence) and
+`scripts/class_sim_ablation.py` (the ablation above). The ablation needs no
+backfill, FEATURE_VERSION bump, or retrain -- `class_similarity` depends only on
+the class/subclass strings, so each variant is applied to the labeled feature
+matrix in memory and scored with the real LOO-by-type CV:
+
+```bash
+uv run python scripts/class_sim_ablation.py
+```
+
+Every figure in the table above is that script's output (seed 42, 33 folds).
 
 ### Side benefit: the backfill is independently validated here
 
