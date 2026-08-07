@@ -48,7 +48,13 @@ jobs:
           pytest -q
 
   test:
-    runs-on: ubuntu-latest
+    # x86_64 is the REQUIRED leg; arm64 is informational (see the matrix note in
+    # the `spark` job below for why both exist and which one to act on).
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,7 +92,35 @@ jobs:
     # booster inside a SparkSession. Separate job because it needs a JDK and pulls
     # the Sedona jars from Maven Central — heavier than the plain `test` job, which
     # skips these (marker `spark`, guarded to SKIP when the extra/JDK is absent).
-    runs-on: ubuntu-latest
+    #
+    # ARCH MATRIX. x86_64 is the leg to act on; arm64 is a divergence detector.
+    #
+    # Why both, when nothing here ships a compiled artifact: the numeric gates
+    # only ever run on CI. tests/regression/test_loo_cv.py and
+    # test_training.py are `skipif GITHUB_ACTIONS != "true"`, and the `test` job
+    # trains its own model to evaluate them. So the runner architecture IS the
+    # sole environment those floors are measured in, and `other` currently clears
+    # its floor by +0.0011 (0.8891 vs 0.88). XGBoost `hist` chooses split points
+    # from histogram bins; SIMD width, FMA contraction and libm differences
+    # across x86/aarch64 can move macro-F1 by more than that margin.
+    #
+    # Running ARM-only would silently re-baseline the only place cross-dataset
+    # generalization is checked. Running x86-only leaves aarch64 wheel and
+    # numeric behaviour untested for anyone installing the published wheel there.
+    # So: both, x86 authoritative.
+    #
+    # `fail-fast: false` is deliberate -- when they diverge you want to see WHICH
+    # arch diverged, not have the first failure cancel the other. There is no
+    # `continue-on-error` on the arm leg either: a red arm check is the signal
+    # this matrix exists to produce, and hiding it would defeat the purpose.
+    # `main` has no branch protection today, so neither leg blocks a merge. If
+    # protection is added later, require only `test (ubuntu-latest)` and
+    # `spark (ubuntu-latest)`.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       # These tests use synthetic data and the bundled model, so materializing
       # the LFS-backed training corpus would only consume bandwidth.
@@ -110,7 +144,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.ivy2
-          key: ivy2-sedona-1.6.1-spark-3.5
+          key: ivy2-${{ matrix.runner }}-sedona-1.6.1-spark-3.5
       - name: Run Spark/Sedona E2E tests
         # -n0 disables xdist so a single Spark session serves both tests.
         run: uv run pytest -m spark -n0 -v
@@ -126,7 +160,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/.ivy2
-          key: ivy2-sedona-1.6.1-spark-3.5
+          key: ivy2-${{ matrix.runner }}-sedona-1.6.1-spark-3.5
 
   publish:
     # PyPI Trusted Publishing (OIDC): the PyPI project `crosswalk-py` trusts this
@@ -136,6 +170,13 @@ jobs:
     # artifacts are committed in-repo (not LFS; only labels/ parquets are), so
     # the wheel build is hermetic without an LFS fetch.
     if: startsWith(github.ref, 'refs/tags/v')
+    # NOTE: `needs: test` waits for EVERY matrix leg, so a red arm64 leg holds a
+    # tagged release even though arm64 is informational for PRs. That is
+    # deliberate and is the one place the arm leg is not merely advisory: the
+    # wheel ships matcher_model_combined.joblib and the Spark booster, so if the
+    # two architectures disagree about whether that model clears its LOO floors,
+    # the right move is to stop and look rather than publish. Split arm64 into a
+    # standalone job if you ever want releases to ignore it.
     needs: [lint, mbench, test]
     runs-on: ubuntu-latest
     environment: pypi
