@@ -29,7 +29,7 @@ matching:
   target_kind: route_network
 last_fetch:
   reference:
-    fetched_at: '2026-07-13T23:48:51.423730+00:00'
+    fetched_at: '2026-08-07T04:31:30.165032+00:00'
     bbox:
     - 5.55
     - 45.65
@@ -41,7 +41,7 @@ last_fetch:
     - 6.562955131330194
     - 46.55898311174991
     bbox_buffer_m: 1000.0
-    feature_count: 378752
+    feature_count: 380376
     geometry_types:
     - LineString
     output_path: data/raw

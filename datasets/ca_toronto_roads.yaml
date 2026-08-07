@@ -48,7 +48,7 @@ fetch:
     - Minor Shoreline (Land locked)
 last_fetch:
   reference:
-    fetched_at: '2026-07-06T18:37:31.039169+00:00'
+    fetched_at: '2026-08-07T04:29:42.088580+00:00'
     bbox:
     - -79.65
     - 43.58
@@ -60,7 +60,7 @@ last_fetch:
     - -79.08757051425378
     - 43.86898311174991
     bbox_buffer_m: 1000.0
-    feature_count: 259155
+    feature_count: 261325
     geometry_types:
     - LineString
     output_path: data/raw
