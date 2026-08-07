@@ -113,3 +113,16 @@ quality_fingerprint:
   total_segments: 3477
   name_coverage_ratio: 0.9514
   class_coverage_ratio: 0.9997
+# Blocks publishing (crosswalk factory publish) until the defect is fixed and
+# the block is removed. See src/crosswalk/factory/publish.py::dataset_quality_hold.
+quality_hold:
+  reason: 'cross-mode defect: separated cycle facilities matched to parallel road
+    centerlines. 607 of 3412 high-confidence road-ref/cycleway-target matches are
+    separated facilities (ExisFacil SBL/SBLBL/SBLSL/CFSBL), the same defect held on
+    co_bogota_bike_network; the other 82% are painted/shared-lane facilities (BL/SLM/
+    BLSL) that legitimately share the road centerline. A facility-aware fix could
+    release most of the dataset. See research/cross_mode_audit_2026-08-06.md.
+    Note: fetch.class_mapping maps painted lanes (BL etc.) to cycleway while this
+    file''s own classification.class_mapping_rules maps BL to unknown — reconcile
+    before re-fetching.'
+  since: '2026-08-06'

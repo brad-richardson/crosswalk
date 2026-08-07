@@ -21,7 +21,16 @@ fetch:
     5: tertiary
     6: residential
     7: residential
-    8: service
+    # toiminn_lk 8 is "kevyen liikenteen väylä" (light-traffic way — the combined
+    # foot/cycle path class), NOT a service road: 57860 of its 57900 rows carry
+    # linkkityyp 8 (kevyen liikenteen väylä) and the remaining 39 carry linkkityyp 9
+    # (jalankulkualue, pedestrian area). Mapping it to `service` made ~50k correct
+    # matches against Overture cycleway refs look like vehicular cross-mode defects
+    # (research/cross_mode_audit_2026-08-06.md). `path` is the right neutral target:
+    # the class is shared foot+cycle, so neither `footway` nor `cycleway` fits.
+    8: path
+    # toiminn_lk 9 IS service access: its 194 rows are linkkityyp 10/13/14/15
+    # (huolto-/pelastustie, huoltoaukko) — service and maintenance access.
     9: service
   # Digiroad SILTA_ALIK is a signed, segment-wide physical level: positive
   # values are bridge levels; -1/-2/-3 are underpasses/underground levels;

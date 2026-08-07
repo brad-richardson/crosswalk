@@ -82,3 +82,14 @@ quality_fingerprint:
   total_segments: 138516
   name_coverage_ratio: 1.0
   class_coverage_ratio: 0.9776
+# Blocks publishing (crosswalk factory publish) until the defect is fixed and
+# the block is removed. See src/crosswalk/factory/publish.py::dataset_quality_hold.
+quality_hold:
+  reason: 'cross-mode defect (roads-side mirror of the co_bogota_bike_network hold):
+    8185 high-confidence pedestrian/vehicular cross-mode matches, 6.0% of the
+    dataset — Overture footway refs consumed by tertiary/residential targets (4200 +
+    3298), residential refs matched to pedestrian targets (1423), steps/tertiary
+    (629). Same parallel-geometry failure as the held bike network, same city.
+    Awaiting optimizer cross-mode gate / learned optimizer. See
+    research/cross_mode_audit_2026-08-06.md.'
+  since: '2026-08-06'
