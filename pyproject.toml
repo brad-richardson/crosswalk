@@ -130,7 +130,11 @@ ignore = ["E501", "B008", "E402", "B905", "SIM102", "SIM108"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-n auto"
+# --dist loadscope keeps a module's tests on one xdist worker so module- and
+# class-scoped fixtures run ONCE, not once per worker. Without it, expensive
+# fixtures (model training in test_export_spark_model.py, the LOO sweep in
+# test_loo_cv.py) are silently re-run per worker and dominate the CI `test` job.
+addopts = "-n auto --dist loadscope"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "spark: marks tests that need the Spark/Sedona stack + a JDK (deselect with '-m \"not spark\"'; select with '-m spark'). Requires the [spark] extra.",
