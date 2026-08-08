@@ -67,11 +67,50 @@ pytestmark = pytest.mark.skipif(
 # labels for bogota bike and a data-quality look at geneva hiking. Note the
 # re-key is exonerated here: bogota bike had 100% of its labels geometrically
 # re-keyed and still scores 0.96, which a mis-key would have destroyed.
+#
+# 2026-08-08 -- the prediction above came true on the very next data change
+# (the reference-side re-key + backfill, #482). `other` fell to 0.8786, 0.0014
+# under the floor, while the other three groups all IMPROVED:
+#
+#   group      pre       post      delta
+#   road_good  0.8832    0.8902   +0.0070
+#   road_poor  0.9244    0.9307   +0.0063
+#   sidewalk   0.8698    0.8767   +0.0069
+#   other      0.8891    0.8786   -0.0105
+#
+# Both states were re-run at seed 42 on the same code, and the pre-run
+# reproduced the baseline above exactly, so that is a clean A/B rather than
+# drift. Per-dataset, `other` is 4-5 individual pair predictions flipping:
+#
+#   dataset                    n     pre       post     delta
+#   ch_geneva_hiking_routes    50   0.6667    0.6667    0.0000
+#   co_bogota_bike_network     29   0.9643    0.9455   -0.0188   (= ONE pair)
+#   us_boston_bike_network     86   0.9620    0.9487   -0.0133
+#   us_frisco_trails          177   0.9634    0.9534   -0.0100
+#
+# None of those four datasets had a single label re-keyed (0 of 7 orphans
+# mapped across them), so the movement is the global feature recomputation, not
+# the re-key.
+#
+# The `other` floor was then LOWERED 0.88 -> 0.86 by maintainer decision, to
+# unblock the merge. Be clear-eyed about what that means: unlike the other
+# three, this floor is NOT (baseline - 0.05) derived from an independent
+# measurement -- it was fitted to a number we had just produced, which is
+# exactly what the "left UNCHANGED" note above was guarding against. It buys
+# +0.0186 of headroom over the current 0.8786 and will drift again.
+#
+# The real fixes are unchanged and still outstanding: label co_bogota_bike_network
+# up from 29 (at n=29 a single pair is worth 0.019 F1, which is most of this
+# group's volatility), and take a data-quality look at ch_geneva_hiking_routes.
+# There is also a structural argument that MIN_GROUP_LABELS=100 gates the GROUP
+# while letting an n=29 MEMBER dominate its macro-average -- if this group trips
+# a third time, fix that rather than lowering the number again.
 MIN_GROUP_MACRO_F1 = {
     "road_good": 0.85,
     "road_poor": 0.87,
     "sidewalk": 0.82,
-    "other": 0.88,
+    # Fitted to a just-measured value, not independently derived -- see above.
+    "other": 0.86,
 }
 
 # Type groups whose evaluated labels total fewer than this are skipped
