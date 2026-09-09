@@ -898,6 +898,8 @@ def invoke_claude(
     model: str,
     timeout: int = 240,
     effort: str = "",
+    *,
+    response_schema: str | None = None,
 ) -> str:
     """Invoke the claude CLI. Prompt via stdin, Read tool for images, JSON schema.
 
@@ -911,7 +913,7 @@ def invoke_claude(
         "--allowedTools",
         "Read",
         "--json-schema",
-        _JSON_SCHEMA,
+        response_schema if response_schema is not None else _JSON_SCHEMA,
     ]
     if effort:
         cmd += ["--effort", effort]
@@ -1081,6 +1083,8 @@ def invoke_opencode(
     effort: str = "",
     agent: str = "",
     config_content: dict | None = None,
+    *,
+    cwd: Path | None = None,
 ) -> str:
     """Invoke the opencode CLI (OpenRouter-backed). Reads images by path via -f.
 
@@ -1138,6 +1142,7 @@ def invoke_opencode(
             text=True,
             timeout=timeout,
             env=env,
+            **({"cwd": cwd} if cwd is not None else {}),
         )
     finally:
         # rmtree clears opencode.db plus its -shm/-wal siblings in one shot; the

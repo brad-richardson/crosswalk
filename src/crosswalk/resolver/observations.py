@@ -15,6 +15,10 @@ import numpy as np
 import pandas as pd
 
 from crosswalk.agent_labeling.consensus_desired import map_desired_to_ids, parse_desired_edges
+from crosswalk.agent_labeling.stitch_edge_ballots import (
+    EDGE_BALLOT_VERSION,
+    validate_edge_decisions,
+)
 from crosswalk.agent_labeling.stitch_provenance import sha256_json
 
 OBSERVATION_SCHEMA_VERSION = 1
@@ -184,12 +188,27 @@ def build_vote_observations(
         weighted_positive, total_weight = Counter(), Counter()
         for ballot in sub.to_dict("records"):
             try:
-                decisions = _legacy_decisions(
-                    ballot,
-                    displayed,
-                    (label_maps or {}).get(evidence_id),
-                    payload.get("option_menu"),
-                )
+                protocol = text(ballot.get("protocol_version"))
+                if protocol or payload.get("protocol_version"):
+                    if (
+                        protocol != EDGE_BALLOT_VERSION
+                        or payload.get("protocol_version") != protocol
+                    ):
+                        raise ValueError("Unsupported or mismatched direct ballot protocol")
+                    if text(ballot.get("error")):
+                        continue
+                    decisions = validate_edge_decisions(
+                        json.loads(ballot["edge_decisions"]),
+                        set(displayed),
+                        text(ballot.get("none_reason")),
+                    )
+                else:
+                    decisions = _legacy_decisions(
+                        ballot,
+                        displayed,
+                        (label_maps or {}).get(evidence_id),
+                        payload.get("option_menu"),
+                    )
                 weight = (provider_weights or {}).get(ballot["provider"], 1.0)
                 if not np.isfinite(weight) or weight <= 0:
                     raise ValueError("provider weights must be finite and positive")
