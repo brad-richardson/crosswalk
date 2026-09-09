@@ -1,0 +1,27 @@
+{
+  "audit": {
+    "ambiguous_model_seats": 0,
+    "known_rows": 19,
+    "observation_groups": 2,
+    "overlap_conflicts": 0,
+    "reconciled_known_rows": 19,
+    "reconciled_rows": 19,
+    "rows": 19
+  },
+  "cases": 2,
+  "draws": 6,
+  "none_reasons": {
+    "": 5,
+    "insufficient_evidence": 1
+  },
+  "observations_sha256": "4edeac89a51da57f0ef2ef0c8965d935d5c722b682bd5670df63d586e753ec87",
+  "panel_invocation_sha256": "f34f05976f5df6a0843bfe6c80ae8c6a72b435e6b41f051bff4de533fb496fcd",
+  "scope": "Purposive protocol smoke test, not a population accuracy estimate; not admitted to the frozen archive experiment.",
+  "selection_sha256": "6c8dfd8e4ae81b3f02975d2a51bfefb3017460e74baa0d5ba0a121c571688754",
+  "tiers": {
+    "below_quorum": 5,
+    "majority": 1,
+    "unanimous": 13
+  },
+  "valid_draws": 6
+}

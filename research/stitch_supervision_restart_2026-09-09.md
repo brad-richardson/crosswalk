@@ -9,7 +9,7 @@ publication gates, and bundled models are outside these four batches.
 |---|---|---|
 | 1 | Recover scoped observations from archived votes; preserve unknowns, evidence versions, overlap conflicts, and parent lineage | Complete |
 | 2 | Freeze and audit the usable existing human evaluation set; exclude related weak observations | Complete |
-| 3 | Support direct edge decisions and uncertainty; bind ballots to evidence and model configuration | Pending batch 2 |
+| 3 | Support direct edge decisions and uncertainty; bind ballots to evidence and model configuration | Complete |
 | 4 | Run weighted human/unanimous/majority supervision comparisons against a fixed evaluation set and optimizer baseline | Pending batch 3 |
 
 Each batch receives a separate commit and dependent branch. Validation combines
@@ -66,3 +66,32 @@ scores. It supports a paired resolver experiment, not end-to-end accuracy or
 model promotion claims. Historical human sessions did not hash their candidate
 universe; unchanged group identity or explicit original membership coverage is
 the strongest available scope check. No new labels are required to continue.
+
+## Batch 3: direct edge panel
+
+`scripts/run_stitch_edge_panel.py` prepares verified, menu-free evidence and runs
+one blind draw per pinned Fable 5.1, Astra 6, and Muse Spark 1.3 Contributor seat.
+Each displayed edge requires separate identity and keep/drop/unknown decisions;
+omissions, incompatible evidence IDs, and contradictory NONE reasons invalidate
+the ballot. A resolution drop never becomes a negative pair-identity label.
+The new panel uses equal seats with no inherited provider reliability weights.
+Schema, rubric, prompt, model/configuration, transport code, and image hashes
+identify each wave; existing ballots cannot be replaced by retrying for agreement.
+
+A live two-pack test produced **six valid ballots** and 19 edge observations:
+13 unanimous, one three-seat majority, and five below quorum. On Helsinki
+`92c0997f`, Astra kept nine edges, dropped four, and marked five unknown; Fable
+kept 13 and dropped five. This preserves useful decisions from the earlier
+whole-group insufficient-evidence response. Counts are protocol evidence, not
+measured truth or calibrated accuracy. The live outputs are excluded from the
+preregistered archive experiment and do not update production labels or routing.
+
+Artifacts live under `data/experiments/stitch-supervision-20260909/batch3`;
+the small report is committed as `stitch_supervision_batch3_2026-09-09.json`.
+Focused panel, delivery, export, and observation tests: **410 passed**.
+
+CI initially failed during collection because installing unlocked web extras
+then partially syncing locked core dependencies mixed AnyIO and typing-extensions
+versions. A separate follow-up commit on batch 1 now installs locked extras and
+uses `uv run --no-sync` for subsequent commands. Both Spark architectures passed
+after the repair; the repair is carried forward through the chain.
