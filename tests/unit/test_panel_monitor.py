@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 from crosswalk.agent_labeling.panel_monitor import (
@@ -30,6 +31,7 @@ from crosswalk.agent_labeling.panel_monitor import (
     wave_optimizer_anchor_warnings,
     wave_position_anchor_warnings,
 )
+from crosswalk.cli import agent as agent_cli
 from crosswalk.cli import app
 
 runner = CliRunner()
@@ -550,9 +552,9 @@ def test_quad_panel_kimi_and_muse_are_distinct_voter_rows():
 def test_cli_panel_stats_shows_muse_as_its_own_row(tmp_path, monkeypatch):
     """`crosswalk agent panel-stats` renders the Muse voter as its own row on a
     4-voter provenance snapshot — distinct from the kimi/Kimi seat."""
-    # Widen the rich console so the voter/model cells aren't truncated to an
-    # ellipsis in the narrow 12-column table (default non-tty width is 80).
-    monkeypatch.setenv("COLUMNS", "400")
+    # Fix the actual renderer width. A CliRunner/terminal override can supersede
+    # COLUMNS, which otherwise tests truncation instead of distinct voter rows.
+    monkeypatch.setattr(agent_cli, "console", Console(width=400))
     rows = []
     for i in range(6):
         for prov, model in [

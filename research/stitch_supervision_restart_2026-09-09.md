@@ -10,7 +10,7 @@ publication gates, and bundled models are outside these four batches.
 | 1 | Recover scoped observations from archived votes; preserve unknowns, evidence versions, overlap conflicts, and parent lineage | Complete |
 | 2 | Freeze and audit the usable existing human evaluation set; exclude related weak observations | Complete |
 | 3 | Support direct edge decisions and uncertainty; bind ballots to evidence and model configuration | Complete |
-| 4 | Run weighted human/unanimous/majority supervision comparisons against a fixed evaluation set and optimizer baseline | Implemented; final validation running |
+| 4 | Run weighted human/unanimous/majority supervision comparisons against a fixed evaluation set and optimizer baseline | Complete |
 
 Each batch receives a separate commit and dependent branch. Validation combines
 focused semantic regression tests, real archived-data replay, and the repository's
@@ -149,3 +149,58 @@ paired intervals, slices, source checks, code/library versions, and output
 hashes. Predictions, verified weak training rows, and three isolated research
 models live under `data/experiments/stitch-supervision-20260909/batch4`.
 Focused weighted-training, context, and evaluation tests: **52 passed**.
+
+## Running the batches
+
+The four PRs are chained: [#483](https://github.com/brad-richardson/crosswalk/pull/483)
+→ [#484](https://github.com/brad-richardson/crosswalk/pull/484)
+→ [#485](https://github.com/brad-richardson/crosswalk/pull/485)
+→ [#486](https://github.com/brad-richardson/crosswalk/pull/486).
+
+For a fresh replay, choose new output directories:
+
+```bash
+uv run --no-sync python scripts/recover_stitch_observations.py \
+  --out data/experiments/stitch-supervision-replay/batch1
+uv run --no-sync python scripts/freeze_stitch_evaluation.py \
+  --observations data/experiments/stitch-supervision-replay/batch1/reconciled.parquet \
+  --out data/experiments/stitch-supervision-replay/batch2
+uv run --no-sync python scripts/run_stitch_edge_panel.py \
+  --packs research/stitch_supervision_example_packs.json \
+  --out data/experiments/stitch-supervision-replay/batch3
+uv run --no-sync python scripts/run_stitch_supervision_experiment.py \
+  --evaluation data/experiments/stitch-supervision-20260909/batch2 \
+  --out data/experiments/stitch-supervision-replay/batch4
+```
+
+Batch 3 prepares evidence without model calls; add `--run` to request the six
+new draws. Its live output stays separate from batch 4. Subsequent comparisons
+should reuse the original `20260909/batch2` frozen evaluation, as the fourth
+command does, instead of choosing a new benchmark after seeing results. Use
+these scripts for the audited, weighted experiment; they enforce the source,
+scope, and loss contracts together. No command writes human labels, publishes
+bridges, or installs a bundled model.
+
+## Final validation
+
+The complete implementation passed [CI on both x86 and ARM](https://github.com/brad-richardson/crosswalk/actions/runs/34375733893):
+**4,148 tests passed**, 44 skipped, one expected failure per architecture;
+**42 serial performance tests passed** per architecture; **256 mbench tests
+passed** (one skip); and **two Spark tests passed** per architecture. The actual
+training quality regression ran and passed in both main CI jobs.
+
+Local checks also passed the 42 serial performance tests, the actual training
+regression plus full export suite (111 tests), and the 42 panel-monitor tests.
+All 430 tracked/new Python files passed formatting and lint. The full local run
+needed execution outside the sandbox because its FastAPI TestClient stalled
+inside it; an isolated comparison confirmed the same test passed outside in
+0.77 seconds. One local parallel rerun completed 4,118 tests but lost a worker
+to a native pandas CSV-parser segmentation fault; the affected export suite
+subsequently passed serially. No application workaround was introduced for
+either environment issue. A separate console-width test fixture was made
+explicit so terminal overrides do not hide the voter names it asserts.
+
+Frozen evaluation hashes, experiment code/output hashes, and zero shared
+reference/target segments between admitted weak rows and human evaluation were
+verified. Production labels, inference defaults, publication gates, and bundled
+models are unchanged. No new human labeling or adjudication blocks these batches.

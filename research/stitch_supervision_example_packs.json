@@ -1,0 +1,10 @@
+[
+  {
+    "dataset_id": "au_sydney_roads",
+    "path": "data/agents/stitching/batches/au_sydney_roads_bulk_v7_20260718/3fd8483c__p07ce5199df"
+  },
+  {
+    "dataset_id": "fi_helsinki_roads",
+    "path": "data/agents/stitching/batches/fi_helsinki_roads_physical_context_v9_rerun_20260717/92c0997f"
+  }
+]
