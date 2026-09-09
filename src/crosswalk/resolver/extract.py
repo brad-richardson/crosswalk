@@ -848,6 +848,40 @@ def _rows_from_legacy_edges(
     ]
 
 
+def build_candidate_context(
+    groups: list[dict], dataset_id: str, *, candidates_df: pd.DataFrame | None = None
+) -> pd.DataFrame:
+    """Feature context over the full eligible graph, without any target labels.
+
+    Partial observations must be joined AFTER within-group features are computed.
+    Otherwise masking unknown edges changes competition/coverage features and
+    makes training differ from inference. Reuse the exact extractor eligibility
+    and enrichment rules, then discard its label/provenance placeholders.
+    """
+    from collections import defaultdict
+
+    rows = []
+    for group in groups:
+        if _group_has_candidate_graph(group):
+            rows.extend(
+                _rows_from_candidate_graph(
+                    group, dataset_id, "", {}, "", frozenset(), True, defaultdict(int), []
+                )
+            )
+        else:
+            rows.extend(_rows_from_legacy_edges(group, dataset_id, "", {}, "", frozenset(), True))
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    if frame.duplicated(list(KEY_COLUMNS)).any():
+        raise ValueError("duplicate candidate keys in feature context")
+    if candidates_df is not None:
+        frame = _enrich_with_candidate_parquet(frame, candidates_df, {})
+    return frame.drop(
+        columns=["keep", "human_group_id", "labeler", "session_id", "anchored", "provenance"]
+    )
+
+
 def build_edge_table(
     groups: list[dict],
     human_df: pd.DataFrame,
