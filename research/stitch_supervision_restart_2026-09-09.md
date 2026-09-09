@@ -111,6 +111,14 @@ seeds, logistic loss, and existing expected-F1 selector. Unanimous observations
 receive weight 0.35; majority observations receive 0.15 and retain their 1/3 or
 2/3 target. Source versions and repeated observations share a physical pair's
 budget, and each connected parent component has a maximum total weight of four.
+Because the cap rescales a whole component, admitting majority rows also
+slightly rescales unanimous rows in capped components (unanimous mass 447.30
+under the unanimous policy versus 443.33 under the majority policy), so the
+majority-versus-unanimous delta is partly a reweighting of shared evidence.
+Post-run review also changed the shared pair budget from the weakest to the
+strongest tier weight so a lower-tier version can never lower a pair; no pair
+in this run had more than one surviving row, so the reported numbers are
+unaffected and the committed report's code hashes identify the code that ran.
 The trainer now accepts sample weights and fails visibly if fractional training
 cannot run; it never silently hardens a fractional target after a model error.
 

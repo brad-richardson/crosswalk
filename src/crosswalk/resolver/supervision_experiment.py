@@ -140,8 +140,10 @@ def weight_weak_rows(frame: pd.DataFrame, policy: str, settings: dict) -> pd.Dat
     """Weight each physical pair once across versions; cap connected parents.
 
     Replicated child observations or source versions split their existing pair
-    budget, rather than increasing it. A component cap is stronger than a parent
-    cap when shared segments connect otherwise separate parents.
+    budget, rather than increasing it. The budget is the pair's strongest tier
+    weight, so admitting a lower tier never lowers a pair that already had a
+    unanimous version. A component cap is stronger than a parent cap when
+    shared segments connect otherwise separate parents.
     """
     if policy not in {"human_only", "human_unanimous", "human_majority"}:
         raise ValueError(f"Unknown supervision policy {policy}")
@@ -160,7 +162,7 @@ def weight_weak_rows(frame: pd.DataFrame, policy: str, settings: dict) -> pd.Dat
         return out
     out["sample_weight"] = out["vote_tier"].map(weights).astype(float)
     by_pair = out.groupby(["dataset_id", "ref_id", "target_id"])["sample_weight"]
-    out["sample_weight"] = by_pair.transform("min") / by_pair.transform("size")
+    out["sample_weight"] = by_pair.transform("max") / by_pair.transform("size")
     mass = out.groupby("component_id")["sample_weight"].transform("sum")
     out["sample_weight"] *= np.minimum(1.0, cap / mass)
     return out

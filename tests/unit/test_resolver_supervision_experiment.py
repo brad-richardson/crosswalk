@@ -52,6 +52,23 @@ def test_repeated_versions_share_one_pair_budget_and_children_have_component_cap
     assert weight_weak_rows(one, "human_majority", SETTINGS)[TRAIN_LABEL_COLUMN].iloc[0] == 2 / 3
 
 
+def test_mixed_tier_versions_keep_the_strongest_pair_budget():
+    """A unanimous version plus a majority version of one physical pair must not
+    weigh less under human_majority than the unanimous version alone did under
+    human_unanimous; the lower tier splits the budget, it does not shrink it."""
+    versions = pd.DataFrame(
+        [
+            weak_row(vote_tier="unanimous", soft_keep=1.0, **{TRAIN_LABEL_COLUMN: 1.0}),
+            weak_row(group_id="parent__p0000000002"),
+        ]
+    )
+    unanimous_only = weight_weak_rows(versions, "human_unanimous", SETTINGS)
+    both = weight_weak_rows(versions, "human_majority", SETTINGS)
+    assert unanimous_only.sample_weight.sum() == pytest.approx(0.35)
+    assert both.sample_weight.sum() == pytest.approx(0.35)
+    assert both.sample_weight.tolist() == pytest.approx([0.175, 0.175])
+
+
 def test_unknown_and_human_related_rows_never_receive_loss_weight():
     frame = pd.DataFrame(
         [
