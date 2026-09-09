@@ -5,8 +5,7 @@ on:
     branches: [main]
     tags: ["v[0-9]*"]
   pull_request:
-    # Run the complete suite on the dependent stitching-supervision PRs too.
-    branches: [main, "feature/stitch-supervision-*"]
+    branches: [main]
 
 jobs:
   lint:
