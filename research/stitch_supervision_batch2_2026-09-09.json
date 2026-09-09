@@ -1,0 +1,298 @@
+{
+  "experiment": {
+    "features": [
+      "confidence",
+      "conf_rel_max",
+      "conf_rel_mean",
+      "conf_rank_frac",
+      "conf_is_group_min",
+      "gers_span",
+      "local_span",
+      "max_span",
+      "min_span",
+      "degree_ref",
+      "degree_tgt",
+      "is_bridge",
+      "is_sliver",
+      "n_share_ref",
+      "n_share_tgt",
+      "n_edges",
+      "n_corridors",
+      "n_assignment_components",
+      "largest_biconnected_block",
+      "oversized_group",
+      "num_refs",
+      "num_targets",
+      "match_type_1N",
+      "match_type_N1",
+      "match_type_MN",
+      "conf_margin_ref",
+      "conf_margin_tgt",
+      "is_best_for_ref",
+      "is_best_for_tgt",
+      "n_higher_share_ref",
+      "n_higher_share_tgt",
+      "ref_span_overlap_higher",
+      "tgt_span_overlap_higher"
+    ],
+    "hyperparameter_search": false,
+    "majority_weight": 0.15,
+    "objective": "reg:logistic",
+    "policies": [
+      "human_only",
+      "human_unanimous",
+      "human_majority"
+    ],
+    "promotion": false,
+    "seeds": [
+      17,
+      29,
+      43
+    ],
+    "selector": "ef1",
+    "unanimous_weight": 0.35,
+    "weak_component_weight_cap": 4.0
+  },
+  "feature_version": "2026-07-15.1",
+  "gold": {
+    "components": 14,
+    "datasets": {
+      "au_sydney_roads": 28,
+      "br_sao_paulo_roads": 3,
+      "de_berlin_roads": 2,
+      "fi_helsinki_roads": 2,
+      "hk_hongkong_roads": 3,
+      "sg_singapore_roads": 3,
+      "us_boston_streets": 65
+    },
+    "deanchored_groups": 5,
+    "fold_edges": {
+      "0": 30,
+      "1": 28,
+      "2": 22,
+      "3": 14,
+      "4": 12
+    },
+    "groups": 14,
+    "positives": 92,
+    "rows": 106
+  },
+  "human_audit": {
+    "changed_group_without_original_scope": 9,
+    "disputed: Existing human NONE conflicts with later physical-identity adjudication; quarantine, do not replace truth with panel opinion.": 1,
+    "eligible": 14,
+    "membership_not_exact_edges": 81,
+    "split_or_missing_selected_edges": 13,
+    "unmapped_or_missing_source": 1
+  },
+  "inputs": {
+    "data/experiments/stitch-supervision-20260909/batch1/reconciled.parquet": "91e019a31bc6d9bd8873d34370cf972e03a1dde7c3275e6cf07ae0acd49409d7",
+    "data/output/au_sydney_roads_candidates.parquet": "6dd92bf84d3b5d88128f7e6a5d8dc1b48fb9c79319b11a914c73f0387b41c3b8",
+    "data/output/au_sydney_roads_groups.json": "a2deaf8e99ed08166cdda80e599f1e25e048c80d8b5f4ff0c75c622147db02f8",
+    "data/output/br_sao_paulo_roads_candidates.parquet": "b126d9ffed6ac292d57f93b88c6f4c58d2f111ef2d70f722b18510552ad64ea6",
+    "data/output/br_sao_paulo_roads_groups.json": "8b7a1185431d0516a7a6fb2134bffb41f7c7a876af0f572aaf44f15beb0435b2",
+    "data/output/ch_grand_geneva_cycle_schema_candidates.parquet": "54f74bb9bead727b0e9bd5cd797070eabc79e34b1785ea7046f8493dfa1b8df0",
+    "data/output/ch_grand_geneva_cycle_schema_groups.json": "79b8165387c3c442d7a12f785035e5482ed80ab034921bed9e9634a95ef197be",
+    "data/output/co_bogota_roads_candidates.parquet": "0d9d42369558a888031c31549ec5e4913018253a6c11d8d904207f1bae600f09",
+    "data/output/co_bogota_roads_groups.json": "2aae046e02dcb64398fc8683645ba28de57039b9d121e9e11e72a5d6e621a4b9",
+    "data/output/de_berlin_roads_candidates.parquet": "0948b4662fbfdf386efc24258b287c19f3034a379b7910790ded5f8385a12ca6",
+    "data/output/de_berlin_roads_groups.json": "2f793071ceeb48dc32f3a1f00f45fe8606a8f3862b3b396960706360b798e890",
+    "data/output/fi_helsinki_roads_candidates.parquet": "d2b24dba29973d281346756b8544cf50f63d252232c72e9d1088430ab3632857",
+    "data/output/fi_helsinki_roads_groups.json": "181ed9e300dd6fc7d808b1603481bc92b76a639761faeb4aeeff43ec28538017",
+    "data/output/fr_france_winter_hiking_traces_candidates.parquet": "6f373512b44c095411fdc71ed76daa8bda70bd4c31d913340bf7cbdff6ce5f9a",
+    "data/output/fr_france_winter_hiking_traces_groups.json": "1f66373e78da396f054fc734a299428d13c405e8de23dbb99ee3851b69235a6a",
+    "data/output/hk_hongkong_roads_candidates.parquet": "555bb6457454b741bd87932f363681e9a6f02177695ef7ca35bd2ba75f19eea2",
+    "data/output/hk_hongkong_roads_groups.json": "9b31f0d677f9fe72fc1f4d4355d4b5432215bafdbb969db56c3f6c0ce522f1b9",
+    "data/output/in_mumbai_streets_candidates.parquet": "4ffb22483eeb730e956db8ba1aa15cae35be958a783f550cf5a6149720b28646",
+    "data/output/in_mumbai_streets_groups.json": "ec6a334c36212c3db88b90dbcf89a9aa9e64c41b347179a5f9f52a73bf45f30b",
+    "data/output/ke_nairobi_roads_candidates.parquet": "9905ce9bd48e7614dfa1e520b0c5057896ec23568700b4b381975aa2f1d817f6",
+    "data/output/ke_nairobi_roads_groups.json": "05d236e69c09adcaf4e8325d7ba55291233346a350d6775819a2b5e3c80dbca1",
+    "data/output/nl_amsterdam_roads_candidates.parquet": "74cab805e05eed3d9cf776f3f7278b5aabb04ce25ce5ec611828d089755e7d09",
+    "data/output/nl_amsterdam_roads_groups.json": "96066157c65efc029264cc9b4bb08f365186bd5ffa2ba4e3a1c3d162f66a5b33",
+    "data/output/sg_singapore_footpaths_candidates.parquet": "66096990f6d6136496a78b297de5fd6669e47b6fae4c5d3ce7b207718c6d97d1",
+    "data/output/sg_singapore_footpaths_groups.json": "081aba489f4547126b1a22fb1ea8b71fd39f262a34f0e9b8321de4c305df8dcf",
+    "data/output/sg_singapore_roads_candidates.parquet": "45342304a05e6b7c673815a239e51099c04ea4708152b27c9a193035f6657fe5",
+    "data/output/sg_singapore_roads_groups.json": "086e7276ce05a238609adfb2f7db5daf86675e5246f2a14349a87d6a1ea7f161",
+    "data/output/us_austin_sidewalks_candidates.parquet": "47a357e3174a52507009f6a21c6ed3f84a06dd6669aa32498a445c241440eee9",
+    "data/output/us_austin_sidewalks_groups.json": "1f3b9543f3dbb4c878ce3c824726103c3653372d281f7859645fa105ed2950d4",
+    "data/output/us_boston_streets_candidates.parquet": "673278a3fd91887afc2478371fcf5f4e2dac05ef42000274fc14e3c616809866",
+    "data/output/us_boston_streets_groups.json": "28a0f2c30bcdde8ed9777f8bf07b2260fc499625aea079b0761b327793f88ec6",
+    "data/output/us_fort_collins_sidewalks_candidates.parquet": "91c32049bf57cfe23fc7898ea18ee703a525b7fa672cbc70ea1fa23652f05f61",
+    "data/output/us_fort_collins_sidewalks_groups.json": "59f3b9dd8ec79ff2c4c0d6eb833efbad5c02e702f8a1efd287eee4c251b5454b",
+    "data/output/us_fort_collins_streets_candidates.parquet": "f50c36a65ac257544d327daec3ec3b15256895c031f3cf5fecd6b23444ee1431",
+    "data/output/us_fort_collins_streets_groups.json": "276d38be30f6d329e89fb5ba085bd2419e857638ea18ec215cc5d805823e18e1",
+    "data/output/us_frisco_trails_candidates.parquet": "9f7a3ce9cb5dc569dd502f7e9536ec7b06a8369284eb062a295a43c4035f2c96",
+    "data/output/us_frisco_trails_groups.json": "e4f256ce10597e329d9d17a4e413bea306b6d27d2f4019444d3829ffcd7cc840",
+    "data/output/us_philadelphia_sidewalks_candidates.parquet": "83ea8cb76df193d28a4175c6545e922f9432b257de400b5f9d2fc73af5665f93",
+    "data/output/us_philadelphia_sidewalks_groups.json": "85b1cf10c91b4d2f0a719fcc08b80b6f52c1bfd8d319b2bcaf5a8c4d91815987",
+    "data/output/us_seattle_sidewalks_candidates.parquet": "6a12394a093d978a3fddcd18e0679a73e72112a3253f3b9711b47765eec5f4f3",
+    "data/output/us_seattle_sidewalks_groups.json": "3eabc211bb4d6b2b617dfd0687c40bf8bfcb00b5ed687cad1bb970af48533638",
+    "labels/stitching/dataset=au_sydney_roads/data.csv": "a222bc41d91a718a26a574ac13437c6d8a8ed868b8b6cf8d1f4d881674c72839",
+    "labels/stitching/dataset=br_sao_paulo_roads/data.csv": "e8561090cf3c2a9cceceea0b13d7d0125f9125da9363a116e4e561816832cf06",
+    "labels/stitching/dataset=ch_grand_geneva_cycle_schema/data.csv": "92bd3b2ef18f9386314e21683cb398b48f7ab0719ec87340f3e6b02ddd7584b2",
+    "labels/stitching/dataset=co_bogota_roads/data.csv": "139285b5355ce2974b2fe65be1ad0aa680629fb6029af846f4b159255ada3c24",
+    "labels/stitching/dataset=de_berlin_roads/data.csv": "43c4a508eb58337a47c1a9b491f2af6888fad3b1526438fc89bed09dd1b8b892",
+    "labels/stitching/dataset=fi_helsinki_roads/data.csv": "6d48d94eb06004080588f901bc52e3f29a44f3bb377cd588039af30274736816",
+    "labels/stitching/dataset=fr_france_winter_hiking_traces/data.csv": "adc96d7fa3537fcb75e0209c8ee3699e2943e8e09f601d4b3e2e9d80b2130136",
+    "labels/stitching/dataset=hk_hongkong_roads/data.csv": "4c3e73ed41147ef20abe0587f586c9724ef563628b6f4e2731ea1d89ab072b57",
+    "labels/stitching/dataset=in_mumbai_streets/data.csv": "9176c30a6bbdbb0aca933c059ba0eeb84a4a38555fbcada25cdd306ee8b20bfd",
+    "labels/stitching/dataset=ke_nairobi_roads/data.csv": "c0836ff1e447b35602d385f99337cfb9194f3d0bb8e2912560903ad3ec529d24",
+    "labels/stitching/dataset=nl_amsterdam_roads/data.csv": "c0685738f7cf57c86afefe33ccdda696f962f8598b95352514367543b9cd128b",
+    "labels/stitching/dataset=sg_singapore_footpaths/data.csv": "2f3c876655164b5c2ada9e0b2cd682b545e6d32eb1d440925e67bfbfd8a1c2ce",
+    "labels/stitching/dataset=sg_singapore_roads/data.csv": "8b69b505973fe0fd4a27bfbfdd97489f7d8d094027a353306d1c1e686eaf0706",
+    "labels/stitching/dataset=us_austin_sidewalks/data.csv": "40ef84aaeafa09d03ea99cfd71873a4d2759a130c2c31d0b2e6887f4678a4ec9",
+    "labels/stitching/dataset=us_boston_streets/data.csv": "7fdf32c4374b35ac255d77f3e451698f17ac37293f19781f12e1e9682215720a",
+    "labels/stitching/dataset=us_fort_collins_sidewalks/data.csv": "9b74e751cf238b8e624d568965f41af5d4f595cab6842c446d34bb40794fb346",
+    "labels/stitching/dataset=us_fort_collins_streets/data.csv": "5c45e662ea89b4f099b43954230c20e6bb28894a71e4e6227c55c2a2763a016b",
+    "labels/stitching/dataset=us_frisco_trails/data.csv": "106f3724c278a39437c206da2d3cd902205c7502c51d6d89d2cc3d78f0136185",
+    "labels/stitching/dataset=us_philadelphia_sidewalks/data.csv": "38ee9125e20af47b7c3c72899ea8236c643f745d27c31f0b7eaed29ad4005e9e",
+    "labels/stitching/dataset=us_seattle_sidewalks/data.csv": "e5e363b96ebb72b7083948ead6ecb77c7ca62ef606a1e3fb3cc218cbcf87094e",
+    "research/stitch_evaluation_exclusions.json": "247131b59693951a61479e0566e110419f03d97c5a116fb62171190460e98af6",
+    "research/v9_rerun_adjudication.md": "e80d01f443ab1d2f0ffe4714676314b3aa148e653f18dd1033ee4efd5bea6f86"
+  },
+  "limitations": [
+    "Existing exact labels remain mostly optimizer-anchored and geographically concentrated; this is an exploratory paired resolver comparison.",
+    "Pair scores are fixed inputs from the existing matcher, not an independently held-out end-to-end matcher evaluation.",
+    "Identity exclusions use recorded parent lineage and segment IDs. Unrecorded simultaneous rekeys of both endpoints cannot be reconstructed.",
+    "The historical human UI did not hash its candidate universe. Unchanged group identity or explicit membership coverage plus complete retained positives is the available scope check."
+  ],
+  "outputs": {
+    "audit.json": "bf8c1f0998be2f202bbe54d2257a331793e01f19cb610c7bef6f0154bb878351",
+    "components.json": "81d31ab7990afce754992d9f9018b606366bdd77ca6ff1812d7c0ffc81ec2ae3",
+    "gold.parquet": "4acafaa17dae1f73f583b7b9c234cb086cd9fd67b8842630a32103d1d11e9469",
+    "weak_partition.parquet": "1996be6328c1dfe00457efd98ed1bf1c744ed73489194c4ea410f16b0f3eecc6"
+  },
+  "schema_version": 1,
+  "sources": [
+    {
+      "candidates": "data/output/au_sydney_roads_candidates.parquet",
+      "dataset_id": "au_sydney_roads",
+      "groups": "data/output/au_sydney_roads_groups.json",
+      "labels": "labels/stitching/dataset=au_sydney_roads/data.csv"
+    },
+    {
+      "candidates": "data/output/br_sao_paulo_roads_candidates.parquet",
+      "dataset_id": "br_sao_paulo_roads",
+      "groups": "data/output/br_sao_paulo_roads_groups.json",
+      "labels": "labels/stitching/dataset=br_sao_paulo_roads/data.csv"
+    },
+    {
+      "candidates": "data/output/ch_grand_geneva_cycle_schema_candidates.parquet",
+      "dataset_id": "ch_grand_geneva_cycle_schema",
+      "groups": "data/output/ch_grand_geneva_cycle_schema_groups.json",
+      "labels": "labels/stitching/dataset=ch_grand_geneva_cycle_schema/data.csv"
+    },
+    {
+      "candidates": "data/output/co_bogota_roads_candidates.parquet",
+      "dataset_id": "co_bogota_roads",
+      "groups": "data/output/co_bogota_roads_groups.json",
+      "labels": "labels/stitching/dataset=co_bogota_roads/data.csv"
+    },
+    {
+      "candidates": "data/output/de_berlin_roads_candidates.parquet",
+      "dataset_id": "de_berlin_roads",
+      "groups": "data/output/de_berlin_roads_groups.json",
+      "labels": "labels/stitching/dataset=de_berlin_roads/data.csv"
+    },
+    {
+      "candidates": "data/output/fi_helsinki_roads_candidates.parquet",
+      "dataset_id": "fi_helsinki_roads",
+      "groups": "data/output/fi_helsinki_roads_groups.json",
+      "labels": "labels/stitching/dataset=fi_helsinki_roads/data.csv"
+    },
+    {
+      "candidates": "data/output/fr_france_winter_hiking_traces_candidates.parquet",
+      "dataset_id": "fr_france_winter_hiking_traces",
+      "groups": "data/output/fr_france_winter_hiking_traces_groups.json",
+      "labels": "labels/stitching/dataset=fr_france_winter_hiking_traces/data.csv"
+    },
+    {
+      "candidates": "data/output/hk_hongkong_roads_candidates.parquet",
+      "dataset_id": "hk_hongkong_roads",
+      "groups": "data/output/hk_hongkong_roads_groups.json",
+      "labels": "labels/stitching/dataset=hk_hongkong_roads/data.csv"
+    },
+    {
+      "candidates": "data/output/in_mumbai_streets_candidates.parquet",
+      "dataset_id": "in_mumbai_streets",
+      "groups": "data/output/in_mumbai_streets_groups.json",
+      "labels": "labels/stitching/dataset=in_mumbai_streets/data.csv"
+    },
+    {
+      "candidates": "data/output/ke_nairobi_roads_candidates.parquet",
+      "dataset_id": "ke_nairobi_roads",
+      "groups": "data/output/ke_nairobi_roads_groups.json",
+      "labels": "labels/stitching/dataset=ke_nairobi_roads/data.csv"
+    },
+    {
+      "candidates": "data/output/nl_amsterdam_roads_candidates.parquet",
+      "dataset_id": "nl_amsterdam_roads",
+      "groups": "data/output/nl_amsterdam_roads_groups.json",
+      "labels": "labels/stitching/dataset=nl_amsterdam_roads/data.csv"
+    },
+    {
+      "candidates": "data/output/sg_singapore_footpaths_candidates.parquet",
+      "dataset_id": "sg_singapore_footpaths",
+      "groups": "data/output/sg_singapore_footpaths_groups.json",
+      "labels": "labels/stitching/dataset=sg_singapore_footpaths/data.csv"
+    },
+    {
+      "candidates": "data/output/sg_singapore_roads_candidates.parquet",
+      "dataset_id": "sg_singapore_roads",
+      "groups": "data/output/sg_singapore_roads_groups.json",
+      "labels": "labels/stitching/dataset=sg_singapore_roads/data.csv"
+    },
+    {
+      "candidates": "data/output/us_austin_sidewalks_candidates.parquet",
+      "dataset_id": "us_austin_sidewalks",
+      "groups": "data/output/us_austin_sidewalks_groups.json",
+      "labels": "labels/stitching/dataset=us_austin_sidewalks/data.csv"
+    },
+    {
+      "candidates": "data/output/us_boston_streets_candidates.parquet",
+      "dataset_id": "us_boston_streets",
+      "groups": "data/output/us_boston_streets_groups.json",
+      "labels": "labels/stitching/dataset=us_boston_streets/data.csv"
+    },
+    {
+      "candidates": "data/output/us_fort_collins_sidewalks_candidates.parquet",
+      "dataset_id": "us_fort_collins_sidewalks",
+      "groups": "data/output/us_fort_collins_sidewalks_groups.json",
+      "labels": "labels/stitching/dataset=us_fort_collins_sidewalks/data.csv"
+    },
+    {
+      "candidates": "data/output/us_fort_collins_streets_candidates.parquet",
+      "dataset_id": "us_fort_collins_streets",
+      "groups": "data/output/us_fort_collins_streets_groups.json",
+      "labels": "labels/stitching/dataset=us_fort_collins_streets/data.csv"
+    },
+    {
+      "candidates": "data/output/us_frisco_trails_candidates.parquet",
+      "dataset_id": "us_frisco_trails",
+      "groups": "data/output/us_frisco_trails_groups.json",
+      "labels": "labels/stitching/dataset=us_frisco_trails/data.csv"
+    },
+    {
+      "candidates": "data/output/us_philadelphia_sidewalks_candidates.parquet",
+      "dataset_id": "us_philadelphia_sidewalks",
+      "groups": "data/output/us_philadelphia_sidewalks_groups.json",
+      "labels": "labels/stitching/dataset=us_philadelphia_sidewalks/data.csv"
+    },
+    {
+      "candidates": "data/output/us_seattle_sidewalks_candidates.parquet",
+      "dataset_id": "us_seattle_sidewalks",
+      "groups": "data/output/us_seattle_sidewalks_groups.json",
+      "labels": "labels/stitching/dataset=us_seattle_sidewalks/data.csv"
+    }
+  ],
+  "weak": {
+    "excluded_human_scope": 2327,
+    "remaining_tiers": {
+      "below_quorum": 1947,
+      "majority": 229,
+      "unanimous": 2802,
+      "unknown": 287
+    },
+    "rows": 7592
+  }
+}
