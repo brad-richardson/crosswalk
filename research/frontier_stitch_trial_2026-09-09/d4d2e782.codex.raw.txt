@@ -1,0 +1,1 @@
+{"choice":"NONE","confidence":0.99,"reasoning":"Both edges pair an underground indoor footway at layer -1 with the surface Alt-Tempelhof roadway at layer 0. These are physically separate traveled ways; their projected overlaps do not establish identity. Neither e1 nor e2 is a match.","none_reason":"all_edges_no_match","desired_edges":[]}

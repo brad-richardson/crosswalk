@@ -1,0 +1,1 @@
+{"choice": "A", "confidence": 0.99, "reasoning": "R1 and R2 are consecutive Everett Street residential segments that tile the long T1 EVERETT STREET (tgt_aln 0.577+0.423=1.0, ref_aln 1.0 both, overlaps 112.8m/82.6m). Same name/class/corridor, straight colinear overlap in all images. B leaves SE half uncovered, C leaves NW half uncovered. N:1 requires both edges."}

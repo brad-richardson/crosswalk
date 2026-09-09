@@ -1,0 +1,45 @@
+{
+  "ballot": {
+    "abstain_reason": "",
+    "attempt": 1,
+    "choice": "D",
+    "chosen_option_id": "",
+    "confidence": 0.9,
+    "desired_edges": "",
+    "displayed_candidate_universe_sha256": "",
+    "edge_set": [
+      [
+        "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+        "hel_road_a4191d7b-7ba5-4bce-b84c-cb972789f9ce:2_881126d2bb"
+      ],
+      [
+        "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+        "hel_road_df7fdd2b-6b5f-4325-9d52-9d074264cfed:2_881126d2bb"
+      ]
+    ],
+    "error": "",
+    "evidence_delivery": "{\"asset_count\":8,\"asset_set_sha256\":\"d5517180baf0d09541d850e589716c37313361cd19ebf27737fe8e43f40f74c1\",\"assets\":[{\"bytes\":27281,\"path\":\"option_A.png\",\"sha256\":\"7ca76aa6992f0c54040c438ca236898d18b31a812a945f6ac3bce69167180c5e\"},{\"bytes\":26799,\"path\":\"option_B.png\",\"sha256\":\"4f546a5239701e8f020a8b82e2c8bd9f5b7ddb72b3329159f4f1b4a860836f74\"},{\"bytes\":26699,\"path\":\"option_C.png\",\"sha256\":\"e4e67c2a865bd53daba3881443a7311c7c1c9eddff00e9528b10cc3947e0f395\"},{\"bytes\":27270,\"path\":\"option_D.png\",\"sha256\":\"c8debd75d544daf2fb0cb13546ac87eb57dc50ea8cab3a87495bc3c5e13abc7f\"},{\"bytes\":26122,\"path\":\"option_E.png\",\"sha256\":\"ef6772e75e0ab1091d1c84ca0e05794e45d02685c6ccd4643841206f1fa3e223\"},{\"bytes\":26683,\"path\":\"option_F.png\",\"sha256\":\"d5a055e83da6ef726bb6dccfd0ee163aa33acb3a293738f4128cfc29b0a9bf12\"},{\"bytes\":26614,\"path\":\"option_G.png\",\"sha256\":\"e4f9622849fdfb0e27e2c63aeeea01df0f43ff0b4d6593b377e4d8c4e5b9a1e9\"},{\"bytes\":25919,\"path\":\"overview.png\",\"sha256\":\"27a6d0f46ab96f01665176b2f895622b954a1f6e4f71eda470635376daa610c9\"}],\"delivery_mode\":\"native_cli_attachment\",\"preflight_status\":\"passed\",\"schema_version\":1,\"transport\":\"codex:-i\"}",
+    "evidence_id": "",
+    "evidence_pack_sha256": "",
+    "group_id": "7175635e",
+    "invocation_route": "",
+    "latency_s": 14.08,
+    "model": "gpt-6-astra",
+    "none_reason": "",
+    "option_menu_sha256": "",
+    "pack_feedback": "",
+    "panel_invocation_sha256": "",
+    "provider": "codex",
+    "raw": "{\"choice\":\"D\",\"confidence\":0.9,\"reasoning\":\"Accept e2 and e3: their aligned portions follow the same corridor at layer 0, consistent with segmentation differences and shared-pavement cycleway representation. Reject e1 because R1 transitions onto a layer-1 bridge within its overlap with T1, while T1 remains explicitly layer 0; the coincident geometry therefore does not establish the same physical traveled way.\",\"none_reason\":null}",
+    "reasoning": "Accept e2 and e3: their aligned portions follow the same corridor at layer 0, consistent with segmentation differences and shared-pavement cycleway representation. Reject e1 because R1 transitions onto a layer-1 bridge within its overlap with T1, while T1 remains explicitly layer 0; the coincident geometry therefore does not establish the same physical traveled way.",
+    "timestamp": "2026-09-09T14:25:13.606472+00:00"
+  },
+  "dataset": "fi_helsinki_roads",
+  "evidence_id": "7f8f7160e2fd5f4a72a08fb87396ff3292eaac56832aeeac7677af154ca66f87",
+  "evidence_pack_sha256": "305715880ab0ce0145e114ed7c90c3ceae0815d822b2377b7f867cc5da28cb10",
+  "group_id": "7175635e",
+  "model": "gpt-6-astra",
+  "provider": "codex",
+  "status": "completed",
+  "wall_seconds": 14.11
+}

@@ -1,0 +1,93 @@
+{
+  "ballot": {
+    "abstain_reason": "",
+    "attempt": 1,
+    "choice": "P",
+    "chosen_option_id": "",
+    "confidence": 0.91,
+    "desired_edges": "",
+    "displayed_candidate_universe_sha256": "",
+    "edge_set": [
+      [
+        "039b9d72-4266-4d72-a14a-f7299dc811db",
+        "ch_geneva_bike_1589_881f91a9eb"
+      ],
+      [
+        "039b9d72-4266-4d72-a14a-f7299dc811db",
+        "ch_geneva_bike_1597_881f91a9eb"
+      ],
+      [
+        "1486effa-370f-4a88-9f11-c3610e0888d0",
+        "ch_geneva_bike_1589_881f91a9eb"
+      ],
+      [
+        "3fe44338-148c-4172-91f9-a2105efd79df",
+        "ch_geneva_bike_1589_881f91a9eb"
+      ],
+      [
+        "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+        "ch_geneva_bike_23_881f91a9e9"
+      ],
+      [
+        "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+        "ch_geneva_bike_23_881f91a9e9"
+      ],
+      [
+        "61238a79-6a1e-4a98-96c7-3a096231020e",
+        "ch_geneva_bike_1589_881f91a9eb"
+      ],
+      [
+        "8092c205-28bf-45f8-92c8-418d0f83dc69",
+        "ch_geneva_bike_1589_881f91a9eb"
+      ],
+      [
+        "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+        "ch_geneva_bike_1597_881f91a9eb"
+      ],
+      [
+        "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+        "ch_geneva_bike_1600_881f91a9eb"
+      ],
+      [
+        "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+        "ch_geneva_bike_23_881f91a9e9"
+      ],
+      [
+        "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+        "ch_geneva_bike_1589_881f91a9eb"
+      ],
+      [
+        "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+        "ch_geneva_bike_1597_881f91a9eb"
+      ],
+      [
+        "f26c8385-b782-4a0f-90f4-f024493ac644",
+        "ch_geneva_bike_1597_881f91a9eb"
+      ]
+    ],
+    "error": "",
+    "evidence_delivery": "{\"asset_count\":17,\"asset_set_sha256\":\"10112ad36393e498e696636796365a45b362fd05197c1078b7bd7e131bcabf0f\",\"assets\":[{\"bytes\":17254,\"path\":\"option_A.png\",\"sha256\":\"69aa42757590556e887e86dc0257f4cb3c8cd6070bfb65c9430f99bf9068c7b2\"},{\"bytes\":16713,\"path\":\"option_B.png\",\"sha256\":\"cff05c52bd15184ee506c4c678d2cbbbf430686bfc7e055807860da93f582ee1\"},{\"bytes\":16671,\"path\":\"option_C.png\",\"sha256\":\"b63514cdb037799c6c78c75a23ee58e6775dce93d0c8f7ddb75636e2b628a086\"},{\"bytes\":16904,\"path\":\"option_D.png\",\"sha256\":\"fab9319d43c198f264eece8263b38b472a37be175b8ad725b96d69fdff43c8be\"},{\"bytes\":16605,\"path\":\"option_E.png\",\"sha256\":\"45849d9a9a9f4788c0f503394db2320751d0bc38beafc3a97c9729d9760f3520\"},{\"bytes\":16410,\"path\":\"option_F.png\",\"sha256\":\"af392edb4ff180a1e7add8c51485106fe78a89db790f554e79fd55a47ef91408\"},{\"bytes\":16864,\"path\":\"option_G.png\",\"sha256\":\"e591eaf1522beb86576cca18d3a6c8b7bdd064434bceec63a51537a6da213722\"},{\"bytes\":16623,\"path\":\"option_H.png\",\"sha256\":\"b8c2fe7499337afcc06dd82b1399ce5a3ab2d0e5da0fd82cd22efb00bbb59d1f\"},{\"bytes\":16516,\"path\":\"option_I.png\",\"sha256\":\"0fee06a1bcf473ff941879849a6fcd8896a48903c35d52d1257dca854382a827\"},{\"bytes\":17186,\"path\":\"option_J.png\",\"sha256\":\"623f135d72daa6612f8cdd9ac81d7698685e3e6733be3411bbda11a811b116a9\"},{\"bytes\":17198,\"path\":\"option_K.png\",\"sha256\":\"e466487491761e4a38da1e9ee2b905ff9b26af94714317784051ca3cfa7f0ece\"},{\"bytes\":17122,\"path\":\"option_L.png\",\"sha256\":\"471001edc3e790d0e755ba5a20d7d218e134487979e4f051ef24a9966dd1e195\"},{\"bytes\":17215,\"path\":\"option_M.png\",\"sha256\":\"a4245904e98126887d1a2093a80b64732b26e52897a8ba6aa2187d59f8055de5\"},{\"bytes\":17024,\"path\":\"option_N.png\",\"sha256\":\"11d61b4a8c0ca41a87599e4586d46d73d0193c5dde388c6ab2ed37cdeb653efb\"},{\"bytes\":16854,\"path\":\"option_O.png\",\"sha256\":\"0853820f8ceebcd18c79b66022888fb8cd924f814086b9aa75f5895cf6c93a53\"},{\"bytes\":16878,\"path\":\"option_P.png\",\"sha256\":\"8d245d872e978cc0154869923b97eba69911049db58412f2905550f160a9bbe2\"},{\"bytes\":14717,\"path\":\"overview.png\",\"sha256\":\"0035cf2109daa9862054ca9c72c241447a7e04e0a8544051e86d8311c4b31c91\"}],\"delivery_mode\":\"native_cli_attachment\",\"preflight_status\":\"passed\",\"schema_version\":1,\"transport\":\"codex:-i\"}",
+    "evidence_id": "",
+    "evidence_pack_sha256": "",
+    "group_id": "a451bf05",
+    "invocation_route": "",
+    "latency_s": 20.1,
+    "model": "gpt-6-astra",
+    "none_reason": "",
+    "option_menu_sha256": "",
+    "pack_feedback": "",
+    "panel_invocation_sha256": "",
+    "provider": "codex",
+    "raw": "{\"choice\":\"P\",\"confidence\":0.91,\"reasoning\":\"Accept e1\u2013e12, e14, and e15 as same-road itinerary matches, preserving segmentation and carriageway representation differences. The short R1\u2013T1, R8\u2013T2, and R9\u2013T1 overlaps are consistent with corridor continuity and coverage partitioning. The itinerary's layer metadata does not establish a separate ground-level facility beneath R8's bridge. Exclude e13, e16, and e17: R10 represents the adjacent footway, while the itinerary follows the roadway represented by R8. Option P contains exactly these accepted edges.\",\"none_reason\":null}",
+    "reasoning": "Accept e1\u2013e12, e14, and e15 as same-road itinerary matches, preserving segmentation and carriageway representation differences. The short R1\u2013T1, R8\u2013T2, and R9\u2013T1 overlaps are consistent with corridor continuity and coverage partitioning. The itinerary's layer metadata does not establish a separate ground-level facility beneath R8's bridge. Exclude e13, e16, and e17: R10 represents the adjacent footway, while the itinerary follows the roadway represented by R8. Option P contains exactly these accepted edges.",
+    "timestamp": "2026-09-09T14:25:34.485155+00:00"
+  },
+  "dataset": "ch_grand_geneva_cycle_schema",
+  "evidence_id": "9c81ee5526ecfe600dba4474541fbb53093d59a1b34c374ea3644c205745821f",
+  "evidence_pack_sha256": "eed32c1225f2a5f02e4846191f28fc22452d82af0946cdfe6b871305ae6cb67e",
+  "group_id": "a451bf05",
+  "model": "gpt-6-astra",
+  "provider": "codex",
+  "status": "completed",
+  "wall_seconds": 20.42
+}

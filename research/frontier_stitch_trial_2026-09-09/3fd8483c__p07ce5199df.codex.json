@@ -1,0 +1,41 @@
+{
+  "ballot": {
+    "abstain_reason": "",
+    "attempt": 1,
+    "choice": "A",
+    "chosen_option_id": "",
+    "confidence": 0.99,
+    "desired_edges": "",
+    "displayed_candidate_universe_sha256": "",
+    "edge_set": [
+      [
+        "0740b48f-939a-439b-a934-aa1ec0004cd7",
+        "au_sydney_823158_88be0e274b"
+      ]
+    ],
+    "error": "",
+    "evidence_delivery": "{\"asset_count\":2,\"asset_set_sha256\":\"b104c03ea3ef88d0a1d15909f57e0f1c555f28adda734a5455811a0d4a1795e7\",\"assets\":[{\"bytes\":36658,\"path\":\"option_A.png\",\"sha256\":\"4951d49b8d6a13bacc5c8e5e2476fbd179d5ce0247e1011b079eab2a7279a093\"},{\"bytes\":35667,\"path\":\"overview.png\",\"sha256\":\"75e8b4ae02ef237cc0d9d481d497a943c3bcf8ca2633ed54d0eb4f7533b99bcc\"}],\"delivery_mode\":\"native_cli_attachment\",\"preflight_status\":\"passed\",\"schema_version\":1,\"transport\":\"codex:-i\"}",
+    "evidence_id": "",
+    "evidence_pack_sha256": "",
+    "group_id": "3fd8483c__p07ce5199df",
+    "invocation_route": "",
+    "latency_s": 7.1,
+    "model": "gpt-6-astra",
+    "none_reason": "",
+    "option_menu_sha256": "",
+    "pack_feedback": "",
+    "panel_invocation_sha256": "",
+    "provider": "codex",
+    "raw": "{\"choice\":\"A\",\"confidence\":0.99,\"reasoning\":\"R1 and T1 follow the same traveled way and direction along Pacific Highway. The substantial aligned overlap supports identity; differing segment lengths and trunk/primary classifications do not indicate separate facilities. Accept e1, exactly represented by Option A.\",\"none_reason\":null,\"desired_edges\":[]}",
+    "reasoning": "R1 and T1 follow the same traveled way and direction along Pacific Highway. The substantial aligned overlap supports identity; differing segment lengths and trunk/primary classifications do not indicate separate facilities. Accept e1, exactly represented by Option A.",
+    "timestamp": "2026-09-09T14:26:07.353897+00:00"
+  },
+  "dataset": "au_sydney_roads",
+  "evidence_id": "6b0fa463accf85617d6dac266de7954160c75bba7e05607d54db3e8efdc32082",
+  "evidence_pack_sha256": "e40d63feb3523661a6778b1b433e29548fa7507f1b1c9ce6bfc810e9b7527ac9",
+  "group_id": "3fd8483c__p07ce5199df",
+  "model": "gpt-6-astra",
+  "provider": "codex",
+  "status": "completed",
+  "wall_seconds": 7.12
+}

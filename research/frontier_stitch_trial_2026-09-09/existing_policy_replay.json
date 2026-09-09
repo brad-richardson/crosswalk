@@ -1,0 +1,85 @@
+{
+  "confidence_floor": 0.75,
+  "rows": [
+    {
+      "group_id": "72063362",
+      "choice": "A",
+      "routing": "auto_accept",
+      "route_reason": "unanimous",
+      "n_candidate_edges": 2,
+      "min_confidence": 0.97
+    },
+    {
+      "group_id": "f69a827e",
+      "choice": "A",
+      "routing": "auto_accept",
+      "route_reason": "unanimous",
+      "n_candidate_edges": 2,
+      "min_confidence": 0.97
+    },
+    {
+      "group_id": "66e22055",
+      "choice": "B",
+      "routing": "human_review",
+      "route_reason": "class-mismatch",
+      "n_candidate_edges": 2,
+      "min_confidence": 0.6
+    },
+    {
+      "group_id": "d4d2e782",
+      "choice": "NONE",
+      "routing": "human_review",
+      "route_reason": "unanimous_none",
+      "n_candidate_edges": 2,
+      "min_confidence": 0.9
+    },
+    {
+      "group_id": "4eed5e80",
+      "choice": "NONE",
+      "routing": "human_review",
+      "route_reason": "unanimous_none",
+      "n_candidate_edges": 3,
+      "min_confidence": 0.85
+    },
+    {
+      "group_id": "92c0997f",
+      "choice": "NONE",
+      "routing": "human_review",
+      "route_reason": "dissent:muse=A",
+      "n_candidate_edges": 18,
+      "min_confidence": 0.55
+    },
+    {
+      "group_id": "7175635e",
+      "choice": "A",
+      "routing": "human_review",
+      "route_reason": "dissent:codex=D",
+      "n_candidate_edges": 3,
+      "min_confidence": 0.8
+    },
+    {
+      "group_id": "a451bf05",
+      "choice": "P",
+      "routing": "human_review",
+      "route_reason": "class-mismatch",
+      "n_candidate_edges": 17,
+      "min_confidence": 0.5
+    },
+    {
+      "group_id": "3fd8483c__p07ce5199df",
+      "choice": "A",
+      "routing": "auto_accept",
+      "route_reason": "unanimous",
+      "n_candidate_edges": 1,
+      "min_confidence": 0.95
+    },
+    {
+      "group_id": "c8b85bbc__p07741daa80",
+      "choice": "A",
+      "routing": "auto_accept",
+      "route_reason": "unanimous",
+      "n_candidate_edges": 40,
+      "min_confidence": 0.82
+    }
+  ]
+}

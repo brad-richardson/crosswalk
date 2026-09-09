@@ -1,0 +1,45 @@
+{
+  "ballot": {
+    "abstain_reason": "",
+    "attempt": 1,
+    "choice": "A",
+    "chosen_option_id": "",
+    "confidence": 0.97,
+    "desired_edges": "",
+    "displayed_candidate_universe_sha256": "",
+    "edge_set": [
+      [
+        "6fc832cc-1413-4c64-a1e0-12ef04935739",
+        "us_boston_streets_4483_882a3066b5"
+      ],
+      [
+        "f94a0f4c-999f-49c9-9044-cd311611978c",
+        "us_boston_streets_4483_882a3066b5"
+      ]
+    ],
+    "error": "",
+    "evidence_delivery": "{\"asset_count\":4,\"asset_set_sha256\":\"deea9a0d9da2ee0d190061e8dec741d6a0ff2222ad11ebf14271c505e6cbd8e2\",\"assets\":[{\"bytes\":25925,\"path\":\"option_A.png\",\"sha256\":\"1ddd9aa2d909c050798ad37e6c4b14b829e4ec26c5ee6c86d196a5cc74f3f1ff\"},{\"bytes\":25433,\"path\":\"option_B.png\",\"sha256\":\"3608a1ebc263b967e1dc2f238fe7fb96b8acc09dc20af7716602fef88a9b9d9c\"},{\"bytes\":25549,\"path\":\"option_C.png\",\"sha256\":\"e4f3ae87d490fd7d6eeb7ff4c3c0b2e36d581b2335160f0142f6a0db33dd18b1\"},{\"bytes\":25796,\"path\":\"overview.png\",\"sha256\":\"dd3013f46ab59bb6979fc056daa8cf96c5adb813ba97b5aff91537c4d2b48dc0\"}],\"delivery_mode\":\"prompt_path_read\",\"preflight_status\":\"passed\",\"schema_version\":1,\"transport\":\"claude:Read\"}",
+    "evidence_id": "",
+    "evidence_pack_sha256": "",
+    "group_id": "f69a827e",
+    "invocation_route": "",
+    "latency_s": 15.42,
+    "model": "claude-fable-5-1",
+    "none_reason": "",
+    "option_menu_sha256": "",
+    "pack_feedback": "",
+    "panel_invocation_sha256": "",
+    "provider": "claude",
+    "raw": "{\"choice\":\"A\",\"confidence\":0.97,\"reasoning\":\"T1 is one long target segment covering all of Chamberlain Street; R1 and R2 are two consecutive reference pieces of the same street that together span T1 (R2 north half, R1 south half). Both edges have ~1.0 ref alignment and substantial overlap (63m and 91m), same name and class, one corridor. This is a classic N:1 split, so both e1 and e2 are correct and only Option A includes both. B and C each drop a valid half.\"}\n",
+    "reasoning": "T1 is one long target segment covering all of Chamberlain Street; R1 and R2 are two consecutive reference pieces of the same street that together span T1 (R2 north half, R1 south half). Both edges have ~1.0 ref alignment and substantial overlap (63m and 91m), same name and class, one corridor. This is a classic N:1 split, so both e1 and e2 are correct and only Option A includes both. B and C each drop a valid half.",
+    "timestamp": "2026-09-09T14:24:24.604609+00:00"
+  },
+  "dataset": "us_boston_streets",
+  "evidence_id": "c212bb7011c25bef3fe11f61041a0588401a35095a66ca8634cc91618d5ffff1",
+  "evidence_pack_sha256": "77f94e63294780aba2412821208ec8a173f83b044e45134d6a16fc4c782a488a",
+  "group_id": "f69a827e",
+  "model": "claude-fable-5-1",
+  "provider": "claude",
+  "status": "completed",
+  "wall_seconds": 15.53
+}

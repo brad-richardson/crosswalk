@@ -1,0 +1,1442 @@
+{
+  "agent_pairs": {
+    "datasets": 15,
+    "rows": 1051
+  },
+  "archive": {
+    "consensus": {
+      "majority": 253,
+      "none": 95,
+      "unanimous": 549
+    },
+    "consensus_rows": 897,
+    "models": {
+      "Gemini 3.5 Flash (Medium)": 15,
+      "claude-opus-4-8": 897,
+      "gpt-5.5": 60,
+      "gpt-5.6-sol": 822,
+      "gpt-5.6-terra": 15,
+      "meta/muse-spark-1.1": 837,
+      "openrouter/google/gemini-3.5-flash": 45,
+      "openrouter/moonshotai/kimi-k2.6": 15
+    },
+    "none_reasons": {
+      "": 2483,
+      "all_edges_no_match": 81,
+      "insufficient_evidence": 53,
+      "no_exact_option": 89
+    },
+    "routing": {
+      "auto_accept": 422,
+      "human_review": 475
+    },
+    "votes": 2706
+  },
+  "audit_date": "2026-09-09",
+  "bulk_v7": {
+    "accepted_packs_inside_failed_parents": 213,
+    "datasets": 23,
+    "decomposed_parents": [
+      {
+        "auto_accepted": 41,
+        "dataset": "au_sydney_roads",
+        "packs": 50,
+        "parent_group_id": "3fd8483c",
+        "source_batch": "au_sydney_roads_bulk_v7_20260718"
+      },
+      {
+        "auto_accepted": 10,
+        "dataset": "au_sydney_roads",
+        "packs": 23,
+        "parent_group_id": "b4f5b92d",
+        "source_batch": "au_sydney_roads_bulk_v7_20260718"
+      },
+      {
+        "auto_accepted": 26,
+        "dataset": "au_sydney_roads",
+        "packs": 35,
+        "parent_group_id": "09d35188",
+        "source_batch": "au_sydney_roads_bulk_v7_20260718"
+      },
+      {
+        "auto_accepted": 11,
+        "dataset": "au_sydney_roads",
+        "packs": 17,
+        "parent_group_id": "9aa1d72a",
+        "source_batch": "au_sydney_roads_bulk_v7_20260718"
+      },
+      {
+        "auto_accepted": 2,
+        "dataset": "co_bogota_bike_network",
+        "packs": 2,
+        "parent_group_id": "50b7da83",
+        "source_batch": "co_bogota_bike_network_bulk_v7_20260718"
+      },
+      {
+        "auto_accepted": 48,
+        "dataset": "fi_helsinki_roads",
+        "packs": 68,
+        "parent_group_id": "c8b85bbc",
+        "source_batch": "fi_helsinki_roads_bulk_v7_20260718"
+      },
+      {
+        "auto_accepted": 37,
+        "dataset": "fi_helsinki_roads",
+        "packs": 68,
+        "parent_group_id": "bfbf4f93",
+        "source_batch": "fi_helsinki_roads_bulk_v7_20260718"
+      },
+      {
+        "auto_accepted": 35,
+        "dataset": "fi_helsinki_roads",
+        "packs": 53,
+        "parent_group_id": "f7a39ee6",
+        "source_batch": "fi_helsinki_roads_bulk_v7_20260718"
+      },
+      {
+        "auto_accepted": 5,
+        "dataset": "fi_helsinki_roads",
+        "packs": 11,
+        "parent_group_id": "6eb6f37b",
+        "source_batch": "fi_helsinki_roads_bulk_v7_20260718"
+      }
+    ],
+    "majority_caveat": "Potential additional pack observations, not validated labels or independently counted parent groups.",
+    "majority_non_none_by_valid_voters": {
+      "2": 23,
+      "3": 96
+    },
+    "packs": 654,
+    "reasons": {
+      "all_abstained": 1,
+      "below_quorum:2": 34,
+      "class-mismatch": 18,
+      "dissent:claude=A": 4,
+      "dissent:claude=B": 13,
+      "dissent:claude=C": 4,
+      "dissent:claude=D": 4,
+      "dissent:claude=F": 1,
+      "dissent:claude=I": 1,
+      "dissent:claude=J": 4,
+      "dissent:claude=NONE": 7,
+      "dissent:codex=A": 33,
+      "dissent:codex=B": 5,
+      "dissent:codex=C": 2,
+      "dissent:codex=D": 1,
+      "dissent:codex=I": 1,
+      "dissent:codex=J": 1,
+      "dissent:codex=NONE": 1,
+      "dissent:codex=O": 1,
+      "dissent:codex=P": 1,
+      "dissent:muse=A": 3,
+      "dissent:muse=B": 8,
+      "dissent:muse=C": 1,
+      "dissent:muse=D": 1,
+      "dissent:muse=E": 1,
+      "dissent:muse=J": 2,
+      "dissent:muse=NONE": 13,
+      "low_confidence": 44,
+      "no_majority": 76,
+      "unanimous": 360,
+      "unanimous_none": 8
+    },
+    "routing": {
+      "auto_accept": 360,
+      "human_review": 294
+    }
+  },
+  "factory_july": {
+    "caveat": "Cached manifest counts, not a fresh run, publication count, or independent accuracy measurement.",
+    "datasets": 36,
+    "recorded_counts": {
+      "n_candidates": 6634961,
+      "n_matched": 1580895,
+      "n_review": 49993,
+      "n_target": 2074223,
+      "n_unmatched": 443335
+    }
+  },
+  "features": {
+    "full": 83,
+    "spark": 34,
+    "version": "2026-07-07.2"
+  },
+  "human_pairs": {
+    "datasets": 34,
+    "labels": {
+      "match": 3291,
+      "no_match": 2166,
+      "unsure": 30
+    },
+    "rows": 5487
+  },
+  "resolver_discovery": [
+    {
+      "bytes": 283272838,
+      "dataset": "au_sydney_roads",
+      "path": "data/output/au_sydney_roads_groups.json"
+    },
+    {
+      "bytes": 293080541,
+      "dataset": "br_sao_paulo_roads",
+      "path": "data/output/br_sao_paulo_roads_groups.json"
+    },
+    {
+      "bytes": 14844329,
+      "dataset": "ch_grand_geneva_cycle_schema",
+      "path": "data/output/ch_grand_geneva_cycle_schema_groups.json"
+    },
+    {
+      "bytes": 14891084,
+      "dataset": "co_bogota_bike_network",
+      "path": "data/output/co_bogota_bike_network_groups.json"
+    },
+    {
+      "bytes": 258204582,
+      "dataset": "co_bogota_roads",
+      "path": "data/output/co_bogota_roads_groups.json"
+    },
+    {
+      "bytes": 67024304,
+      "dataset": "de_berlin_roads",
+      "path": "data/output/de_berlin_roads_groups.json"
+    },
+    {
+      "bytes": 752935212,
+      "dataset": "fi_helsinki_roads",
+      "path": "data/output/fi_helsinki_roads_groups.json"
+    },
+    {
+      "bytes": 34568273,
+      "dataset": "fr_france_winter_hiking_traces",
+      "path": "data/output/fr_france_winter_hiking_traces_groups.json"
+    },
+    {
+      "bytes": 552590382,
+      "dataset": "gb_london_roads",
+      "path": "data/factory/release=2026-06-17.0/dataset=gb_london_roads/groups.json"
+    },
+    {
+      "bytes": 641821868,
+      "dataset": "hk_hongkong_roads",
+      "path": "data/output/hk_hongkong_roads_groups.json"
+    },
+    {
+      "bytes": 115040750,
+      "dataset": "in_mumbai_streets",
+      "path": "data/output/in_mumbai_streets_groups.json"
+    },
+    {
+      "bytes": 97016436,
+      "dataset": "ke_nairobi_roads",
+      "path": "data/output/ke_nairobi_roads_groups.json"
+    },
+    {
+      "bytes": 150158054,
+      "dataset": "nl_amsterdam_roads",
+      "path": "data/output/nl_amsterdam_roads_groups.json"
+    },
+    {
+      "bytes": 174395416,
+      "dataset": "sg_singapore_footpaths",
+      "path": "data/output/sg_singapore_footpaths_groups.json"
+    },
+    {
+      "bytes": 61702620,
+      "dataset": "sg_singapore_roads",
+      "path": "data/output/sg_singapore_roads_groups.json"
+    },
+    {
+      "bytes": 209761657,
+      "dataset": "tn_tunis_ml_roads",
+      "path": "data/output/tn_tunis_ml_roads_groups.json"
+    },
+    {
+      "bytes": 21714502,
+      "dataset": "us_austin_sidewalks",
+      "path": "data/output/us_austin_sidewalks_groups.json"
+    },
+    {
+      "bytes": 48225570,
+      "dataset": "us_boston_streets",
+      "path": "data/output/us_boston_streets_groups.json"
+    },
+    {
+      "bytes": 62627560,
+      "dataset": "us_fort_collins_sidewalks",
+      "path": "data/output/us_fort_collins_sidewalks_groups.json"
+    },
+    {
+      "bytes": 15344692,
+      "dataset": "us_fort_collins_streets",
+      "path": "data/output/us_fort_collins_streets_groups.json"
+    },
+    {
+      "bytes": 3030985,
+      "dataset": "us_frisco_trails",
+      "path": "data/output/us_frisco_trails_groups.json"
+    },
+    {
+      "bytes": 23414643,
+      "dataset": "us_montana_missoula",
+      "path": "data/output/us_montana_missoula_groups.json"
+    },
+    {
+      "bytes": 114903343,
+      "dataset": "us_philadelphia_sidewalks",
+      "path": "data/output/us_philadelphia_sidewalks_groups.json"
+    },
+    {
+      "bytes": 90377786,
+      "dataset": "us_seattle_sidewalks",
+      "path": "data/output/us_seattle_sidewalks_groups.json"
+    },
+    {
+      "bytes": 6067541,
+      "dataset": "us_usfs_flathead",
+      "path": "data/output/us_usfs_flathead_groups.json"
+    }
+  ],
+  "scope": "Inventory and stored-output replay only; no new model ballots, training, or pipeline run.",
+  "source_commit": "d13a93d75dd668028c2438c62ca4106f597b6de5",
+  "sources": [
+    {
+      "bytes": 48095579,
+      "path": "data/agents/stitching/batches/au_sydney_roads_bulk_v7_20260718/batch.json",
+      "sha256": "466dadacaaaab4770b97f005b558b46ee22ada2e54af9ed17b5901ed2725e781"
+    },
+    {
+      "bytes": 2966175,
+      "path": "data/agents/stitching/batches/br_sao_paulo_roads_bulk_v7_20260718/batch.json",
+      "sha256": "493eb35f5baa141967d9e5cb7d7beb9581fb9c0c9923956571ba1e0f90475f29"
+    },
+    {
+      "bytes": 9465671,
+      "path": "data/agents/stitching/batches/co_bogota_bike_network_bulk_v7_20260718/batch.json",
+      "sha256": "d5535361f22a40221435b29f14517ecb5046337362b986fd53c653f6f678b1ae"
+    },
+    {
+      "bytes": 46635745,
+      "path": "data/agents/stitching/batches/co_bogota_roads_bulk_v7_20260718/batch.json",
+      "sha256": "8d833d5ff06959d121780b9167be62442fef927dcdce1957f877ae23550fce06"
+    },
+    {
+      "bytes": 7143381,
+      "path": "data/agents/stitching/batches/de_berlin_roads_bulk_v7_20260718/batch.json",
+      "sha256": "a3ea5db98969e6eab859af3ce27c5664d75788fc01136ebbaa092111d0f45dbf"
+    },
+    {
+      "bytes": 131889713,
+      "path": "data/agents/stitching/batches/fi_helsinki_roads_bulk_v7_20260718/batch.json",
+      "sha256": "daaaeeba306bd8662edc9e1c5d3ae4551bb60932373230cb82ca4c5f12b1139a"
+    },
+    {
+      "bytes": 2297017,
+      "path": "data/agents/stitching/batches/fr_france_winter_hiking_traces_bulk_v7_20260718/batch.json",
+      "sha256": "df3da9b21e47141f86e0d281f20f7f1c14412bec4fdfdddc4a3cc9ac8cf7e3ad"
+    },
+    {
+      "bytes": 27836329,
+      "path": "data/agents/stitching/batches/hk_hongkong_roads_bulk_v7_20260718/batch.json",
+      "sha256": "b35b07dbacfb734c6cb42f137eb7350e63c5100774996de270da5f1a3c477756"
+    },
+    {
+      "bytes": 2047628,
+      "path": "data/agents/stitching/batches/in_mumbai_streets_bulk_v7_20260718/batch.json",
+      "sha256": "a7cdadead15f57a690d4c222fc26b44059056ac9ead450886013bc4b992a50c0"
+    },
+    {
+      "bytes": 2550129,
+      "path": "data/agents/stitching/batches/ke_nairobi_roads_bulk_v7_20260718/batch.json",
+      "sha256": "31ded6f460789766ff98e27aa632bf50057f6b761570ff76cc3f40f377c36307"
+    },
+    {
+      "bytes": 3207950,
+      "path": "data/agents/stitching/batches/nl_amsterdam_roads_bulk_v7_20260718/batch.json",
+      "sha256": "4dcf70e863a0b55f06d4240d87858740b4eb0671fc9cd4724acaa4794fa93355"
+    },
+    {
+      "bytes": 2441500,
+      "path": "data/agents/stitching/batches/sg_singapore_footpaths_bulk_v7_20260718/batch.json",
+      "sha256": "f3b79cf8f531db16be59ce29c3757c09bd1e51d26aaee33ba25cad46c6d570f9"
+    },
+    {
+      "bytes": 8092800,
+      "path": "data/agents/stitching/batches/sg_singapore_roads_bulk_v7_20260718/batch.json",
+      "sha256": "3e96995e48ace93fa8a8e9b7ac240b727c4593513c5c30b85e62d7df456292d2"
+    },
+    {
+      "bytes": 4821265,
+      "path": "data/agents/stitching/batches/tn_tunis_ml_roads_bulk_v7_20260718/batch.json",
+      "sha256": "50d1a51817e43f6864a20b014303cf5e531bfd20f48ed5e15d4db1e102036b18"
+    },
+    {
+      "bytes": 1468953,
+      "path": "data/agents/stitching/batches/us_austin_sidewalks_bulk_v7_20260718/batch.json",
+      "sha256": "3cb8dadfa39988d5ff5571ab6215ca235c0c964f7e68f40f54fec71369494c8a"
+    },
+    {
+      "bytes": 1724959,
+      "path": "data/agents/stitching/batches/us_boston_streets_bulk_v7_20260718/batch.json",
+      "sha256": "48dd0be6ec46d10d70ea6303cac3986875f890ed6dbb1963394c5ff257fefdad"
+    },
+    {
+      "bytes": 1753496,
+      "path": "data/agents/stitching/batches/us_fort_collins_sidewalks_bulk_v7_20260718/batch.json",
+      "sha256": "9127de432f30dec4b1ad8450acb90c0d780d0f52d19602fac584e487d0c2d3f2"
+    },
+    {
+      "bytes": 884533,
+      "path": "data/agents/stitching/batches/us_fort_collins_streets_bulk_v7_20260718/batch.json",
+      "sha256": "bb3f41f059247cf6c6ef646684c1a6494e23da41950cf9a25ff4f3e20203f4db"
+    },
+    {
+      "bytes": 982707,
+      "path": "data/agents/stitching/batches/us_frisco_trails_bulk_v7_20260718/batch.json",
+      "sha256": "495a2c8ebe8524ae41d4af6857cab76d97e1503c7ff6a41a7a4b89e64e085a4f"
+    },
+    {
+      "bytes": 3685470,
+      "path": "data/agents/stitching/batches/us_montana_missoula_bulk_v7_20260718/batch.json",
+      "sha256": "e7332f4328152691a2e8ba9f610b688e3f162e9462045c911c1b86e0d0686208"
+    },
+    {
+      "bytes": 2746686,
+      "path": "data/agents/stitching/batches/us_philadelphia_sidewalks_bulk_v7_20260718/batch.json",
+      "sha256": "a3fd6279634c3010bd1c714d0f8992b1376eee3bc854207ff83e663be88e5323"
+    },
+    {
+      "bytes": 3149684,
+      "path": "data/agents/stitching/batches/us_seattle_sidewalks_bulk_v7_20260718/batch.json",
+      "sha256": "a17a72400eb542d55391a5f84d3c044d78475309464f60b350bc1dc02d2a6107"
+    },
+    {
+      "bytes": 4042461,
+      "path": "data/agents/stitching/batches/us_usfs_flathead_bulk_v7_20260718/batch.json",
+      "sha256": "3297b185fdf825da542c113cd7edf22591c47e784d572d43b022077aeb6cc869"
+    },
+    {
+      "bytes": 3526,
+      "path": "data/factory/release=2026-07-22.0/dataset=au_melbourne_roads/manifest.json",
+      "sha256": "4e1da5668c5ef5ee2a7d5c3388682282034a5fd80461a3a3a7e40157e098bff6"
+    },
+    {
+      "bytes": 3533,
+      "path": "data/factory/release=2026-07-22.0/dataset=au_sydney_roads/manifest.json",
+      "sha256": "4042dbaf7a72ee3a511903d7be8a763ff9ce008cf7c59583712ef4ff344a3190"
+    },
+    {
+      "bytes": 3545,
+      "path": "data/factory/release=2026-07-22.0/dataset=br_sao_paulo_roads/manifest.json",
+      "sha256": "5b8e916c1d709375608e3f51f87ed8d705f98ed7c3393df1442bcbbcb590b7a9"
+    },
+    {
+      "bytes": 3528,
+      "path": "data/factory/release=2026-07-22.0/dataset=ca_toronto_roads/manifest.json",
+      "sha256": "b3de7303331e3818b75af03902c6b0c8c38833bf488450672bcf0642c983da73"
+    },
+    {
+      "bytes": 3524,
+      "path": "data/factory/release=2026-07-22.0/dataset=ch_geneva_hiking_routes/manifest.json",
+      "sha256": "55719efdd187ad501784c42c42a4f3b71a72aaa8a98b8c13d936830caffa332a"
+    },
+    {
+      "bytes": 3555,
+      "path": "data/factory/release=2026-07-22.0/dataset=ch_geneva_pedestrian_network/manifest.json",
+      "sha256": "187e9ff31e7141afd8573a49d37b8c9e672834b891fffc1dff670368023a6948"
+    },
+    {
+      "bytes": 3559,
+      "path": "data/factory/release=2026-07-22.0/dataset=ch_grand_geneva_cycle_schema/manifest.json",
+      "sha256": "320f2015b45f5b2419c1e1d5d8a578dff750e04736a506a250910cff4b30d8e6"
+    },
+    {
+      "bytes": 3537,
+      "path": "data/factory/release=2026-07-22.0/dataset=co_bogota_bike_network/manifest.json",
+      "sha256": "25a29d64165268dfca24e0416b9c6beab8cd403595b4d1574afe8862ab6549a5"
+    },
+    {
+      "bytes": 3531,
+      "path": "data/factory/release=2026-07-22.0/dataset=co_bogota_roads/manifest.json",
+      "sha256": "da95ec262564973ca8a55d066ab5607a1bfd1e60bac198cc2eeafe7dad1beef4"
+    },
+    {
+      "bytes": 3522,
+      "path": "data/factory/release=2026-07-22.0/dataset=de_berlin_roads/manifest.json",
+      "sha256": "c880bdf0c9093aeb7d5ca00a254d8d0f49e77dfa35f12055fa6c65d3cf17da91"
+    },
+    {
+      "bytes": 3544,
+      "path": "data/factory/release=2026-07-22.0/dataset=fi_helsinki_roads/manifest.json",
+      "sha256": "e71ab824c688547fdda4948b7e91c877a9d6b9d0fdd6f56499762d501ad3e85d"
+    },
+    {
+      "bytes": 3576,
+      "path": "data/factory/release=2026-07-22.0/dataset=fr_france_winter_hiking_traces/manifest.json",
+      "sha256": "aaed4486c8d39cb71d0c56868f3e622f9640bf8c20d56eba2ee996bf4372016b"
+    },
+    {
+      "bytes": 3534,
+      "path": "data/factory/release=2026-07-22.0/dataset=gb_london_roads/manifest.json",
+      "sha256": "afba2242a366496f8df353c05bdcc2cf43d3d08c6d85ff188c4dd62356402628"
+    },
+    {
+      "bytes": 3536,
+      "path": "data/factory/release=2026-07-22.0/dataset=hk_hongkong_roads/manifest.json",
+      "sha256": "a1accd3510dc2074d979ead042c3d6b5ab56952cf6d89c5621c5c0e2fd6c0b1d"
+    },
+    {
+      "bytes": 3533,
+      "path": "data/factory/release=2026-07-22.0/dataset=in_mumbai_streets/manifest.json",
+      "sha256": "6f2c835b7ee14ca75eb6f76aad425bd66c3da847055eb0822f20c4fd170af06d"
+    },
+    {
+      "bytes": 3550,
+      "path": "data/factory/release=2026-07-22.0/dataset=jp_tokyo_emergency_roads/manifest.json",
+      "sha256": "d01a0fd2878331efd6bfef7f7e90b023a345259bec7c01a0e5cbd67400c87788"
+    },
+    {
+      "bytes": 3496,
+      "path": "data/factory/release=2026-07-22.0/dataset=ke_kisumu_roads/manifest.json",
+      "sha256": "025b56b355fb7d3f8ef50010450fe36703cc7475ce1710865167602f4e6d3b4f"
+    },
+    {
+      "bytes": 3519,
+      "path": "data/factory/release=2026-07-22.0/dataset=ke_nairobi_roads/manifest.json",
+      "sha256": "956b441e50d8b8c42f246731cc22601af2bc86cd960d39daaf556f8eb11dedf1"
+    },
+    {
+      "bytes": 3534,
+      "path": "data/factory/release=2026-07-22.0/dataset=nl_amsterdam_roads/manifest.json",
+      "sha256": "3013548c17a81c7debf93327952f60e5f43998a77cd196cae64c96289358aa59"
+    },
+    {
+      "bytes": 3555,
+      "path": "data/factory/release=2026-07-22.0/dataset=sg_singapore_footpaths/manifest.json",
+      "sha256": "fdb10b5457537368412f03a2357c39c3234f898d6d3cb283aeb5db9a62ae93d5"
+    },
+    {
+      "bytes": 3528,
+      "path": "data/factory/release=2026-07-22.0/dataset=sg_singapore_roads/manifest.json",
+      "sha256": "26e25b882df87ef4f1378316c812f9b7142ef19475e35c2db18e8582a4b0a789"
+    },
+    {
+      "bytes": 3534,
+      "path": "data/factory/release=2026-07-22.0/dataset=tn_tunis_ml_roads/manifest.json",
+      "sha256": "6d13192af6fbe56fafa7c450c86008600c2828f22f2c4825a146e5d2b534d7fc"
+    },
+    {
+      "bytes": 3529,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_austin_sidewalks/manifest.json",
+      "sha256": "49f8f2b6a44682b7a50fe8081e170d1f5d8ff9924bf607dbe82875cb8f21b8f0"
+    },
+    {
+      "bytes": 3533,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_boston_bike_network/manifest.json",
+      "sha256": "455441b12833ecb39329974b9613afa5a13eb713a81f3c798aff79149102e4d6"
+    },
+    {
+      "bytes": 3541,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_boston_sidewalks/manifest.json",
+      "sha256": "3c5cce6a8706cc99930d7ad224b82610092e00a6a711b247104f449b2f480c54"
+    },
+    {
+      "bytes": 3520,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_boston_streets/manifest.json",
+      "sha256": "af1b33f909a82a6b7d819747f0cf9e5eb9c06ac25c5d0ff7bb0f6381694d46f1"
+    },
+    {
+      "bytes": 3553,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_fort_collins_sidewalks/manifest.json",
+      "sha256": "9cd42f520df2af1157b16beda817f01e99fecbcf4b4611da84834a6b53a04100"
+    },
+    {
+      "bytes": 3540,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_fort_collins_streets/manifest.json",
+      "sha256": "86dc4950744808f28c99df64c18c8a00c2a92032a50dfc89425e9885d2ea28bb"
+    },
+    {
+      "bytes": 3497,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_frisco_trails/manifest.json",
+      "sha256": "ea6eb49433e076188bbbef3c192c5fc3424395250025639c5202201b0509b470"
+    },
+    {
+      "bytes": 3512,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_montana_helena/manifest.json",
+      "sha256": "da8402501b870a6389ab9a44b62fc82e92c3a76fc4be876e5a26ffd82f1f2bc9"
+    },
+    {
+      "bytes": 3522,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_montana_missoula/manifest.json",
+      "sha256": "0f1c2de6832bb158312c5df5a538d774dc82d8bde2cda169f2a13167822872cd"
+    },
+    {
+      "bytes": 3566,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_philadelphia_sidewalks/manifest.json",
+      "sha256": "a0726278e7309065062042a165142c3d28a6e2d39a296531fe8ce1e43a9a5601"
+    },
+    {
+      "bytes": 3539,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_seattle_sidewalks/manifest.json",
+      "sha256": "cb991ab6680b1d9932747555b229cebd70a0cf1deb62b45cac05cf87d8213d64"
+    },
+    {
+      "bytes": 3500,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_usfs_flathead/manifest.json",
+      "sha256": "3394be75dfb95507a174655feb0cceb5011831022bd7a5cad20f4f237f7c05f2"
+    },
+    {
+      "bytes": 3486,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_usfs_lolo/manifest.json",
+      "sha256": "5dc055f792d1968091c885e787a7d97f4d8e5ccf5e5a3a160aaf3c39a6862dc6"
+    },
+    {
+      "bytes": 3533,
+      "path": "data/factory/release=2026-07-22.0/dataset=us_utah_slc_roads/manifest.json",
+      "sha256": "d4241e8185425831e05233df72a23661f41b86797c568e7c27bdf8dda879206f"
+    },
+    {
+      "bytes": 4164125,
+      "path": "data/output/us_boston_streets_candidates.parquet",
+      "sha256": "673278a3fd91887afc2478371fcf5f4e2dac05ef42000274fc14e3c616809866"
+    },
+    {
+      "bytes": 48225570,
+      "path": "data/output/us_boston_streets_groups.json",
+      "sha256": "28a0f2c30bcdde8ed9777f8bf07b2260fc499625aea079b0761b327793f88ec6"
+    },
+    {
+      "bytes": 14576357,
+      "path": "data/output/us_seattle_sidewalks_candidates.parquet",
+      "sha256": "6a12394a093d978a3fddcd18e0679a73e72112a3253f3b9711b47765eec5f4f3"
+    },
+    {
+      "bytes": 90377786,
+      "path": "data/output/us_seattle_sidewalks_groups.json",
+      "sha256": "3eabc211bb4d6b2b617dfd0687c40bf8bfcb00b5ed687cad1bb970af48533638"
+    },
+    {
+      "bytes": 17144,
+      "path": "labels/agent/dataset=au_melbourne_roads/data.csv",
+      "sha256": "7f69b8bf27251d0180e762e2482e9d14c94a38f27579b9589f69ab47b13013c5"
+    },
+    {
+      "bytes": 26948,
+      "path": "labels/agent/dataset=au_sydney_roads/data.csv",
+      "sha256": "41a225a432919f0236576efa8888ab8cc7ad37365bd7027cc721706e86016852"
+    },
+    {
+      "bytes": 22097,
+      "path": "labels/agent/dataset=co_bogota_roads/data.csv",
+      "sha256": "d067b85526efe18acbe6d0c237c09bd959590207f7c0eb830021ab40316fbe04"
+    },
+    {
+      "bytes": 22642,
+      "path": "labels/agent/dataset=de_berlin_roads/data.csv",
+      "sha256": "41ac6d68587658abb938f4688fb736772889e9467de2ade4d21640a0b82a7da1"
+    },
+    {
+      "bytes": 303,
+      "path": "labels/agent/dataset=gb_london_roads/data.csv",
+      "sha256": "a86a004934b12804e0340847044ecacbbf6eb4db42517e86913db35a72809481"
+    },
+    {
+      "bytes": 11039,
+      "path": "labels/agent/dataset=us_austin_sidewalks/data.csv",
+      "sha256": "f910348e0c554968535f78cebe69b533ca5460163ea7e0e18679317ba7da1826"
+    },
+    {
+      "bytes": 23122,
+      "path": "labels/agent/dataset=us_boston_bike_network/data.csv",
+      "sha256": "d871495c2baa82236c6ce6481e167df2869b1dbef96d77735798250baacc0f69"
+    },
+    {
+      "bytes": 27449,
+      "path": "labels/agent/dataset=us_boston_sidewalks/data.csv",
+      "sha256": "8a031b968c8d5918da5f97e502f04712a8f109a6edd19f53a38040dd3f0cf68a"
+    },
+    {
+      "bytes": 26950,
+      "path": "labels/agent/dataset=us_boston_streets/data.csv",
+      "sha256": "2376084d2bc1fde81a80c53fdb9de956b393774c0601f6af81fdf281bdcb3d75"
+    },
+    {
+      "bytes": 7431,
+      "path": "labels/agent/dataset=us_fort_collins_sidewalks/data.csv",
+      "sha256": "f23acd26af10d06d6a295aa41f43326b53c394392cc5b79763c804177b00485a"
+    },
+    {
+      "bytes": 709,
+      "path": "labels/agent/dataset=us_fort_collins_streets/data.csv",
+      "sha256": "9c69a649f9125ea9b7748f007c396d708078912d8c812fc87e3ec40d3fee36f0"
+    },
+    {
+      "bytes": 27235,
+      "path": "labels/agent/dataset=us_frisco_trails/data.csv",
+      "sha256": "0104358d86961899d380eb53f020b429133f1b4b7c2074837d6f4b04b8f7dfec"
+    },
+    {
+      "bytes": 26503,
+      "path": "labels/agent/dataset=us_montana_helena/data.csv",
+      "sha256": "a2f80753b1a3ea03339b0a4c7b50e2cc5739838a15c028342fbb5ab3d518da79"
+    },
+    {
+      "bytes": 27224,
+      "path": "labels/agent/dataset=us_philadelphia_sidewalks/data.csv",
+      "sha256": "aa2976aa718f6ddc76d57557b94be2d06bde0b5094c6208ae5de14f13ac54359"
+    },
+    {
+      "bytes": 15877,
+      "path": "labels/agent/dataset=us_usfs_lolo/data.csv",
+      "sha256": "efbc2dda55bcc6008a65430df5a1cb0005455adbcdf787984e0424eb9983b017"
+    },
+    {
+      "bytes": 17340,
+      "path": "labels/human/dataset=au_melbourne_roads/data.csv",
+      "sha256": "8138593d239f45c86de7f31860b0b41584ed916f5b48a2a43f2eca32f824731c"
+    },
+    {
+      "bytes": 42999,
+      "path": "labels/human/dataset=au_sydney_roads/data.csv",
+      "sha256": "10389ad36cb393432d66395bc5f6e51c85576352d5bff405b006a4512eabe899"
+    },
+    {
+      "bytes": 21859,
+      "path": "labels/human/dataset=br_sao_paulo_roads/data.csv",
+      "sha256": "104b4527d0afae1defaeae59393687383eb3bf55131bfe38ae3e1df92e9f632e"
+    },
+    {
+      "bytes": 19835,
+      "path": "labels/human/dataset=ca_toronto_roads/data.csv",
+      "sha256": "088797b490ab54c42fed555808393eaefba304436cd302aeb74d73ad7fffcc40"
+    },
+    {
+      "bytes": 11909,
+      "path": "labels/human/dataset=ch_geneva_hiking_routes/data.csv",
+      "sha256": "8af8849cc34a8c610bdbe221acdb33d600f53058ff96fdd729de7950489a9179"
+    },
+    {
+      "bytes": 11984,
+      "path": "labels/human/dataset=ch_geneva_pedestrian_network/data.csv",
+      "sha256": "a14a40b590eb2a55797bcb6b6b654c5cf5ac5e904ef28daa8b9e7818d45a9bf7"
+    },
+    {
+      "bytes": 6943,
+      "path": "labels/human/dataset=co_bogota_bike_network/data.csv",
+      "sha256": "2adbd2dd0005d02f7395ee0577e3c5e92e460b86614c7a1435177fcaf154fe12"
+    },
+    {
+      "bytes": 24721,
+      "path": "labels/human/dataset=co_bogota_roads/data.csv",
+      "sha256": "fa1e021b2c3baa023acba66315c59edb943c900677c3f97332ad8e8f1ee83a89"
+    },
+    {
+      "bytes": 22904,
+      "path": "labels/human/dataset=de_berlin_roads/data.csv",
+      "sha256": "a69348cbdb27602329a8df8f305cc9b28c3642087aa16871ef2dfc1128de31ca"
+    },
+    {
+      "bytes": 22581,
+      "path": "labels/human/dataset=fi_helsinki_roads/data.csv",
+      "sha256": "b90ce0118c2487102c4a308a3c78749bde3aca594103c47142c10e10d2b6ee82"
+    },
+    {
+      "bytes": 44729,
+      "path": "labels/human/dataset=gb_london_roads/data.csv",
+      "sha256": "d9c1bc72beec8db882a1640d47bea6619ce4dbf018c1a6162e7edeae661727a6"
+    },
+    {
+      "bytes": 42170,
+      "path": "labels/human/dataset=hk_hongkong_roads/data.csv",
+      "sha256": "fbda3f477705d25453f1302badbd4b0b56e1757365a5e41109d137da00628ced"
+    },
+    {
+      "bytes": 58542,
+      "path": "labels/human/dataset=in_mumbai_streets/data.csv",
+      "sha256": "82c08d56275a8022482b41048c4ffb5b72c82887275c181b9488a6da2fcc5605"
+    },
+    {
+      "bytes": 47530,
+      "path": "labels/human/dataset=jp_tokyo_emergency_roads/data.csv",
+      "sha256": "4d1fbf186c3c22854f257f577dcfca22da37d6a1ab6c3e7ba030432352685b8e"
+    },
+    {
+      "bytes": 19067,
+      "path": "labels/human/dataset=ke_kisumu_roads/data.csv",
+      "sha256": "99a97698d8bcf17f4786ab194569abfdfa3ef32c1921ee5a2db7d021670dcbe0"
+    },
+    {
+      "bytes": 11830,
+      "path": "labels/human/dataset=ke_nairobi_roads/data.csv",
+      "sha256": "e5d3ea8080c133cf2230f669ae5a43129121692f0acbc62e554a22c61cf76a86"
+    },
+    {
+      "bytes": 47900,
+      "path": "labels/human/dataset=nl_amsterdam_roads/data.csv",
+      "sha256": "d72b603c66a6db0e9571ca346c1f01109856e6b64fc084dfd905c1a452fe4956"
+    },
+    {
+      "bytes": 18816,
+      "path": "labels/human/dataset=sg_singapore_footpaths/data.csv",
+      "sha256": "d5276c4d73a5ca0d7eb3994aa04f1db0e18271ada5eb7dc035dea5939a964a35"
+    },
+    {
+      "bytes": 47823,
+      "path": "labels/human/dataset=sg_singapore_roads/data.csv",
+      "sha256": "4ead5e4ef807b4806bc29b36a66e18a56952b1a4066e67eb5c5323dbb7b93a94"
+    },
+    {
+      "bytes": 48376,
+      "path": "labels/human/dataset=tn_tunis_ml_roads/data.csv",
+      "sha256": "3162651b538a434f014b534465e5faef3e026fa73363caf598288e12d968cbcb"
+    },
+    {
+      "bytes": 19969,
+      "path": "labels/human/dataset=us_austin_sidewalks/data.csv",
+      "sha256": "1eb97d7791324e99be40907f45b3e97b1fb6b23baef64b96740a8421b620036f"
+    },
+    {
+      "bytes": 16371,
+      "path": "labels/human/dataset=us_boston_bike_network/data.csv",
+      "sha256": "5b49ad0f3ea81647e55a2b3269114448b55ac4f9a2b44b8e2b2f8feb13163873"
+    },
+    {
+      "bytes": 53343,
+      "path": "labels/human/dataset=us_boston_sidewalks/data.csv",
+      "sha256": "c162aeb6d67668d7f9c5465fafacb72c2d06828f2b03d13b97512de3e94b148d"
+    },
+    {
+      "bytes": 123204,
+      "path": "labels/human/dataset=us_boston_streets/data.csv",
+      "sha256": "40ddf84137ac67adc501f45812a6870d8d69f1aa211c32dcb55432a2b73c3601"
+    },
+    {
+      "bytes": 42840,
+      "path": "labels/human/dataset=us_fort_collins_sidewalks/data.csv",
+      "sha256": "b9bb166299e50b581a37a2d34f7cbefc40b6370b44deabab331dc34be4baa890"
+    },
+    {
+      "bytes": 37918,
+      "path": "labels/human/dataset=us_fort_collins_streets/data.csv",
+      "sha256": "19ab23188ccb5464c8683a9173d80747fb6bf707c7c2beec6f7c947e696827ad"
+    },
+    {
+      "bytes": 31755,
+      "path": "labels/human/dataset=us_frisco_trails/data.csv",
+      "sha256": "d380356af85f7dc164a5cb42c144022cefec2e66cfc261d120259313fa181869"
+    },
+    {
+      "bytes": 38106,
+      "path": "labels/human/dataset=us_montana_helena/data.csv",
+      "sha256": "106bbef0fb1ed162ad39a6e1ca1b44f8917172c5dcaac8fa33fa43c2dba96ee3"
+    },
+    {
+      "bytes": 1187,
+      "path": "labels/human/dataset=us_montana_missoula/data.csv",
+      "sha256": "ab0dc8471dade57e05a60faf8949b00c99ce2da6d8e87cafee579dc71c0035d0"
+    },
+    {
+      "bytes": 62883,
+      "path": "labels/human/dataset=us_philadelphia_sidewalks/data.csv",
+      "sha256": "62ae3aca75e5bf2b1ccfb442150212a67926ae0fc8ca41871218d3efee5dc51c"
+    },
+    {
+      "bytes": 36463,
+      "path": "labels/human/dataset=us_seattle_sidewalks/data.csv",
+      "sha256": "0a4c4adb3adb36cb6cba1017ff1fd034cde3897ea467367da02b9d94abfb4495"
+    },
+    {
+      "bytes": 12494,
+      "path": "labels/human/dataset=us_usfs_flathead/data.csv",
+      "sha256": "88d7f8ac3b1209e5a40754abe4a4da0f0180e95386950e31bd26268c1cdf2987"
+    },
+    {
+      "bytes": 20274,
+      "path": "labels/human/dataset=us_usfs_lolo/data.csv",
+      "sha256": "e614840f2c73a3a581235379b4fe1f03249e0b4f1bc98504e955f268526db367"
+    },
+    {
+      "bytes": 39274,
+      "path": "labels/human/dataset=us_utah_slc_roads/data.csv",
+      "sha256": "a68f006cc9852072f1e801ceaf4d6ca70e3ed1a62fcfdf1b8542857fdbc16d60"
+    },
+    {
+      "bytes": 11208,
+      "path": "labels/stitching/dataset=au_sydney_roads/data.csv",
+      "sha256": "a222bc41d91a718a26a574ac13437c6d8a8ed868b8b6cf8d1f4d881674c72839"
+    },
+    {
+      "bytes": 2797,
+      "path": "labels/stitching/dataset=br_sao_paulo_roads/data.csv",
+      "sha256": "e8561090cf3c2a9cceceea0b13d7d0125f9125da9363a116e4e561816832cf06"
+    },
+    {
+      "bytes": 4820,
+      "path": "labels/stitching/dataset=ch_grand_geneva_cycle_schema/data.csv",
+      "sha256": "92bd3b2ef18f9386314e21683cb398b48f7ab0719ec87340f3e6b02ddd7584b2"
+    },
+    {
+      "bytes": 7161,
+      "path": "labels/stitching/dataset=co_bogota_bike_network/data.csv",
+      "sha256": "99270abb2b062f32661eaa1c8326e37d744c551f95a25f0cfbdaa61f2bfa84cc"
+    },
+    {
+      "bytes": 17372,
+      "path": "labels/stitching/dataset=co_bogota_roads/data.csv",
+      "sha256": "139285b5355ce2974b2fe65be1ad0aa680629fb6029af846f4b159255ada3c24"
+    },
+    {
+      "bytes": 6746,
+      "path": "labels/stitching/dataset=de_berlin_roads/data.csv",
+      "sha256": "43c4a508eb58337a47c1a9b491f2af6888fad3b1526438fc89bed09dd1b8b892"
+    },
+    {
+      "bytes": 116503,
+      "path": "labels/stitching/dataset=fi_helsinki_roads/data.csv",
+      "sha256": "6d48d94eb06004080588f901bc52e3f29a44f3bb377cd588039af30274736816"
+    },
+    {
+      "bytes": 5712,
+      "path": "labels/stitching/dataset=fr_france_winter_hiking_traces/data.csv",
+      "sha256": "adc96d7fa3537fcb75e0209c8ee3699e2943e8e09f601d4b3e2e9d80b2130136"
+    },
+    {
+      "bytes": 547,
+      "path": "labels/stitching/dataset=gb_london_roads/data.csv",
+      "sha256": "ba90d7c06b64d373835aa7bccf4401e4e1c13e31ccd3b53bd18f88b0168502a4"
+    },
+    {
+      "bytes": 5591,
+      "path": "labels/stitching/dataset=hk_hongkong_roads/data.csv",
+      "sha256": "4c3e73ed41147ef20abe0587f586c9724ef563628b6f4e2731ea1d89ab072b57"
+    },
+    {
+      "bytes": 4201,
+      "path": "labels/stitching/dataset=in_mumbai_streets/data.csv",
+      "sha256": "9176c30a6bbdbb0aca933c059ba0eeb84a4a38555fbcada25cdd306ee8b20bfd"
+    },
+    {
+      "bytes": 13127,
+      "path": "labels/stitching/dataset=ke_nairobi_roads/data.csv",
+      "sha256": "c0836ff1e447b35602d385f99337cfb9194f3d0bb8e2912560903ad3ec529d24"
+    },
+    {
+      "bytes": 7012,
+      "path": "labels/stitching/dataset=nl_amsterdam_roads/data.csv",
+      "sha256": "c0685738f7cf57c86afefe33ccdda696f962f8598b95352514367543b9cd128b"
+    },
+    {
+      "bytes": 4016,
+      "path": "labels/stitching/dataset=sg_singapore_footpaths/data.csv",
+      "sha256": "2f3c876655164b5c2ada9e0b2cd682b545e6d32eb1d440925e67bfbfd8a1c2ce"
+    },
+    {
+      "bytes": 15388,
+      "path": "labels/stitching/dataset=sg_singapore_roads/data.csv",
+      "sha256": "8b69b505973fe0fd4a27bfbfdd97489f7d8d094027a353306d1c1e686eaf0706"
+    },
+    {
+      "bytes": 9415,
+      "path": "labels/stitching/dataset=tn_tunis_ml_roads/data.csv",
+      "sha256": "ac42579fb0c940533dd52eff05f34768c62e4f1450cf136407f1f49dc1653f6b"
+    },
+    {
+      "bytes": 16613,
+      "path": "labels/stitching/dataset=us_austin_sidewalks/data.csv",
+      "sha256": "40ef84aaeafa09d03ea99cfd71873a4d2759a130c2c31d0b2e6887f4678a4ec9"
+    },
+    {
+      "bytes": 99330,
+      "path": "labels/stitching/dataset=us_boston_streets/data.csv",
+      "sha256": "7fdf32c4374b35ac255d77f3e451698f17ac37293f19781f12e1e9682215720a"
+    },
+    {
+      "bytes": 14810,
+      "path": "labels/stitching/dataset=us_fort_collins_sidewalks/data.csv",
+      "sha256": "9b74e751cf238b8e624d568965f41af5d4f595cab6842c446d34bb40794fb346"
+    },
+    {
+      "bytes": 9783,
+      "path": "labels/stitching/dataset=us_fort_collins_streets/data.csv",
+      "sha256": "5c45e662ea89b4f099b43954230c20e6bb28894a71e4e6227c55c2a2763a016b"
+    },
+    {
+      "bytes": 3946,
+      "path": "labels/stitching/dataset=us_frisco_trails/data.csv",
+      "sha256": "106f3724c278a39437c206da2d3cd902205c7502c51d6d89d2cc3d78f0136185"
+    },
+    {
+      "bytes": 4962,
+      "path": "labels/stitching/dataset=us_montana_missoula/data.csv",
+      "sha256": "63954215610906f652289c6c736f62aa38c8a524a2f6d530823f871d1b0d2dd1"
+    },
+    {
+      "bytes": 15354,
+      "path": "labels/stitching/dataset=us_philadelphia_sidewalks/data.csv",
+      "sha256": "38ee9125e20af47b7c3c72899ea8236c643f745d27c31f0b7eaed29ad4005e9e"
+    },
+    {
+      "bytes": 25225,
+      "path": "labels/stitching/dataset=us_seattle_sidewalks/data.csv",
+      "sha256": "e5e363b96ebb72b7083948ead6ecb77c7ca62ef606a1e3fb3cc218cbcf87094e"
+    },
+    {
+      "bytes": 8733,
+      "path": "labels/stitching/dataset=us_usfs_flathead/data.csv",
+      "sha256": "82f6bfbb0488c0311f4102135782e727d4296f6f663a946cfd3f6fce6befa1ba"
+    },
+    {
+      "bytes": 131532,
+      "path": "labels/votes/dataset=au_sydney_roads/consensus.csv",
+      "sha256": "ca93bea4fa872ddf7808188d991f3b0457fa069825e5af86e70362c9a66a40e3"
+    },
+    {
+      "bytes": 1181656,
+      "path": "labels/votes/dataset=au_sydney_roads/votes.csv",
+      "sha256": "e89ee1ca245c0cddb83c9d7975e4b451a96fe1a03dcdeec6d39ffa3337dc7476"
+    },
+    {
+      "bytes": 20848,
+      "path": "labels/votes/dataset=br_sao_paulo_roads/consensus.csv",
+      "sha256": "472f9098dfa8a104d38b35b49613b990dadb1a5567ffabc4c60cfe12596e2a35"
+    },
+    {
+      "bytes": 166382,
+      "path": "labels/votes/dataset=br_sao_paulo_roads/votes.csv",
+      "sha256": "9600dbb6bf9c49133dcec5a12e95ee44c5e3f98417fbd2dd818568381b45561c"
+    },
+    {
+      "bytes": 19576,
+      "path": "labels/votes/dataset=ch_grand_geneva_cycle_schema/consensus.csv",
+      "sha256": "9ad1f9d8b48da590e291605f56127ae69d5f525b5ec4a2bde6e704e60f1797f1"
+    },
+    {
+      "bytes": 213538,
+      "path": "labels/votes/dataset=ch_grand_geneva_cycle_schema/votes.csv",
+      "sha256": "29f396dccd1ec5dd022a53357e3eff34712c6104939b7ece4e8afc70adca64e0"
+    },
+    {
+      "bytes": 20839,
+      "path": "labels/votes/dataset=co_bogota_bike_network/consensus.csv",
+      "sha256": "540385ec85202f8eb4dec93e5f2a3a6322059adcab79cb9e00468f93a9af192d"
+    },
+    {
+      "bytes": 133160,
+      "path": "labels/votes/dataset=co_bogota_bike_network/votes.csv",
+      "sha256": "3d85b051a7189b389882449ab498dcbe1fd3a186e93f5b080ead063243edaed7"
+    },
+    {
+      "bytes": 32248,
+      "path": "labels/votes/dataset=co_bogota_roads/consensus.csv",
+      "sha256": "d9b1d8273ede66cf0225e5ed3311b293177ee3572bf18a5672977e358f40d9f3"
+    },
+    {
+      "bytes": 179267,
+      "path": "labels/votes/dataset=co_bogota_roads/votes.csv",
+      "sha256": "b8cfb3270ca2c55d01f689fd1079826e8a6ab5487306a115030b3b481d09ab8b"
+    },
+    {
+      "bytes": 45514,
+      "path": "labels/votes/dataset=de_berlin_roads/consensus.csv",
+      "sha256": "9b216c331062484027cec503ea82b1e585fadbaf92c3330ca6868ebafac3beba"
+    },
+    {
+      "bytes": 453966,
+      "path": "labels/votes/dataset=de_berlin_roads/votes.csv",
+      "sha256": "7599ae0a17e14bba65e051d1280de510bbe7c85c5ff6cb6eb394e650c438b01e"
+    },
+    {
+      "bytes": 489921,
+      "path": "labels/votes/dataset=fi_helsinki_roads/consensus.csv",
+      "sha256": "e0719c39083fbebc5bf661ae8c74ea36273c4d7bc0759971507c51ca80b759bd"
+    },
+    {
+      "bytes": 2747341,
+      "path": "labels/votes/dataset=fi_helsinki_roads/votes.csv",
+      "sha256": "17e15d6c58bb5b89c48f608e0986397836bd8ec409dd114ddd849dc0cd7478ae"
+    },
+    {
+      "bytes": 20617,
+      "path": "labels/votes/dataset=fr_france_winter_hiking_traces/consensus.csv",
+      "sha256": "144cf3ad94aed4f7daef49f24722ba7f17446dfac6d75d2ea6f8aa81713be749"
+    },
+    {
+      "bytes": 150734,
+      "path": "labels/votes/dataset=fr_france_winter_hiking_traces/votes.csv",
+      "sha256": "20b3c6c14aa47375eb7a35467bcfd2b4e1131c71b3db8339bfde6cd0f478c445"
+    },
+    {
+      "bytes": 26530,
+      "path": "labels/votes/dataset=gb_london_roads/consensus.csv",
+      "sha256": "64a519be4b4f4d6f1df9837b473455c5e02b2be51c3847ffdd74dc14046f44a7"
+    },
+    {
+      "bytes": 223943,
+      "path": "labels/votes/dataset=gb_london_roads/votes.csv",
+      "sha256": "f109d9e2df8dbc52d99aabdfa7f7bb8477365d912cbe3b1c1c60b755e3d13a24"
+    },
+    {
+      "bytes": 40355,
+      "path": "labels/votes/dataset=hk_hongkong_roads/consensus.csv",
+      "sha256": "0b0b68cf975d4efa8b25eb9e8783dc2e6e3aaa52740de46ab8050d00e3dedb96"
+    },
+    {
+      "bytes": 473894,
+      "path": "labels/votes/dataset=hk_hongkong_roads/votes.csv",
+      "sha256": "9a243a7cfd6bbe3d2f3b16069881fe1bdb6a6688757a693895c305c668140b49"
+    },
+    {
+      "bytes": 21318,
+      "path": "labels/votes/dataset=in_mumbai_streets/consensus.csv",
+      "sha256": "cee2307db605f593aa5b80117a26eb0b933655e63dfa1919c736329a17476aa0"
+    },
+    {
+      "bytes": 181348,
+      "path": "labels/votes/dataset=in_mumbai_streets/votes.csv",
+      "sha256": "f5cae9bebb4d451bab408aeb7e46ff022fa96c2a9a88797fae9df9d6ca0f4d39"
+    },
+    {
+      "bytes": 38709,
+      "path": "labels/votes/dataset=ke_nairobi_roads/consensus.csv",
+      "sha256": "866530e676cdb0c6ca387ef420fad5c4d7ceed474b5adb7496869575b91957b1"
+    },
+    {
+      "bytes": 191233,
+      "path": "labels/votes/dataset=ke_nairobi_roads/votes.csv",
+      "sha256": "9d98429ea51f6713db4c054f7850a11ffd3cc34a518a1ff4134608f82479e372"
+    },
+    {
+      "bytes": 24499,
+      "path": "labels/votes/dataset=nl_amsterdam_roads/consensus.csv",
+      "sha256": "36bcebdee1832df4b103f9472061ca632de733aa778342b66de238cdf9dee5d5"
+    },
+    {
+      "bytes": 262865,
+      "path": "labels/votes/dataset=nl_amsterdam_roads/votes.csv",
+      "sha256": "4a39e04461b7b42833d9290857b6c0d30c5a1bee00966146777e6998f26607de"
+    },
+    {
+      "bytes": 33474,
+      "path": "labels/votes/dataset=sg_singapore_footpaths/consensus.csv",
+      "sha256": "3c7d79827520ab749966daab05ee5191a9e17ae4ba7554372f24e514b6184c4a"
+    },
+    {
+      "bytes": 177690,
+      "path": "labels/votes/dataset=sg_singapore_footpaths/votes.csv",
+      "sha256": "4c29051faab774419cce502156b458f45a7b598e2847724bde0ab61b2920a0bc"
+    },
+    {
+      "bytes": 27709,
+      "path": "labels/votes/dataset=sg_singapore_roads/consensus.csv",
+      "sha256": "c80f4c8584e606aeaca1331465485de19200777d71c08d7c7ea179303f44f764"
+    },
+    {
+      "bytes": 181129,
+      "path": "labels/votes/dataset=sg_singapore_roads/votes.csv",
+      "sha256": "dd947e57dc5aff95c7b5bc00bfc847d473a1204674914425ede7c154168a450c"
+    },
+    {
+      "bytes": 32794,
+      "path": "labels/votes/dataset=tn_tunis_ml_roads/consensus.csv",
+      "sha256": "20e684fde3694532cc41bc6781c7dcb0bb68731079774dc31d1cf330af1e284a"
+    },
+    {
+      "bytes": 212779,
+      "path": "labels/votes/dataset=tn_tunis_ml_roads/votes.csv",
+      "sha256": "af66f81d03c3a314f1afd977dbddf481e77ea7a4b903b48f57697cd96cbf9d6b"
+    },
+    {
+      "bytes": 29859,
+      "path": "labels/votes/dataset=us_austin_sidewalks/consensus.csv",
+      "sha256": "8f580747515bea56861216a5db0fa0be96d9dd68253dde50e9615bad08a371d5"
+    },
+    {
+      "bytes": 170902,
+      "path": "labels/votes/dataset=us_austin_sidewalks/votes.csv",
+      "sha256": "85fbe18583a754fa072c35be1ea5ded4027c09a9e9b867c8bd1053fdffe2e13f"
+    },
+    {
+      "bytes": 342067,
+      "path": "labels/votes/dataset=us_boston_streets/consensus.csv",
+      "sha256": "36ec64d9c733608c7e905b4ffd0ec44a90c4169ee10cb1cc0056cd255c2aa520"
+    },
+    {
+      "bytes": 731693,
+      "path": "labels/votes/dataset=us_boston_streets/votes.csv",
+      "sha256": "8933d55a3bf69ac01bddd17c6964749cb4daa4dc70907c6daec899bbb8547717"
+    },
+    {
+      "bytes": 27012,
+      "path": "labels/votes/dataset=us_fort_collins_sidewalks/consensus.csv",
+      "sha256": "0c6e77db833b91b65497b92df580383684fa4b1d9b0b407a830a11588a0160c9"
+    },
+    {
+      "bytes": 158578,
+      "path": "labels/votes/dataset=us_fort_collins_sidewalks/votes.csv",
+      "sha256": "31736eff1d0981f27a6d8b971c6116b36744eae71b1b2edcd479f21e0f6fc20f"
+    },
+    {
+      "bytes": 15925,
+      "path": "labels/votes/dataset=us_fort_collins_streets/consensus.csv",
+      "sha256": "6586344343b4881fa5d5b649af7ca424e88aa3c0f1855bc84c361e202b11647d"
+    },
+    {
+      "bytes": 134864,
+      "path": "labels/votes/dataset=us_fort_collins_streets/votes.csv",
+      "sha256": "3e82d4de52dc37118287f3df1e9bccbe88a88a1af5295b2beb351d1792a68fba"
+    },
+    {
+      "bytes": 14530,
+      "path": "labels/votes/dataset=us_frisco_trails/consensus.csv",
+      "sha256": "d4fad16590bb901d888c5698b247036cc4a8a1251185884df9011174dde79d2d"
+    },
+    {
+      "bytes": 120244,
+      "path": "labels/votes/dataset=us_frisco_trails/votes.csv",
+      "sha256": "814f979863772f2bf498bc523d6ee5edcb7e52bf66fcfe314044c861b1707f6b"
+    },
+    {
+      "bytes": 12916,
+      "path": "labels/votes/dataset=us_montana_missoula/consensus.csv",
+      "sha256": "961984dad0cee3331cc969c2929b09d5007c75e08d57487dfd653adfaab07ade"
+    },
+    {
+      "bytes": 118171,
+      "path": "labels/votes/dataset=us_montana_missoula/votes.csv",
+      "sha256": "9a26a2a00867a3819c87a149516edfc8ea570c84a1bf2709b6811db88ef416ce"
+    },
+    {
+      "bytes": 37535,
+      "path": "labels/votes/dataset=us_philadelphia_sidewalks/consensus.csv",
+      "sha256": "eb5870c9cb9899fecfafbbb14105fc41fd6b3a0fb48f4b7a2e7628919bee239c"
+    },
+    {
+      "bytes": 293478,
+      "path": "labels/votes/dataset=us_philadelphia_sidewalks/votes.csv",
+      "sha256": "abab077b7c744b1a46a1ded5240c008b4fdebd5f93af8f1c257cd7e7ccb5aeec"
+    },
+    {
+      "bytes": 17173,
+      "path": "labels/votes/dataset=us_seattle_sidewalks/consensus.csv",
+      "sha256": "41a9eb81d0a9157ff5a21d5027b5395afb5cf59b6247b3a0dcc61c613415f7ed"
+    },
+    {
+      "bytes": 125946,
+      "path": "labels/votes/dataset=us_seattle_sidewalks/votes.csv",
+      "sha256": "85e10530309ba07e9b892da768023584d3cf2782a7103384b8d4969a5d79ccca"
+    },
+    {
+      "bytes": 13674,
+      "path": "labels/votes/dataset=us_usfs_flathead/consensus.csv",
+      "sha256": "292b03433112a955fe5c64a9cebf0053d4df0d59927d1b62f086c19c0112e201"
+    },
+    {
+      "bytes": 115137,
+      "path": "labels/votes/dataset=us_usfs_flathead/votes.csv",
+      "sha256": "a2f96818dee1098652f5247a0eb5c08b58317fd518051550d1d7367a99295786"
+    }
+  ],
+  "stitching": {
+    "datasets": 25,
+    "human_exact_deanchored_rows": 11,
+    "human_exact_rows": 38,
+    "labelers": {
+      "brad": 119,
+      "panel_unanimous_decomposed_v7": 1,
+      "panel_unanimous_none_v3": 3,
+      "panel_unanimous_v1": 102,
+      "panel_unanimous_v3": 41,
+      "panel_unanimous_v5": 8,
+      "panel_unanimous_v7": 143
+    },
+    "latest_human_label": "2026-07-18T02:46:25.080647+00:00",
+    "latest_label": "2026-07-18T22:02:47.399389+00:00",
+    "rows": 417,
+    "rows_with_edge_dispositions": 0,
+    "semantics": {
+      "pair": 336,
+      "set": 81
+    }
+  },
+  "stored_sidecar_replay": {
+    "us_boston_streets": {
+      "build_stats": {
+        "candidate_groups": 111,
+        "candidate_parquet_enriched": 583,
+        "candidate_parquet_missing_keys": 0,
+        "candidate_parquet_rows": 9799,
+        "candidate_parquet_unexpected_columns": [],
+        "candidate_seen": 706,
+        "conflicting_keys": 26,
+        "deduplicated_rows": 2,
+        "duplicate_keys": 61,
+        "duplicate_rows": 61,
+        "empty_legacy_skipped": 0,
+        "empty_rows": 0,
+        "empty_unrecovered": 0,
+        "human_selected_outside_candidate_graph": 12,
+        "human_selected_outside_candidate_graph_clean": 0,
+        "human_selected_outside_candidate_graph_split": 12,
+        "legacy_groups": 0,
+        "legacy_known_omission_occurrences": 12,
+        "legacy_known_omission_occurrences_clean": 0,
+        "legacy_known_omission_occurrences_split": 12,
+        "legacy_known_omission_unique_raw_keys": 11,
+        "legacy_known_omission_unique_raw_keys_clean": 0,
+        "legacy_known_omission_unique_raw_keys_split": 11,
+        "legacy_known_omission_unique_retained_keys": 10,
+        "legacy_known_omission_unique_retained_keys_clean": 0,
+        "legacy_known_omission_unique_retained_keys_split": 10,
+        "negatives": 143,
+        "new_negatives": 0,
+        "positives": 440,
+        "quarantined_groups": 3,
+        "quarantined_rows": 118,
+        "raw_rows": 703,
+        "rows": 583,
+        "rule5_filtered": 3,
+        "selected_elsewhere_excluded": 0
+      },
+      "slices": {
+        "all": {
+          "edges": 583,
+          "f1": 0.8971553610503282,
+          "fn": 30,
+          "fp": 64,
+          "group_exact": 0.6730769230769231,
+          "groups": 104,
+          "tp": 410
+        },
+        "human": {
+          "edges": 186,
+          "f1": 0.8932038834951457,
+          "fn": 13,
+          "fp": 20,
+          "group_exact": 0.7083333333333334,
+          "groups": 24,
+          "tp": 138
+        },
+        "panel": {
+          "edges": 397,
+          "f1": 0.8991735537190083,
+          "fn": 17,
+          "fp": 44,
+          "group_exact": 0.6625,
+          "groups": 80,
+          "tp": 272
+        }
+      }
+    },
+    "us_seattle_sidewalks": {
+      "build_stats": {
+        "candidate_groups": 26,
+        "candidate_parquet_enriched": 103,
+        "candidate_parquet_missing_keys": 0,
+        "candidate_parquet_rows": 33582,
+        "candidate_parquet_unexpected_columns": [],
+        "candidate_seen": 103,
+        "conflicting_keys": 0,
+        "deduplicated_rows": 0,
+        "duplicate_keys": 0,
+        "duplicate_rows": 0,
+        "empty_legacy_skipped": 0,
+        "empty_rows": 0,
+        "empty_unrecovered": 0,
+        "human_selected_outside_candidate_graph": 5,
+        "human_selected_outside_candidate_graph_clean": 2,
+        "human_selected_outside_candidate_graph_split": 3,
+        "legacy_groups": 0,
+        "legacy_known_omission_occurrences": 5,
+        "legacy_known_omission_occurrences_clean": 2,
+        "legacy_known_omission_occurrences_split": 3,
+        "legacy_known_omission_unique_raw_keys": 5,
+        "legacy_known_omission_unique_raw_keys_clean": 2,
+        "legacy_known_omission_unique_raw_keys_split": 3,
+        "legacy_known_omission_unique_retained_keys": 5,
+        "legacy_known_omission_unique_retained_keys_clean": 2,
+        "legacy_known_omission_unique_retained_keys_split": 3,
+        "negatives": 42,
+        "new_negatives": 0,
+        "positives": 61,
+        "quarantined_groups": 0,
+        "quarantined_rows": 0,
+        "raw_rows": 103,
+        "rows": 103,
+        "rule5_filtered": 0,
+        "selected_elsewhere_excluded": 0
+      },
+      "slices": {
+        "all": {
+          "edges": 103,
+          "f1": 0.8444444444444444,
+          "fn": 4,
+          "fp": 17,
+          "group_exact": 0.7307692307692307,
+          "groups": 26,
+          "tp": 57
+        },
+        "human": {
+          "edges": 0,
+          "groups": 0
+        },
+        "panel": {
+          "edges": 103,
+          "f1": 0.8444444444444444,
+          "fn": 4,
+          "fp": 17,
+          "group_exact": 0.7307692307692307,
+          "groups": 26,
+          "tp": 57
+        }
+      }
+    }
+  },
+  "toy_independent_binary_panel": [
+    {
+      "individual_error": 0.05,
+      "majority_error": 0.007250000000000001,
+      "split_conditional_error": 0.05,
+      "unanimous_conditional_error": 0.00014577259475218664
+    },
+    {
+      "individual_error": 0.1,
+      "majority_error": 0.028000000000000004,
+      "split_conditional_error": 0.1,
+      "unanimous_conditional_error": 0.0013698630136986304
+    }
+  ],
+  "vote_loader_replay": {
+    "groups": 796,
+    "mixed_evidence_groups": [
+      {
+        "dataset": "au_sydney_roads",
+        "group_id": "fb8f359f",
+        "voters": [
+          {
+            "evidence_id": "25b4af2d7cc20911d281e0e158e465325c58b8dddd0ca7f49512a73e61f2203a",
+            "model": "meta/muse-spark-1.1",
+            "provider": "muse",
+            "source_batch": "au_sydney_roads_physical_context_v8_20260717_minimal"
+          },
+          {
+            "evidence_id": "25b4af2d7cc20911d281e0e158e465325c58b8dddd0ca7f49512a73e61f2203a",
+            "model": "gpt-5.6-sol",
+            "provider": "codex",
+            "source_batch": "au_sydney_roads_physical_context_v8_20260717_minimal"
+          },
+          {
+            "evidence_id": "2eb6b91b1e9562474456f337c499e2eb4440e2b88373d9034d8557bbdf9ab74e",
+            "model": "claude-opus-4-8",
+            "provider": "claude",
+            "source_batch": "au_sydney_roads_physical_context_v8_20260717_no_coincidence"
+          }
+        ]
+      }
+    ]
+  },
+  "zero_error_one_sided_95pct_upper_bound": {
+    "100": 0.029513049607039932,
+    "299": 0.009969146792899286,
+    "50": 0.058155079116972264
+  }
+}

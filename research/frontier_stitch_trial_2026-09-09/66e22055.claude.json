@@ -1,0 +1,41 @@
+{
+  "ballot": {
+    "abstain_reason": "",
+    "attempt": 1,
+    "choice": "B",
+    "chosen_option_id": "",
+    "confidence": 0.6,
+    "desired_edges": "",
+    "displayed_candidate_universe_sha256": "",
+    "edge_set": [
+      [
+        "d910f21d-02b5-417c-85ae-e0b3c419f8cb",
+        "au_sydney_831180_88be0e3435"
+      ]
+    ],
+    "error": "",
+    "evidence_delivery": "{\"asset_count\":4,\"asset_set_sha256\":\"d28332b1307013a9eff261b1252667b476f5700dc17d97bb05b8431bb9be3491\",\"assets\":[{\"bytes\":45339,\"path\":\"option_A.png\",\"sha256\":\"f9854141f3c53db3d465d1e889bd5f4def6f42ed728947e95909e8b7224e00d2\"},{\"bytes\":45023,\"path\":\"option_B.png\",\"sha256\":\"33ee16e58e06711a050b796fde22d7d80dbf557f0db62772a73b0d28ae0429f7\"},{\"bytes\":45357,\"path\":\"option_C.png\",\"sha256\":\"3e3636ab943473ac124298ba860354b88f430930ef4ed5f5391051795286b4de\"},{\"bytes\":44426,\"path\":\"overview.png\",\"sha256\":\"62c933e3b6d8835cc1981a4a3880b663ff13645c41403e9469689bd8be4de312\"}],\"delivery_mode\":\"prompt_path_read\",\"preflight_status\":\"passed\",\"schema_version\":1,\"transport\":\"claude:Read\"}",
+    "evidence_id": "",
+    "evidence_pack_sha256": "",
+    "group_id": "66e22055",
+    "invocation_route": "",
+    "latency_s": 23.89,
+    "model": "claude-fable-5-1",
+    "none_reason": "",
+    "option_menu_sha256": "",
+    "pack_feedback": "",
+    "panel_invocation_sha256": "",
+    "provider": "claude",
+    "raw": "{\"choice\":\"B\",\"confidence\":0.6,\"reasoning\":\"R1 is a short (~15m) cycleway segment lying directly on the William Street centerline at layer 0. e1 (R1->T2) pairs it with the Cross City Tunnel motorway, which is a tunnel (physical stack conflict), bike:no, and a different facility/role than a surface cycleway; under MI-1/MI-4 it is a no-match regardless of geometric coincidence. e2 (R1->T1) pairs the cycleway with the surface secondary road William Street: it is fully aligned (ref_aln 0.96), coincident with the road centerline, deg 2 continuation, and there is no affirmative sign of lateral separation, so per MI-4 the same-pavement reading stands and the edge is accepted. Option B contains exactly e2.\",\"none_reason\":null,\"desired_edges\":[]}\n",
+    "reasoning": "R1 is a short (~15m) cycleway segment lying directly on the William Street centerline at layer 0. e1 (R1->T2) pairs it with the Cross City Tunnel motorway, which is a tunnel (physical stack conflict), bike:no, and a different facility/role than a surface cycleway; under MI-1/MI-4 it is a no-match regardless of geometric coincidence. e2 (R1->T1) pairs the cycleway with the surface secondary road William Street: it is fully aligned (ref_aln 0.96), coincident with the road centerline, deg 2 continuation, and there is no affirmative sign of lateral separation, so per MI-4 the same-pavement reading stands and the edge is accepted. Option B contains exactly e2.",
+    "timestamp": "2026-09-09T14:24:33.085270+00:00"
+  },
+  "dataset": "au_sydney_roads",
+  "evidence_id": "4e032cb6868f1f13a24c86558f5a405dc6133eed2fae789f3305ff2495481ab7",
+  "evidence_pack_sha256": "81e8d52338951ed564b2738ff59ec8421d2a5b2f4ecfe74d550c870b789774d2",
+  "group_id": "66e22055",
+  "model": "claude-fable-5-1",
+  "provider": "claude",
+  "status": "completed",
+  "wall_seconds": 24.01
+}
