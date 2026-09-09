@@ -560,10 +560,10 @@ def _resolve_duplicate_label_collisions(
     before_dedupe = len(df)
     df = df.drop_duplicates(subset=key_columns, keep="first").copy()
     stats["deduplicated_rows"] = before_dedupe - len(df)
-    df["historical_human_group_ids"] = df.apply(
-        lambda row: json.dumps(lineage_by_key[tuple(row[column] for column in key_columns)]),
-        axis=1,
-    )
+    df["historical_human_group_ids"] = [
+        json.dumps(lineage_by_key[key])
+        for key in df[key_columns].itertuples(index=False, name=None)
+    ]
     return df, quarantined_group_keys, collision_audit
 
 

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "exclusions": [
+    {
+      "dataset_id": "au_sydney_roads",
+      "group_id": "66e22055",
+      "reason": "Existing human NONE conflicts with later physical-identity adjudication; quarantine, do not replace truth with panel opinion.",
+      "source": "research/v9_rerun_adjudication.md"
+    }
+  ]
+}
