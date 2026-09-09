@@ -5,10 +5,10 @@ each provider's chosen edge set. These cover more groups than the curated
 ``labels/stitching`` exports, so they are a candidate way to expand training
 coverage with *soft* per-edge keep probabilities.
 
-Reliability weighting: ``codex`` is a systematic conservative dissenter (drops
-center-junction edges the others keep), so it is down-weighted rather than
-dropped. The per-edge soft keep-probability is the weighted fraction of
-providers whose chosen edge set includes the edge.
+The legacy path retains its historical provider weights for reproducibility.
+The scoped path uses equal seats by default and records a vote fraction, not a
+calibrated correctness probability. It keeps evidence versions, unknowns, and
+parent lineage instead of treating an accepted child as a complete parent label.
 
 Vote group_ids are batch-vintage hashes, so they are mapped to current sidecar
 groups by edge overlap (same churn-robust principle as
@@ -27,6 +27,7 @@ from crosswalk.agent_labeling.consensus_desired import (
     map_desired_to_ids,
     parse_desired_edges,
 )
+from crosswalk.agent_labeling.stitch_provenance import load_evidence_manifest
 
 # Default provider reliability weights (see module docstring).
 DEFAULT_PROVIDER_WEIGHTS: dict[str, float] = {
@@ -47,10 +48,10 @@ def _parse_edge_set(raw) -> frozenset[tuple[str, str]]:
 
 
 def load_votes(paths: list[str | Path]) -> pd.DataFrame:
-    """Load and concatenate votes CSVs, keeping the latest vote per (group, provider).
+    """Keep the latest ballot per seat within the same evidence/invocation.
 
-    A group_id can recur across batch phases (re-votes); the most recent
-    timestamp wins.
+    A re-vote on changed evidence is a different observation, not a replacement
+    seat that can be combined with the other providers' older answers.
     """
     frames = []
     for p in paths:
@@ -68,6 +69,8 @@ def load_votes(paths: list[str | Path]) -> pd.DataFrame:
         elif p.parent.name.startswith("dataset="):
             dataset_id = p.parent.name.removeprefix("dataset=")
         frame["dataset_id"] = dataset_id
+        if "source_batch" not in frame:
+            frame["source_batch"] = p.parent.name
         frames.append(frame)
     if not frames:
         return pd.DataFrame(
@@ -83,8 +86,19 @@ def load_votes(paths: list[str | Path]) -> pd.DataFrame:
         )
     df = pd.concat(frames, ignore_index=True)
     df = df[df["error"].isna()] if "error" in df.columns else df
-    df = df.sort_values("timestamp")
-    df = df.drop_duplicates(subset=["dataset_id", "group_id", "provider"], keep="last")
+    scope = [
+        "source_batch",
+        "evidence_id",
+        "evidence_pack_sha256",
+        "panel_invocation_sha256",
+        "model",
+    ]
+    for column in scope:
+        if column not in df:
+            df[column] = ""
+        df[column] = df[column].fillna("")
+    df = df.sort_values("timestamp", kind="stable")
+    df = df.drop_duplicates(subset=["dataset_id", "group_id", "provider", *scope], keep="last")
     return df.reset_index(drop=True)
 
 
@@ -114,9 +128,9 @@ def load_evidence(paths: list[str | Path]) -> pd.DataFrame:
         frames.append(frame)
     if not frames:
         return pd.DataFrame(columns=["dataset_id", "group_id", "evidence_id", "evidence"])
-    return pd.concat(frames, ignore_index=True).drop_duplicates(
-        subset=["dataset_id", "group_id", "evidence_id"], keep="last"
-    )
+    # Preserve conflicting payloads so the observation builder can quarantine
+    # them. Different renderings can share semantic evidence but not pack hashes.
+    return pd.concat(frames, ignore_index=True).drop_duplicates()
 
 
 def load_archived_label_maps(
@@ -136,7 +150,10 @@ def load_archived_label_maps(
     required = {"source_batch", "group_id", "evidence_id"}
     if votes_df.empty or not required <= set(votes_df.columns):
         return out
-    for _, row in votes_df[list(required)].drop_duplicates().iterrows():
+    needed = votes_df
+    if "none_reason" in needed:
+        needed = needed[needed["none_reason"].fillna("") == "no_exact_option"]
+    for _, row in needed[sorted(required)].drop_duplicates().iterrows():
         evidence_id = str(row.get("evidence_id") or "")
         if not evidence_id:
             continue
@@ -148,6 +165,15 @@ def load_archived_label_maps(
             if not resolved.is_relative_to(root):
                 continue
             metadata = yaml.safe_load(resolved.read_text()) or {}
+            # The R#/T# map must belong to this ballot's snapshot. A regenerated
+            # directory with the same group ID is not a valid historical map.
+            if metadata.get("evidence", {}).get("evidence_id") != evidence_id:
+                continue
+            if (
+                load_evidence_manifest(resolved.parent, allow_legacy=False)["evidence_id"]
+                != evidence_id
+            ):
+                continue
         except (OSError, ValueError, TypeError):
             continue
         segments = metadata.get("segments", {}) or {}
@@ -243,6 +269,8 @@ def edge_soft_labels(
     dataset_id: str | None = None,
     evidence_df: pd.DataFrame | None = None,
     label_maps: dict[str, dict[str, dict[str, str]]] | None = None,
+    *,
+    scoped: bool = False,
 ) -> pd.DataFrame:
     """Per-edge weighted panel keep-probability, mapped to sidecar groups.
 
@@ -260,6 +288,25 @@ def edge_soft_labels(
         evidence_df = evidence_df[evidence_df["dataset_id"] == dataset_id]
     if votes_df.empty:
         return pd.DataFrame()
+
+    if scoped:
+        from crosswalk.resolver.observations import build_vote_observations, reconcile_observations
+
+        observations = build_vote_observations(
+            votes_df,
+            evidence_df if evidence_df is not None else pd.DataFrame(),
+            label_maps=label_maps,
+            provider_weights=provider_weights,
+        )
+        observations = reconcile_observations(observations)
+        if observations.empty:
+            return observations
+        # Carry the source group and parent even when an observation maps to a
+        # current group. Scope remains the shown edges, never its complement.
+        mapping = _map_vote_groups_to_sidecar(groups, votes_df, evidence_df)
+        observations["source_group_id"] = observations["group_id"]
+        observations["group_id"] = observations["source_group_id"].map(mapping)
+        return observations[observations["group_id"].notna()].reset_index(drop=True)
 
     weights = provider_weights or DEFAULT_PROVIDER_WEIGHTS
     vgid_to_sgid = _map_vote_groups_to_sidecar(groups, votes_df, evidence_df)

@@ -25,6 +25,7 @@ from loguru import logger
 
 from crosswalk.config import FEATURE_VERSION
 from crosswalk.resolver.extract import (
+    build_candidate_context,
     build_edge_table,
     concat_edge_tables,
     discover_candidates_parquet,
@@ -211,44 +212,15 @@ def _build_soft_extra(
             dataset_id=dataset_id,
             evidence_df=evidence_df,
             label_maps=label_maps,
+            scoped=True,
         )
         if not soft.empty:
             frames.append(soft)
     if not frames:
         return None
-    soft = pd.concat(frames, ignore_index=True)
-    if "group_id" in soft.columns and "ref_id" in soft.columns:
-        aggregations = {
-            "soft_keep": "mean",
-            "n_providers": "max",
-            "unanimous": "min",
-        }
-        if "evidence_complete" in soft.columns:
-            aggregations["evidence_complete"] = "max"
-        soft = (
-            soft.groupby(["dataset_id", "group_id", "ref_id", "target_id"], as_index=False).agg(
-                aggregations
-            )
-            if "n_providers" in soft.columns
-            else soft.drop_duplicates(subset=["group_id", "ref_id", "target_id"])
-        )
-    return soft
-
-
-def _build_edge_lookup_for_group(group: dict) -> dict[tuple[str, str], dict]:
-    lookup: dict[tuple[str, str], dict] = {}
-    for e in group.get("edges", []):
-        lookup[(str(e["ref_id"]), str(e["target_id"]))] = e
-    for e in group.get("rejected_edges", []):
-        lookup.setdefault((str(e["ref_id"]), str(e["target_id"])), e)
-    for e in group.get("candidate_edges", []):
-        key = (str(e["ref_id"]), str(e["target_id"]))
-        if key in lookup:
-            merged = {**lookup[key], **e}
-            lookup[key] = merged
-        else:
-            lookup[key] = e
-    return lookup
+    # The scoped builder already reconciles overlaps within each snapshot.
+    # Keep its provenance and separate versions; a mean here would erase both.
+    return pd.concat(frames, ignore_index=True)
 
 
 def _prepare_soft_for_train(
@@ -262,84 +234,43 @@ def _prepare_soft_for_train(
 ) -> pd.DataFrame | None:
     if soft_df.empty:
         return None
-
-    gmap: dict[tuple[str, str], dict] = {}
-    for dataset_id, gs in groups_by_dataset.items():
-        for g in gs:
-            gmap[(dataset_id, str(g["group_id"]))] = g
-
-    edge_lookup_cache: dict[tuple[str, str], dict[tuple[str, str], dict]] = {}
-
-    rows: list[dict] = []
-    for _, r in soft_df.iterrows():
-        dataset_id = str(r.get("dataset_id", ""))
-        gid = str(r["group_id"])
-        group_key = (dataset_id, gid)
-        if group_key in existing_group_ids:
-            continue
-        g = gmap.get(group_key)
-        if g is None:
-            continue
-        key = (str(r["ref_id"]), str(r["target_id"]))
-        if group_key not in edge_lookup_cache:
-            edge_lookup_cache[group_key] = _build_edge_lookup_for_group(g)
-        edge = edge_lookup_cache[group_key].get(key)
-        if edge is None:
-            continue
-
-        sk = float(r["soft_keep"])
-        keep_v = sk if use_float_label else float(sk >= 0.5)
-
-        rows.append(
-            {
-                "dataset_id": dataset_id,
-                "group_id": gid,
-                "human_group_id": gid,
-                "labeler": "panel",
-                "provenance": "soft_vote",
-                "match_type": g.get("match_type", ""),
-                "ref_id": key[0],
-                "target_id": key[1],
-                "keep": keep_v,
-                "soft_keep": sk,
-                "selected": bool(edge.get("selected", True)),
-                "pruned": bool(edge.get("pruned", False)),
-                "confidence": float(edge.get("confidence", float("nan"))),
-                "degree_ref": int(edge.get("degree_ref", 0)),
-                "degree_tgt": int(edge.get("degree_tgt", 0)),
-                "is_bridge": bool(edge.get("candidate_graph_bridge", edge.get("is_bridge", False))),
-                "is_sliver": bool(edge.get("is_sliver", False)),
-                "biconnected_block": int(edge.get("biconnected_block", -1)),
-                "corridor_ref": int(edge.get("corridor_ref", -1)),
-                "corridor_tgt": int(edge.get("corridor_tgt", -1)),
-                "gers_start_frac": float(edge.get("gers_start_frac", float("nan"))),
-                "gers_end_frac": float(edge.get("gers_end_frac", float("nan"))),
-                "local_start_frac": float(edge.get("local_start_frac", float("nan"))),
-                "local_end_frac": float(edge.get("local_end_frac", float("nan"))),
-                "n_edges": int(g.get("n_edges", 1)),
-                "n_corridors": int(g.get("n_corridors", 1)),
-                "n_assignment_components": int(g.get("n_assignment_components", 1)),
-                "largest_biconnected_block": int(g.get("largest_biconnected_block", 1)),
-                "oversized_group": bool(g.get("oversized_group", False)),
-                "num_refs": len(g.get("ref_ids", [])),
-                "num_targets": len(g.get("target_ids", [])),
-            }
-        )
-
-    if not rows:
+    soft = soft_df.copy()
+    if "known" in soft:
+        soft = soft[soft["known"].fillna(False)]
+    soft = soft[np.isfinite(soft["soft_keep"]) & soft["soft_keep"].between(0, 1)]
+    soft = soft.loc[
+        [
+            (str(ds), str(gid)) not in existing_group_ids
+            for ds, gid in zip(soft["dataset_id"], soft["group_id"])
+        ]
+    ]
+    if soft.empty:
         return None
 
-    df = pd.DataFrame(rows)
-    if extended:
-        df = featurize_extended(df)
-    else:
-        df = featurize(df)
-
-    missing = [c for c in feature_cols if c not in df.columns]
-    if missing:
+    contexts = []
+    for dataset_id, sub in soft.groupby("dataset_id"):
+        required = set(sub["group_id"].astype(str))
+        groups = [
+            g for g in groups_by_dataset.get(str(dataset_id), []) if str(g["group_id"]) in required
+        ]
+        context = build_candidate_context(groups, str(dataset_id))
+        if not context.empty:
+            contexts.append(featurize_extended(context) if extended else featurize(context))
+    if not contexts:
+        return None
+    context = pd.concat(contexts, ignore_index=True)
+    keys = ["dataset_id", "group_id", "ref_id", "target_id"]
+    df = soft.merge(
+        context, on=keys, how="inner", validate="many_to_one", suffixes=("_observation", "")
+    )
+    if df.empty or any(c not in df for c in feature_cols):
         return None
     if df[feature_cols].isna().all().all():
         return None
+    df["human_group_id"] = df.get("source_group_id", df["group_id"])
+    df["labeler"] = "panel"
+    df["provenance"] = "soft_vote"
+    df["keep"] = df["soft_keep"] if use_float_label else (df["soft_keep"] >= 0.5).astype(float)
     return df
 
 
