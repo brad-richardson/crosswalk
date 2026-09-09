@@ -181,7 +181,8 @@ def parse_edge_ballot(raw: str, evidence: dict) -> dict:
                     "target_id": maps["target"][item["target_id"]],
                 }
             )
-        except KeyError as exc:
+        except (KeyError, TypeError) as exc:
+            # TypeError: an unhashable label (e.g. a list) from a free-form seat.
             raise ValueError("Unknown R#/T# label") from exc
     displayed = {(e["ref_id"], e["target_id"]) for e in evidence["displayed_edges"]}
     validate_edge_decisions(canonical, displayed, ballot.get("none_reason"))
@@ -332,7 +333,7 @@ def invoke_direct_seat(provider: ProviderSpec, pack: Path, manifest: dict, confi
                 provider.model,
                 provider.timeout,
                 provider.effort,
-                agent="vote",
+                agent=provider.opencode_agent or "vote",
                 config_content=config,
                 cwd=scratch,
             )

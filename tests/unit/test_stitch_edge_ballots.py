@@ -99,6 +99,21 @@ def test_parser_binds_short_labels_to_exact_evidence():
         parse_edge_ballot(json.dumps(ballot), ev)
 
 
+def test_parser_rejects_unhashable_labels_as_invalid_ballot():
+    """A free-form seat can emit a list for ref_id; that is an invalid ballot,
+    not an uncaught TypeError that would abort the whole wave."""
+    ev = evidence()
+    ballot = {
+        "protocol_version": EDGE_BALLOT_VERSION,
+        "evidence_id": ev["evidence_id"],
+        "none_reason": "",
+        "reasoning": "x",
+        "edge_decisions": [{**decision(), "ref_id": ["R1"], "target_id": "T1"}],
+    }
+    with pytest.raises(ValueError, match="Unknown R#/T# label"):
+        parse_edge_ballot(json.dumps(ballot), ev)
+
+
 def test_partial_direct_ballots_aggregate_per_edge_without_abstention_votes():
     ev = evidence()
     base = {
