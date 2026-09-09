@@ -10,7 +10,7 @@ publication gates, and bundled models are outside these four batches.
 | 1 | Recover scoped observations from archived votes; preserve unknowns, evidence versions, overlap conflicts, and parent lineage | Complete |
 | 2 | Freeze and audit the usable existing human evaluation set; exclude related weak observations | Complete |
 | 3 | Support direct edge decisions and uncertainty; bind ballots to evidence and model configuration | Complete |
-| 4 | Run weighted human/unanimous/majority supervision comparisons against a fixed evaluation set and optimizer baseline | Pending batch 3 |
+| 4 | Run weighted human/unanimous/majority supervision comparisons against a fixed evaluation set and optimizer baseline | Complete |
 
 Each batch receives a separate commit and dependent branch. Validation combines
 focused semantic regression tests, real archived-data replay, and the repository's
@@ -95,3 +95,120 @@ then partially syncing locked core dependencies mixed AnyIO and typing-extension
 versions. A separate follow-up commit on batch 1 now installs locked extras and
 uses `uv run --no-sync` for subsequent commands. Both Spark architectures passed
 after the repair; the repair is carried forward through the chain.
+
+## Batch 4: weighted supervision experiment
+
+`scripts/run_stitch_supervision_experiment.py` verifies the frozen evaluation
+outputs and original weak-evidence source artifacts before training. It excludes
+270 rows whose source bytes changed. Features and leakage scope are computed
+over the complete eligible parent context, including unvoted edges, before any
+supervision mask. That extended scope excludes 2,493 of 7,322 verified rows.
+The final training pool contains **2,589 unanimous + 216 majority rows**, spanning
+306 connected components. No unknown or below-quorum target reaches the loss.
+
+The three learned policies share the frozen five folds, 33 features, three
+seeds, logistic loss, and existing expected-F1 selector. Unanimous observations
+receive weight 0.35; majority observations receive 0.15 and retain their 1/3 or
+2/3 target. Source versions and repeated observations share a physical pair's
+budget, and each connected parent component has a maximum total weight of four.
+Because the cap rescales a whole component, admitting majority rows also
+slightly rescales unanimous rows in capped components (unanimous mass 447.30
+under the unanimous policy versus 443.33 under the majority policy), so the
+majority-versus-unanimous delta is partly a reweighting of shared evidence.
+Post-run review also changed the shared pair budget from the weakest to the
+strongest tier weight so a lower-tier version can never lower a pair; no pair
+in this run had more than one surviving row, so the reported numbers are
+unaffected and the committed report's code hashes identify the code that ran.
+The trainer now accepts sample weights and fails visibly if fractional training
+cannot run; it never silently hardens a fractional target after a model error.
+
+| Policy | Edge F1 | Exact groups | Weak rows | Weak weight mass |
+|---|---:|---:|---:|---:|
+| Existing optimizer | 0.8508 | 7/14 | 0 | 0 |
+| Human only | 0.9436 | 9/14 | 0 | 0 |
+| Human + unanimous archive | 0.9215 | 7/14 | 2,589 | 447.30 |
+| Human + unanimous + majority archive | 0.9062 | 6/14 | 2,805 | 469.55 |
+
+Adding majority archive supervision reduced F1 by 0.0373 versus human-only
+(paired component bootstrap 95% interval **[-0.1042, -0.0040]**). Its incremental
+effect versus unanimous-only was -0.0152, with interval **[-0.0606, +0.0090]**.
+The unanimous-versus-human-only interval also crosses zero. These conditional,
+small-sample intervals do not establish population accuracy or explain whether
+the loss comes from label noise, source distribution, or the selected weights.
+
+The human-only result is not grounds for promotion either. There are only 14
+groups, most positive edges come from a few large groups, and all five surviving
+deanchored groups are reject-all cases. Human-only and unanimous training each
+reject one of those five groups correctly; majority rejects none. As a post-hoc
+sanity check, simply keeping all 106 candidates would already score F1 0.9293
+and 8/14 exact groups. The fixed benchmark exposes these limits instead of
+turning more model agreement into claimed ground truth.
+
+**Decision:** retain the recovered observations and direct-edge automation, but
+leave weak-supervision training opt-in and do not replace the production model.
+This experiment evaluates the **older archived panel**; the six new frontier
+draws validate the direct-edge protocol and are too few to validate its accuracy.
+Future model comparison can run on this same frozen set without waiting on new
+human labels. Source/rubric-specific calibration and constrained routing remain
+separate follow-up work.
+
+The committed `stitch_supervision_batch4_2026-09-09.json` records full metrics,
+paired intervals, slices, source checks, code/library versions, and output
+hashes. Predictions, verified weak training rows, and three isolated research
+models live under `data/experiments/stitch-supervision-20260909/batch4`.
+Focused weighted-training, context, and evaluation tests: **52 passed**.
+
+## Running the batches
+
+The four PRs are chained: [#483](https://github.com/brad-richardson/crosswalk/pull/483)
+→ [#484](https://github.com/brad-richardson/crosswalk/pull/484)
+→ [#485](https://github.com/brad-richardson/crosswalk/pull/485)
+→ [#486](https://github.com/brad-richardson/crosswalk/pull/486).
+
+For a fresh replay, choose new output directories:
+
+```bash
+uv run --no-sync python scripts/recover_stitch_observations.py \
+  --out data/experiments/stitch-supervision-replay/batch1
+uv run --no-sync python scripts/freeze_stitch_evaluation.py \
+  --observations data/experiments/stitch-supervision-replay/batch1/reconciled.parquet \
+  --out data/experiments/stitch-supervision-replay/batch2
+uv run --no-sync python scripts/run_stitch_edge_panel.py \
+  --packs research/stitch_supervision_example_packs.json \
+  --out data/experiments/stitch-supervision-replay/batch3
+uv run --no-sync python scripts/run_stitch_supervision_experiment.py \
+  --evaluation data/experiments/stitch-supervision-20260909/batch2 \
+  --out data/experiments/stitch-supervision-replay/batch4
+```
+
+Batch 3 prepares evidence without model calls; add `--run` to request the six
+new draws. Its live output stays separate from batch 4. Subsequent comparisons
+should reuse the original `20260909/batch2` frozen evaluation, as the fourth
+command does, instead of choosing a new benchmark after seeing results. Use
+these scripts for the audited, weighted experiment; they enforce the source,
+scope, and loss contracts together. No command writes human labels, publishes
+bridges, or installs a bundled model.
+
+## Final validation
+
+The complete implementation passed [CI on both x86 and ARM](https://github.com/brad-richardson/crosswalk/actions/runs/34375733893):
+**4,148 tests passed**, 44 skipped, one expected failure per architecture;
+**42 serial performance tests passed** per architecture; **256 mbench tests
+passed** (one skip); and **two Spark tests passed** per architecture. The actual
+training quality regression ran and passed in both main CI jobs.
+
+Local checks also passed the 42 serial performance tests, the actual training
+regression plus full export suite (111 tests), and the 42 panel-monitor tests.
+All 430 tracked/new Python files passed formatting and lint. The full local run
+needed execution outside the sandbox because its FastAPI TestClient stalled
+inside it; an isolated comparison confirmed the same test passed outside in
+0.77 seconds. One local parallel rerun completed 4,118 tests but lost a worker
+to a native pandas CSV-parser segmentation fault; the affected export suite
+subsequently passed serially. No application workaround was introduced for
+either environment issue. A separate console-width test fixture was made
+explicit so terminal overrides do not hide the voter names it asserts.
+
+Frozen evaluation hashes, experiment code/output hashes, and zero shared
+reference/target segments between admitted weak rows and human evaluation were
+verified. Production labels, inference defaults, publication gates, and bundled
+models are unchanged. No new human labeling or adjudication blocks these batches.
