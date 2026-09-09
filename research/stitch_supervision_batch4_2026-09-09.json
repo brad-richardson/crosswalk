@@ -1,0 +1,1922 @@
+{
+  "code": {
+    "/home/brad/dev/crosswalk/scripts/run_stitch_supervision_experiment.py": "b902f4677b8e276e06f7f21192553a761d715298b710cb86efabcc74062976bf",
+    "src/crosswalk/resolver/evaluate.py": "e7610dc53a12da49e96dd1449c7ed9c335a05aedcb14be2a429be7c751ce3c37",
+    "src/crosswalk/resolver/evaluation_set.py": "ea0fa00301eebe043b636094c39ac3d273a664df642997ba1e5c64b1cd28a2da",
+    "src/crosswalk/resolver/extract.py": "62d069f8b57f02bcd04e5924a08cf47e86284277ca0171f63f8466348a3a2e88",
+    "src/crosswalk/resolver/features.py": "eee1ff55e3170d0bd25db57fa38c11dcc8575d03e88cd938bd57eeeede88a5d9",
+    "src/crosswalk/resolver/round2.py": "0fb41eb5b8c7ed1cf5f7e0573e4ad3cbaa4d61c1fae385f18e2c7df15418838b",
+    "src/crosswalk/resolver/supervision_experiment.py": "1b58c495865ae4271a31d858c012ac5329d9c0850909fe8592991f4c35d9bd25",
+    "src/crosswalk/resolver/train.py": "13421745dd619e872e2f073070041c759fda1c23c2369b2a9cad6a3d109a9b1c"
+  },
+  "context_audit": {
+    "components": 306,
+    "counts": {
+      "eligible_training_rows": 2805,
+      "excluded_after_full_context": 2493,
+      "input_rows": 7592,
+      "missing_or_changed_source_artifact": 270,
+      "observations_outside_eligible_parent_context": 0,
+      "verified_context_rows": 7322
+    },
+    "snapshots": [
+      {
+        "dataset_id": "au_sydney_roads",
+        "joined_rows": 98,
+        "rows": 98,
+        "source_snapshot_id": "31368974e9480601625f04a8125c3b22d3e37b963c0b3c1f6463c17f8fb784a7",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "au_sydney_roads",
+        "joined_rows": 2,
+        "rows": 2,
+        "source_snapshot_id": "7b8a81f494e04354dd8ac3ada84c4a3fa3822b9ef17f033ee37e98927097b204",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "au_sydney_roads",
+        "joined_rows": 849,
+        "rows": 849,
+        "source_snapshot_id": "c318ec649794ab07584eae516eb6cc89d7987250cd02d9f5e044e699c462f5c1",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "br_sao_paulo_roads",
+        "joined_rows": 233,
+        "rows": 233,
+        "source_snapshot_id": "41efe055b249ec1c59511da77b02475a3e5dc12cc75d5464d9a4071f08da75de",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "ch_grand_geneva_cycle_schema",
+        "joined_rows": 21,
+        "rows": 21,
+        "source_snapshot_id": "1d44444a557c0930a57097f5b41ccb83cc2c5e92b119f39b361a27e9e3598923",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "ch_grand_geneva_cycle_schema",
+        "joined_rows": 36,
+        "rows": 36,
+        "source_snapshot_id": "3c51c66814387094d02b624cf2d3820c728e491a51d2e3233fcfd9fe9b132bcc",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "ch_grand_geneva_cycle_schema",
+        "joined_rows": 17,
+        "rows": 17,
+        "source_snapshot_id": "7dd4ed92414d9596c93debddbf2982563f1452d3df68cd516a136352ace5ae37",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "ch_grand_geneva_cycle_schema",
+        "joined_rows": 111,
+        "rows": 111,
+        "source_snapshot_id": "b3ef61f2f5e650d668e176676038d6d79f1158ebe5d0f8f92b8c7d3a15ab6386",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "co_bogota_bike_network",
+        "joined_rows": 161,
+        "rows": 161,
+        "source_snapshot_id": "c34ee246d810b1296936d13a858b7efabd5abd1e5b2aad65e13a7610ab6832c4",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "co_bogota_roads",
+        "joined_rows": 188,
+        "rows": 188,
+        "source_snapshot_id": "59e5e7f7c801891e048b7165a94e16baf0c5edd31df60c90d90968dd207ea5fe",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "de_berlin_roads",
+        "joined_rows": 100,
+        "rows": 100,
+        "source_snapshot_id": "7d921569f2ee4b2f48992ec9236a5da81d53faebf2c39d4be080e86684afa981",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "de_berlin_roads",
+        "joined_rows": 201,
+        "rows": 201,
+        "source_snapshot_id": "a4b0c95b4e78d6b61d828e324361d74233171e2ad0522896de195731e275c7db",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "fi_helsinki_roads",
+        "joined_rows": 31,
+        "rows": 31,
+        "source_snapshot_id": "77066b6499acbfd1d47580c15d8d085a8f68ecc7d3f22a9498e7abcabf0148fe",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "fi_helsinki_roads",
+        "joined_rows": 79,
+        "rows": 79,
+        "source_snapshot_id": "cdbc66570df57da8941efea3f0e473ad0668fb4482d54479241f1ece95f6b417",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "fi_helsinki_roads",
+        "joined_rows": 2306,
+        "rows": 2306,
+        "source_snapshot_id": "fd653851f7726ee488fa21e6e2c6fa931e375c03d0661b500981b39a5a4c8a09",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "fr_france_winter_hiking_traces",
+        "joined_rows": 111,
+        "rows": 111,
+        "source_snapshot_id": "0671a8ff2d6d967b48f0acdd28691f62d1da5fb1eb51289b40a5aa798d6270d9",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "gb_london_roads",
+        "joined_rows": 107,
+        "rows": 107,
+        "source_snapshot_id": "04fda51407a6da814e02c396a71a657cb00c0a40f9a1d300dd65217562dc5caf",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "hk_hongkong_roads",
+        "joined_rows": 243,
+        "rows": 243,
+        "source_snapshot_id": "63045ab9158f58279fd3373a5f13da554599b835e48e99cadca2153a419d47b3",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "hk_hongkong_roads",
+        "joined_rows": 125,
+        "rows": 125,
+        "source_snapshot_id": "eead7fa994e1c291c606cd2fab4786a1b5aea714c3a7618e2d062d72c7f5830e",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "in_mumbai_streets",
+        "joined_rows": 234,
+        "rows": 234,
+        "source_snapshot_id": "f8f2fec763742ccf8358b1da2a148c54ea4eff3b7bc226d31de4653d74b155e6",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "ke_nairobi_roads",
+        "joined_rows": 186,
+        "rows": 186,
+        "source_snapshot_id": "032e95b73ec7f06493c994528f9b8318b02e2cc7c696ee9d62aab50d2e174083",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "nl_amsterdam_roads",
+        "joined_rows": 181,
+        "rows": 181,
+        "source_snapshot_id": "4501dda71cf1146899dc8b76fe298c59543113ad72759baabd2946112c6f894a",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "nl_amsterdam_roads",
+        "joined_rows": 49,
+        "rows": 49,
+        "source_snapshot_id": "c54954735a1dd9c26b1831291c5ffff276637291f892a07f64e97bcd39ffcd9c",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "sg_singapore_footpaths",
+        "joined_rows": 182,
+        "rows": 182,
+        "source_snapshot_id": "65f88bb0aa44e1180ddf9b19d803fa86917f537086fe461edec7990b066c22b8",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "sg_singapore_roads",
+        "joined_rows": 180,
+        "rows": 180,
+        "source_snapshot_id": "33947911a89c48ce430457eee2203e2d91cf5f64efda35d478ff51604e880191",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "tn_tunis_ml_roads",
+        "joined_rows": 123,
+        "rows": 123,
+        "source_snapshot_id": "a1402b6cdf86e151100b160cb6f93cc1729022dc82a27420e8c5621233b5274b",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "tn_tunis_ml_roads",
+        "rows": 157,
+        "source_snapshot_id": "c38d4da44bb405a0ed58306b8b46a8590dfe1ab255ddfb318815964e92afb892",
+        "status": "missing_or_changed_source_artifact",
+        "verified": {
+          "bridge_parquet": false,
+          "candidates_parquet": false,
+          "groups_sidecar": false
+        }
+      },
+      {
+        "dataset_id": "us_austin_sidewalks",
+        "joined_rows": 252,
+        "rows": 252,
+        "source_snapshot_id": "5ce63c07564faca0bb7b23fc129feb8c5f049c00966b64423fb34aef8d93673b",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "us_boston_streets",
+        "rows": 113,
+        "source_snapshot_id": "45b809327e4909ddc0f7e1c6c4acf653aa5f5d29ad6e2e4537de2434d3625021",
+        "status": "missing_or_changed_source_artifact",
+        "verified": {
+          "bridge_parquet": false,
+          "candidates_parquet": false,
+          "groups_sidecar": false
+        }
+      },
+      {
+        "dataset_id": "us_fort_collins_sidewalks",
+        "joined_rows": 226,
+        "rows": 226,
+        "source_snapshot_id": "e9059acf47da8550b2bc5b12f2d683616ee3714c105aa738e6c07df553df394e",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "us_fort_collins_streets",
+        "joined_rows": 106,
+        "rows": 106,
+        "source_snapshot_id": "4d50fc4a1f5135a68de7db5eab05f65709cf1cf679ad2d9c5e3a668e6bc40f41",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "us_frisco_trails",
+        "joined_rows": 67,
+        "rows": 67,
+        "source_snapshot_id": "ce165d75c29abf5f185492d50541a5b5b839910a69a4dcb9fd18c8cb25c1821b",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "us_montana_missoula",
+        "joined_rows": 132,
+        "rows": 132,
+        "source_snapshot_id": "310ba526accd23013aefd9e3ed89158301d3c94f757921c2196f72a99f6ac95e",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "us_philadelphia_sidewalks",
+        "joined_rows": 196,
+        "rows": 196,
+        "source_snapshot_id": "0232968f6cf4d72cd610ab43050968dd8c44d7a0f8054d6c540f329a600df7cf",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "us_philadelphia_sidewalks",
+        "joined_rows": 42,
+        "rows": 42,
+        "source_snapshot_id": "2fa7ae5823ed56dc4905319e65631464dcb099922f18d408e35f27e50857e840",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "us_seattle_sidewalks",
+        "joined_rows": 81,
+        "rows": 81,
+        "source_snapshot_id": "afd6cfffd8c9f38bed3f57079a2ca3adf8245ffa82aafd540de55ccca9f12d8a",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      },
+      {
+        "dataset_id": "us_usfs_flathead",
+        "joined_rows": 66,
+        "rows": 66,
+        "source_snapshot_id": "a35e0acd811fd8299ee9411d510349773765f16e898a11e038f42a7b6a84088d",
+        "status": "verified",
+        "verified": {
+          "bridge_parquet": true,
+          "candidates_parquet": true,
+          "groups_sidecar": true
+        }
+      }
+    ],
+    "tiers": {
+      "majority": 216,
+      "unanimous": 2589
+    }
+  },
+  "environment": {
+    "numpy": "2.3.5",
+    "pandas": "2.3.3",
+    "python": "3.12.3",
+    "scikit-learn": "1.8.0",
+    "xgboost": "3.1.3"
+  },
+  "evaluation_manifest_sha256": "bbce3cd15ab85139ad002131bda4c1945ef853e5e990ec49e4449ec35ea9ec50",
+  "experiment": {
+    "features": [
+      "confidence",
+      "conf_rel_max",
+      "conf_rel_mean",
+      "conf_rank_frac",
+      "conf_is_group_min",
+      "gers_span",
+      "local_span",
+      "max_span",
+      "min_span",
+      "degree_ref",
+      "degree_tgt",
+      "is_bridge",
+      "is_sliver",
+      "n_share_ref",
+      "n_share_tgt",
+      "n_edges",
+      "n_corridors",
+      "n_assignment_components",
+      "largest_biconnected_block",
+      "oversized_group",
+      "num_refs",
+      "num_targets",
+      "match_type_1N",
+      "match_type_N1",
+      "match_type_MN",
+      "conf_margin_ref",
+      "conf_margin_tgt",
+      "is_best_for_ref",
+      "is_best_for_tgt",
+      "n_higher_share_ref",
+      "n_higher_share_tgt",
+      "ref_span_overlap_higher",
+      "tgt_span_overlap_higher"
+    ],
+    "hyperparameter_search": false,
+    "majority_weight": 0.15,
+    "objective": "reg:logistic",
+    "policies": [
+      "human_only",
+      "human_unanimous",
+      "human_majority"
+    ],
+    "promotion": false,
+    "seeds": [
+      17,
+      29,
+      43
+    ],
+    "selector": "ef1",
+    "unanimous_weight": 0.35,
+    "weak_component_weight_cap": 4.0
+  },
+  "limitations": [
+    "Existing exact labels remain mostly optimizer-anchored and geographically concentrated; this is an exploratory paired resolver comparison.",
+    "Pair scores are fixed inputs from the existing matcher, not an independently held-out end-to-end matcher evaluation.",
+    "Identity exclusions use recorded parent lineage and segment IDs. Unrecorded simultaneous rekeys of both endpoints cannot be reconstructed.",
+    "The historical human UI did not hash its candidate universe. Unchanged group identity or explicit membership coverage plus complete retained positives is the available scope check.",
+    "Three fixed model seeds share one frozen partition; seeds are not independent evaluation samples.",
+    "Full candidate context may conservatively exclude more weak observations than the initial displayed-edge audit."
+  ],
+  "outputs": {
+    "human_majority.joblib": "de568965b4efd7a42f8ec02b229a5b8f33628b7bc362eedfefb8dbc8382c1a48",
+    "human_only.joblib": "0211daee99049e6ab5ac11d9e3741785c8e30accd83c275c3b3f0c2fca867a3a",
+    "human_unanimous.joblib": "d08fc246d11bde425ea67a4c939196fcd993dda66f0e368f0024cdee8537d513",
+    "predictions.parquet": "ad5363b044876cab6985da61bd40ac31b646d8d43843b6628e0d79b3058a523d",
+    "weak_training.parquet": "fab337aa6e6c333fb040ac5698e5d0cb5676716466952049d7eebbddb1a0a7c1"
+  },
+  "promotion": false,
+  "results": {
+    "human_majority": {
+      "folds": [
+        {
+          "fold": 0,
+          "human_test_edges": 30,
+          "human_train_edges": 76,
+          "seed": 17,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 1,
+          "human_test_edges": 28,
+          "human_train_edges": 78,
+          "seed": 17,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 2,
+          "human_test_edges": 22,
+          "human_train_edges": 84,
+          "seed": 17,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 3,
+          "human_test_edges": 14,
+          "human_train_edges": 92,
+          "seed": 17,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 4,
+          "human_test_edges": 12,
+          "human_train_edges": 94,
+          "seed": 17,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 0,
+          "human_test_edges": 30,
+          "human_train_edges": 76,
+          "seed": 29,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 1,
+          "human_test_edges": 28,
+          "human_train_edges": 78,
+          "seed": 29,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 2,
+          "human_test_edges": 22,
+          "human_train_edges": 84,
+          "seed": 29,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 3,
+          "human_test_edges": 14,
+          "human_train_edges": 92,
+          "seed": 29,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 4,
+          "human_test_edges": 12,
+          "human_train_edges": 94,
+          "seed": 29,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 0,
+          "human_test_edges": 30,
+          "human_train_edges": 76,
+          "seed": 43,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 1,
+          "human_test_edges": 28,
+          "human_train_edges": 78,
+          "seed": 43,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 2,
+          "human_test_edges": 22,
+          "human_train_edges": 84,
+          "seed": 43,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 3,
+          "human_test_edges": 14,
+          "human_train_edges": 92,
+          "seed": 43,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        },
+        {
+          "fold": 4,
+          "human_test_edges": 12,
+          "human_train_edges": 94,
+          "seed": 43,
+          "weak_edges": 2805,
+          "weak_weight_mass": 469.54999999999995
+        }
+      ],
+      "fractional_targets": 216,
+      "max_component_weight": 4.000000000000001,
+      "metrics": {
+        "extra": {},
+        "f1": 0.90625,
+        "f1_filtered": 0.90625,
+        "group_exact_rate": 0.42857142857142855,
+        "label": "human_majority",
+        "n_edges": 106,
+        "n_groups": 14,
+        "precision": 0.87,
+        "precision_filtered": 0.87,
+        "recall": 0.9456521739130435,
+        "recall_filtered": 0.9456521739130435
+      },
+      "paired_vs_human_only": {
+        "confidence": 0.95,
+        "f1": {
+          "bootstrap_support_candidate_better": 0.014249999999999999,
+          "ci_high": -0.003977109297256025,
+          "ci_low": -0.1042343057925244,
+          "delta": -0.03733974358974357
+        },
+        "group_exact": {
+          "bootstrap_support_candidate_better": 0.01475,
+          "ci_high": 0.0,
+          "ci_low": -0.42857142857142855,
+          "delta": -0.21428571428571436
+        },
+        "n_groups": 14,
+        "n_resample_units": 14,
+        "n_resamples": 2000,
+        "resample_columns": [
+          "component_id"
+        ],
+        "seed": 1729
+      },
+      "paired_vs_human_unanimous": {
+        "confidence": 0.95,
+        "f1": {
+          "bootstrap_support_candidate_better": 0.097,
+          "ci_high": 0.008962450366086061,
+          "ci_low": -0.06056225461734113,
+          "delta": -0.015215968586387407
+        },
+        "group_exact": {
+          "bootstrap_support_candidate_better": 0.17625,
+          "ci_high": 0.0,
+          "ci_low": -0.21428571428571427,
+          "delta": -0.07142857142857145
+        },
+        "n_groups": 14,
+        "n_resample_units": 14,
+        "n_resamples": 2000,
+        "resample_columns": [
+          "component_id"
+        ],
+        "seed": 1729
+      },
+      "paired_vs_optimizer": {
+        "confidence": 0.95,
+        "f1": {
+          "bootstrap_support_candidate_better": 0.7152499999999999,
+          "ci_high": 0.202248721916197,
+          "ci_low": -0.029873026617786038,
+          "delta": 0.055421270718231996
+        },
+        "group_exact": {
+          "bootstrap_support_candidate_better": 0.179,
+          "ci_high": 0.0,
+          "ci_low": -0.21428571428571427,
+          "delta": -0.07142857142857145
+        },
+        "n_groups": 14,
+        "n_resample_units": 14,
+        "n_resamples": 2000,
+        "resample_columns": [
+          "component_id"
+        ],
+        "seed": 1729
+      },
+      "seed_metrics": [
+        {
+          "extra": {},
+          "f1": 0.9052631578947369,
+          "f1_filtered": 0.9052631578947369,
+          "group_exact_rate": 0.42857142857142855,
+          "label": "human_majority:17",
+          "n_edges": 106,
+          "n_groups": 14,
+          "precision": 0.8775510204081632,
+          "precision_filtered": 0.8775510204081632,
+          "recall": 0.9347826086956522,
+          "recall_filtered": 0.9347826086956522
+        },
+        {
+          "extra": {},
+          "f1": 0.9005235602094241,
+          "f1_filtered": 0.9005235602094241,
+          "group_exact_rate": 0.42857142857142855,
+          "label": "human_majority:29",
+          "n_edges": 106,
+          "n_groups": 14,
+          "precision": 0.8686868686868687,
+          "precision_filtered": 0.8686868686868687,
+          "recall": 0.9347826086956522,
+          "recall_filtered": 0.9347826086956522
+        },
+        {
+          "extra": {},
+          "f1": 0.90625,
+          "f1_filtered": 0.90625,
+          "group_exact_rate": 0.42857142857142855,
+          "label": "human_majority:43",
+          "n_edges": 106,
+          "n_groups": 14,
+          "precision": 0.87,
+          "precision_filtered": 0.87,
+          "recall": 0.9456521739130435,
+          "recall_filtered": 0.9456521739130435
+        }
+      ],
+      "slices": {
+        "au_sydney_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.962962962962963,
+            "f1_filtered": 0.962962962962963,
+            "group_exact_rate": 0.0,
+            "label": "human_majority",
+            "n_edges": 28,
+            "n_groups": 1,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 0.9285714285714286,
+            "recall_filtered": 0.9285714285714286
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 1.0,
+            "f1_filtered": 1.0,
+            "group_exact_rate": 1.0,
+            "label": "optimizer",
+            "n_edges": 28,
+            "n_groups": 1,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "br_sao_paulo_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_majority",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "de_berlin_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_majority",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "deanchored": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_majority",
+            "n_edges": 13,
+            "n_groups": 5,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 13,
+            "n_groups": 5,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "fi_helsinki_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_majority",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "hk_hongkong_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_majority",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "sg_singapore_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_majority",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "us_boston_streets": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.9682539682539683,
+            "f1_filtered": 0.9682539682539683,
+            "group_exact_rate": 0.75,
+            "label": "human_majority",
+            "n_edges": 65,
+            "n_groups": 8,
+            "precision": 0.9838709677419355,
+            "precision_filtered": 0.9838709677419355,
+            "recall": 0.953125,
+            "recall_filtered": 0.953125
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.8672566371681416,
+            "f1_filtered": 0.8672566371681416,
+            "group_exact_rate": 0.75,
+            "label": "optimizer",
+            "n_edges": 65,
+            "n_groups": 8,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 0.765625,
+            "recall_filtered": 0.765625
+          }
+        }
+      },
+      "weak_rows": 2805,
+      "weak_weight_mass": 469.54999999999995
+    },
+    "human_only": {
+      "folds": [
+        {
+          "fold": 0,
+          "human_test_edges": 30,
+          "human_train_edges": 76,
+          "seed": 17,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 1,
+          "human_test_edges": 28,
+          "human_train_edges": 78,
+          "seed": 17,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 2,
+          "human_test_edges": 22,
+          "human_train_edges": 84,
+          "seed": 17,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 3,
+          "human_test_edges": 14,
+          "human_train_edges": 92,
+          "seed": 17,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 4,
+          "human_test_edges": 12,
+          "human_train_edges": 94,
+          "seed": 17,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 0,
+          "human_test_edges": 30,
+          "human_train_edges": 76,
+          "seed": 29,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 1,
+          "human_test_edges": 28,
+          "human_train_edges": 78,
+          "seed": 29,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 2,
+          "human_test_edges": 22,
+          "human_train_edges": 84,
+          "seed": 29,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 3,
+          "human_test_edges": 14,
+          "human_train_edges": 92,
+          "seed": 29,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 4,
+          "human_test_edges": 12,
+          "human_train_edges": 94,
+          "seed": 29,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 0,
+          "human_test_edges": 30,
+          "human_train_edges": 76,
+          "seed": 43,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 1,
+          "human_test_edges": 28,
+          "human_train_edges": 78,
+          "seed": 43,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 2,
+          "human_test_edges": 22,
+          "human_train_edges": 84,
+          "seed": 43,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 3,
+          "human_test_edges": 14,
+          "human_train_edges": 92,
+          "seed": 43,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        },
+        {
+          "fold": 4,
+          "human_test_edges": 12,
+          "human_train_edges": 94,
+          "seed": 43,
+          "weak_edges": 0,
+          "weak_weight_mass": 0.0
+        }
+      ],
+      "fractional_targets": 0,
+      "max_component_weight": 0.0,
+      "metrics": {
+        "extra": {},
+        "f1": 0.9435897435897436,
+        "f1_filtered": 0.9435897435897436,
+        "group_exact_rate": 0.6428571428571429,
+        "label": "human_only",
+        "n_edges": 106,
+        "n_groups": 14,
+        "precision": 0.8932038834951457,
+        "precision_filtered": 0.8932038834951457,
+        "recall": 1.0,
+        "recall_filtered": 1.0
+      },
+      "paired_vs_optimizer": {
+        "confidence": 0.95,
+        "f1": {
+          "bootstrap_support_candidate_better": 0.9504999999999999,
+          "ci_high": 0.2621244661933846,
+          "ci_low": -0.00639656156811717,
+          "delta": 0.09276101430797556
+        },
+        "group_exact": {
+          "bootstrap_support_candidate_better": 0.9420000000000001,
+          "ci_high": 0.35714285714285715,
+          "ci_low": 0.0,
+          "delta": 0.1428571428571429
+        },
+        "n_groups": 14,
+        "n_resample_units": 14,
+        "n_resamples": 2000,
+        "resample_columns": [
+          "component_id"
+        ],
+        "seed": 1729
+      },
+      "seed_metrics": [
+        {
+          "extra": {},
+          "f1": 0.9435897435897436,
+          "f1_filtered": 0.9435897435897436,
+          "group_exact_rate": 0.6428571428571429,
+          "label": "human_only:17",
+          "n_edges": 106,
+          "n_groups": 14,
+          "precision": 0.8932038834951457,
+          "precision_filtered": 0.8932038834951457,
+          "recall": 1.0,
+          "recall_filtered": 1.0
+        },
+        {
+          "extra": {},
+          "f1": 0.9435897435897436,
+          "f1_filtered": 0.9435897435897436,
+          "group_exact_rate": 0.6428571428571429,
+          "label": "human_only:29",
+          "n_edges": 106,
+          "n_groups": 14,
+          "precision": 0.8932038834951457,
+          "precision_filtered": 0.8932038834951457,
+          "recall": 1.0,
+          "recall_filtered": 1.0
+        },
+        {
+          "extra": {},
+          "f1": 0.9435897435897436,
+          "f1_filtered": 0.9435897435897436,
+          "group_exact_rate": 0.6428571428571429,
+          "label": "human_only:43",
+          "n_edges": 106,
+          "n_groups": 14,
+          "precision": 0.8932038834951457,
+          "precision_filtered": 0.8932038834951457,
+          "recall": 1.0,
+          "recall_filtered": 1.0
+        }
+      ],
+      "slices": {
+        "au_sydney_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 1.0,
+            "f1_filtered": 1.0,
+            "group_exact_rate": 1.0,
+            "label": "human_only",
+            "n_edges": 28,
+            "n_groups": 1,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 1.0,
+            "f1_filtered": 1.0,
+            "group_exact_rate": 1.0,
+            "label": "optimizer",
+            "n_edges": 28,
+            "n_groups": 1,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "br_sao_paulo_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_only",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "de_berlin_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_only",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "deanchored": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.2,
+            "label": "human_only",
+            "n_edges": 13,
+            "n_groups": 5,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 13,
+            "n_groups": 5,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "fi_helsinki_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_only",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "hk_hongkong_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_only",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "sg_singapore_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 1.0,
+            "f1_filtered": 1.0,
+            "group_exact_rate": 1.0,
+            "label": "human_only",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "us_boston_streets": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.9922480620155039,
+            "f1_filtered": 0.9922480620155039,
+            "group_exact_rate": 0.875,
+            "label": "human_only",
+            "n_edges": 65,
+            "n_groups": 8,
+            "precision": 0.9846153846153847,
+            "precision_filtered": 0.9846153846153847,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.8672566371681416,
+            "f1_filtered": 0.8672566371681416,
+            "group_exact_rate": 0.75,
+            "label": "optimizer",
+            "n_edges": 65,
+            "n_groups": 8,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 0.765625,
+            "recall_filtered": 0.765625
+          }
+        }
+      },
+      "weak_rows": 0,
+      "weak_weight_mass": 0.0
+    },
+    "human_unanimous": {
+      "folds": [
+        {
+          "fold": 0,
+          "human_test_edges": 30,
+          "human_train_edges": 76,
+          "seed": 17,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 1,
+          "human_test_edges": 28,
+          "human_train_edges": 78,
+          "seed": 17,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 2,
+          "human_test_edges": 22,
+          "human_train_edges": 84,
+          "seed": 17,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 3,
+          "human_test_edges": 14,
+          "human_train_edges": 92,
+          "seed": 17,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 4,
+          "human_test_edges": 12,
+          "human_train_edges": 94,
+          "seed": 17,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 0,
+          "human_test_edges": 30,
+          "human_train_edges": 76,
+          "seed": 29,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 1,
+          "human_test_edges": 28,
+          "human_train_edges": 78,
+          "seed": 29,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 2,
+          "human_test_edges": 22,
+          "human_train_edges": 84,
+          "seed": 29,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 3,
+          "human_test_edges": 14,
+          "human_train_edges": 92,
+          "seed": 29,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 4,
+          "human_test_edges": 12,
+          "human_train_edges": 94,
+          "seed": 29,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 0,
+          "human_test_edges": 30,
+          "human_train_edges": 76,
+          "seed": 43,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 1,
+          "human_test_edges": 28,
+          "human_train_edges": 78,
+          "seed": 43,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 2,
+          "human_test_edges": 22,
+          "human_train_edges": 84,
+          "seed": 43,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 3,
+          "human_test_edges": 14,
+          "human_train_edges": 92,
+          "seed": 43,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        },
+        {
+          "fold": 4,
+          "human_test_edges": 12,
+          "human_train_edges": 94,
+          "seed": 43,
+          "weak_edges": 2589,
+          "weak_weight_mass": 447.29999999999995
+        }
+      ],
+      "fractional_targets": 0,
+      "max_component_weight": 4.000000000000001,
+      "metrics": {
+        "extra": {},
+        "f1": 0.9214659685863874,
+        "f1_filtered": 0.9214659685863874,
+        "group_exact_rate": 0.5,
+        "label": "human_unanimous",
+        "n_edges": 106,
+        "n_groups": 14,
+        "precision": 0.8888888888888888,
+        "precision_filtered": 0.8888888888888888,
+        "recall": 0.9565217391304348,
+        "recall_filtered": 0.9565217391304348
+      },
+      "paired_vs_human_only": {
+        "confidence": 0.95,
+        "f1": {
+          "bootstrap_support_candidate_better": 0.137,
+          "ci_high": 0.028574700109051138,
+          "ci_low": -0.08153280728475856,
+          "delta": -0.02212377500335616
+        },
+        "group_exact": {
+          "bootstrap_support_candidate_better": 0.15975,
+          "ci_high": 0.14285714285714285,
+          "ci_low": -0.42857142857142855,
+          "delta": -0.1428571428571429
+        },
+        "n_groups": 14,
+        "n_resample_units": 14,
+        "n_resamples": 2000,
+        "resample_columns": [
+          "component_id"
+        ],
+        "seed": 1729
+      },
+      "paired_vs_optimizer": {
+        "confidence": 0.95,
+        "f1": {
+          "bootstrap_support_candidate_better": 0.8625,
+          "ci_high": 0.21918629147440108,
+          "ci_low": -0.016328291922981828,
+          "delta": 0.0706372393046194
+        },
+        "group_exact": {
+          "bootstrap_support_candidate_better": 0.509,
+          "ci_high": 0.21428571428571427,
+          "ci_low": -0.21428571428571427,
+          "delta": 0.0
+        },
+        "n_groups": 14,
+        "n_resample_units": 14,
+        "n_resamples": 2000,
+        "resample_columns": [
+          "component_id"
+        ],
+        "seed": 1729
+      },
+      "seed_metrics": [
+        {
+          "extra": {},
+          "f1": 0.9270833333333334,
+          "f1_filtered": 0.9270833333333334,
+          "group_exact_rate": 0.5,
+          "label": "human_unanimous:17",
+          "n_edges": 106,
+          "n_groups": 14,
+          "precision": 0.89,
+          "precision_filtered": 0.89,
+          "recall": 0.967391304347826,
+          "recall_filtered": 0.967391304347826
+        },
+        {
+          "extra": {},
+          "f1": 0.9263157894736843,
+          "f1_filtered": 0.9263157894736843,
+          "group_exact_rate": 0.5,
+          "label": "human_unanimous:29",
+          "n_edges": 106,
+          "n_groups": 14,
+          "precision": 0.8979591836734694,
+          "precision_filtered": 0.8979591836734694,
+          "recall": 0.9565217391304348,
+          "recall_filtered": 0.9565217391304348
+        },
+        {
+          "extra": {},
+          "f1": 0.9270833333333334,
+          "f1_filtered": 0.9270833333333334,
+          "group_exact_rate": 0.5,
+          "label": "human_unanimous:43",
+          "n_edges": 106,
+          "n_groups": 14,
+          "precision": 0.89,
+          "precision_filtered": 0.89,
+          "recall": 0.967391304347826,
+          "recall_filtered": 0.967391304347826
+        }
+      ],
+      "slices": {
+        "au_sydney_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.9818181818181818,
+            "f1_filtered": 0.9818181818181818,
+            "group_exact_rate": 0.0,
+            "label": "human_unanimous",
+            "n_edges": 28,
+            "n_groups": 1,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 0.9642857142857143,
+            "recall_filtered": 0.9642857142857143
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 1.0,
+            "f1_filtered": 1.0,
+            "group_exact_rate": 1.0,
+            "label": "optimizer",
+            "n_edges": 28,
+            "n_groups": 1,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "br_sao_paulo_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_unanimous",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "de_berlin_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 1.0,
+            "f1_filtered": 1.0,
+            "group_exact_rate": 1.0,
+            "label": "human_unanimous",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "deanchored": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.2,
+            "label": "human_unanimous",
+            "n_edges": 13,
+            "n_groups": 5,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 13,
+            "n_groups": 5,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "fi_helsinki_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_unanimous",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 2,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "hk_hongkong_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_unanimous",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "sg_singapore_roads": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "human_unanimous",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.0,
+            "f1_filtered": 0.0,
+            "group_exact_rate": 0.0,
+            "label": "optimizer",
+            "n_edges": 3,
+            "n_groups": 1,
+            "precision": 0.0,
+            "precision_filtered": 0.0,
+            "recall": 1.0,
+            "recall_filtered": 1.0
+          }
+        },
+        "us_boston_streets": {
+          "candidate": {
+            "extra": {},
+            "f1": 0.9682539682539683,
+            "f1_filtered": 0.9682539682539683,
+            "group_exact_rate": 0.75,
+            "label": "human_unanimous",
+            "n_edges": 65,
+            "n_groups": 8,
+            "precision": 0.9838709677419355,
+            "precision_filtered": 0.9838709677419355,
+            "recall": 0.953125,
+            "recall_filtered": 0.953125
+          },
+          "optimizer": {
+            "extra": {},
+            "f1": 0.8672566371681416,
+            "f1_filtered": 0.8672566371681416,
+            "group_exact_rate": 0.75,
+            "label": "optimizer",
+            "n_edges": 65,
+            "n_groups": 8,
+            "precision": 1.0,
+            "precision_filtered": 1.0,
+            "recall": 0.765625,
+            "recall_filtered": 0.765625
+          }
+        }
+      },
+      "weak_rows": 2589,
+      "weak_weight_mass": 447.29999999999995
+    },
+    "optimizer": {
+      "metrics": {
+        "extra": {},
+        "f1": 0.850828729281768,
+        "f1_filtered": 0.850828729281768,
+        "group_exact_rate": 0.5,
+        "label": "optimizer",
+        "n_edges": 106,
+        "n_groups": 14,
+        "precision": 0.8651685393258427,
+        "precision_filtered": 0.8651685393258427,
+        "recall": 0.8369565217391305,
+        "recall_filtered": 0.8369565217391305
+      }
+    }
+  }
+}

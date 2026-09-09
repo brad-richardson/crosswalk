@@ -39,7 +39,7 @@ def observation_tokens(row: dict) -> set[str]:
     for column in ("parent_group_ids", "historical_human_group_ids"):
         groups.extend(_list(row.get(column)))
     lineages = [row.get("lineage_id"), *_list(row.get("lineage_ids"))]
-    return scope_tokens(
+    return set(_list(row.get("context_scope_tokens"))) | scope_tokens(
         str(row["dataset_id"]), groups, [row.get("ref_id")], [row.get("target_id")], lineages
     )
 
@@ -210,8 +210,8 @@ def freeze_partitions(
     return gold, weak, token_index
 
 
-def exclude_frozen_scopes(frame: pd.DataFrame, token_index: dict[str, str], blocked: set[str]):
-    """Conservatively propagate a frozen exclusion through newly added evidence."""
+def connect_frozen_scopes(frame: pd.DataFrame, token_index: dict[str, str], blocked: set[str]):
+    """Propagate frozen exclusions and component budgets through new full context."""
     tokens = [observation_tokens(r) for r in frame.to_dict("records")]
     components = _Components()
     for scope in tokens:
@@ -223,9 +223,22 @@ def exclude_frozen_scopes(frame: pd.DataFrame, token_index: dict[str, str], bloc
         for component in blocked
         if f"frozen:{component}" in components.parents
     }
-    return pd.Series(
-        [components.root(min(t)) in bad for t in tokens], index=frame.index, dtype=bool
+    members = defaultdict(list)
+    for token in sorted(components.parents):
+        members[components.root(token)].append(token)
+    identities = {root: sha256_json(values) for root, values in members.items()}
+    return pd.DataFrame(
+        {
+            "component_id": [identities[components.root(min(t))] for t in tokens],
+            "excluded_human_scope": [components.root(min(t)) in bad for t in tokens],
+        },
+        index=frame.index,
     )
+
+
+def exclude_frozen_scopes(frame: pd.DataFrame, token_index: dict[str, str], blocked: set[str]):
+    """Conservatively propagate a frozen exclusion through newly added evidence."""
+    return connect_frozen_scopes(frame, token_index, blocked)["excluded_human_scope"].astype(bool)
 
 
 def load_frozen_evaluation(directory: str | Path):

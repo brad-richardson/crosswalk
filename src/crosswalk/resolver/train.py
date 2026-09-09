@@ -279,6 +279,8 @@ def train_model(
     feature_cols: list[str],
     soft_extra: pd.DataFrame | None = None,
     seed: int = 0,
+    *,
+    force_soft_objective: bool = False,
 ):
     from crosswalk.resolver.evaluate import _make_model
 
@@ -291,10 +293,23 @@ def train_model(
         if TRAIN_LABEL_COLUMN not in soft_df.columns:
             soft_df[TRAIN_LABEL_COLUMN] = soft_df["keep"]
         frames.append(soft_df)
+    if any("sample_weight" in frame for frame in frames):
+        for frame in frames:
+            if "sample_weight" not in frame:
+                frame["sample_weight"] = 1.0
     train_df = pd.concat(frames, ignore_index=True) if len(frames) > 1 else hard_df
 
     X = train_df[feature_cols].to_numpy(dtype=float)
     y = train_df[TRAIN_LABEL_COLUMN].to_numpy(dtype=float)
+    if not np.isfinite(y).all() or np.any((y < 0) | (y > 1)):
+        raise ValueError("Training targets must be finite and in [0, 1]; mask unknowns first")
+    weights = None
+    if "sample_weight" in train_df:
+        weights = train_df["sample_weight"].to_numpy(dtype=float)
+        if not np.isfinite(weights).all() or np.any(weights < 0) or not np.any(weights > 0):
+            raise ValueError("Sample weights must be finite, nonnegative, and have positive mass")
+        active = weights > 0
+        X, y, weights = X[active], y[active], weights[active]
     is_float = bool(np.any((y != 0) & (y != 1)))
     y_bin = (y >= 0.5).astype(int) if is_float else y.astype(int)
     n_pos = int(y_bin.sum())
@@ -302,29 +317,27 @@ def train_model(
     if len(train_df) == 0 or n_pos == 0 or n_neg == 0:
         raise ValueError(f"Cannot train: rows={len(train_df)} pos={n_pos} neg={n_neg}")
     dtrain_label = y if is_float else y_bin
-    if is_float:
-        try:
-            import xgboost as xgb  # type: ignore
+    if is_float or force_soft_objective:
+        # Hardening fractional targets after a regressor failure would silently
+        # change the supervision experiment. Fail visibly instead.
+        import xgboost as xgb
 
-            model = xgb.XGBRegressor(
-                objective="reg:logistic",
-                eval_metric="logloss",
-                n_estimators=120,
-                max_depth=3,
-                learning_rate=0.08,
-                subsample=0.9,
-                colsample_bytree=0.9,
-                min_child_weight=2,
-                reg_lambda=1.5,
-                n_jobs=1,
-                random_state=seed,
-            )
-        except Exception:
-            model = _make_model(n_pos, n_neg, seed=seed)
-            dtrain_label = y_bin
+        model = xgb.XGBRegressor(
+            objective="reg:logistic",
+            eval_metric="logloss",
+            n_estimators=120,
+            max_depth=3,
+            learning_rate=0.08,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            min_child_weight=2,
+            reg_lambda=1.5,
+            n_jobs=1,
+            random_state=seed,
+        )
     else:
         model = _make_model(n_pos, n_neg, seed=seed)
-    model.fit(X, dtrain_label)
+    model.fit(X, dtrain_label, **({"sample_weight": weights} if weights is not None else {}))
     return model
 
 
