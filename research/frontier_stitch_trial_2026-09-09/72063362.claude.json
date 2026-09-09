@@ -1,0 +1,45 @@
+{
+  "ballot": {
+    "abstain_reason": "",
+    "attempt": 1,
+    "choice": "A",
+    "chosen_option_id": "",
+    "confidence": 0.97,
+    "desired_edges": "",
+    "displayed_candidate_universe_sha256": "",
+    "edge_set": [
+      [
+        "a374826e-6c16-4971-99c7-6655723d85ae",
+        "us_boston_streets_432_882a3066b9"
+      ],
+      [
+        "f192a418-962e-4983-8126-151f1f5c9e0e",
+        "us_boston_streets_432_882a3066b9"
+      ]
+    ],
+    "error": "",
+    "evidence_delivery": "{\"asset_count\":4,\"asset_set_sha256\":\"2d583af375ac40bdaf9d7fb709dbe13428d78d938d61041507cdfd340bf7a261\",\"assets\":[{\"bytes\":28117,\"path\":\"option_A.png\",\"sha256\":\"17f32e36d8177cc992dfd82fa5c4c0c39c5c9b24f618b13a633227cc7c59d76d\"},{\"bytes\":27507,\"path\":\"option_B.png\",\"sha256\":\"6160892b7c5e3ecd01525c44e48ca58b0a85cde75a18df44778dae906d803e93\"},{\"bytes\":27695,\"path\":\"option_C.png\",\"sha256\":\"1e6cfe69bd15783330489d0b11d29f47c3f62ac406b84b3bfc1f29acd1ad1310\"},{\"bytes\":28005,\"path\":\"overview.png\",\"sha256\":\"3e499d4e5639cbad5a6d393cdc288c34910d6d0946982271742f83cc76673ada\"}],\"delivery_mode\":\"prompt_path_read\",\"preflight_status\":\"passed\",\"schema_version\":1,\"transport\":\"claude:Read\"}",
+    "evidence_id": "",
+    "evidence_pack_sha256": "",
+    "group_id": "72063362",
+    "invocation_route": "",
+    "latency_s": 13.77,
+    "model": "claude-fable-5-1",
+    "none_reason": "",
+    "option_menu_sha256": "",
+    "pack_feedback": "",
+    "panel_invocation_sha256": "",
+    "provider": "claude",
+    "raw": "{\"choice\":\"A\",\"confidence\":0.97,\"reasoning\":\"R1 and R2 are two consecutive pieces of Everett Street that together span exactly the single target T1 (ref_aln=1.0 on both; tgt_aln 0.577+0.423=1.0; overlaps 112.8m and 82.6m, neither a sliver). The overview shows blue R1/R2 lying directly on red T1 along the same straight residential street with matching names. This is a classic N:1 split where both edges are true; Options B and C each drop a fully-overlapping real correspondence.\"}\n",
+    "reasoning": "R1 and R2 are two consecutive pieces of Everett Street that together span exactly the single target T1 (ref_aln=1.0 on both; tgt_aln 0.577+0.423=1.0; overlaps 112.8m and 82.6m, neither a sliver). The overview shows blue R1/R2 lying directly on red T1 along the same straight residential street with matching names. This is a classic N:1 split where both edges are true; Options B and C each drop a fully-overlapping real correspondence.",
+    "timestamp": "2026-09-09T14:23:37.394864+00:00"
+  },
+  "dataset": "us_boston_streets",
+  "evidence_id": "72db642f85efb36185a3bb236018d21835f33f319aa7601aba0e971a454e7b25",
+  "evidence_pack_sha256": "189da538906059302d476478d0fb48834c4f6654df6756cdb8d934c0cf6fb1d6",
+  "group_id": "72063362",
+  "model": "claude-fable-5-1",
+  "provider": "claude",
+  "status": "completed",
+  "wall_seconds": 13.81
+}

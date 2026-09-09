@@ -1,0 +1,9 @@
+{
+  "dataset": "us_boston_streets",
+  "error": "ProviderInvocationError: claude on group 72063362: invocation error: [Errno 2] No such file or directory: '/tmp/stitch_pack_asynlg7t/metadata.yaml' (errno 2=ENOENT, not retryable) \u2014 halting the run.",
+  "group_id": "72063362",
+  "model": "claude-fable-5-1",
+  "provider": "claude",
+  "status": "error",
+  "wall_seconds": 15.85
+}

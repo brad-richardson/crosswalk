@@ -1,0 +1,197 @@
+{
+  "ballot": {
+    "abstain_reason": "",
+    "attempt": 1,
+    "choice": "A",
+    "chosen_option_id": "",
+    "confidence": 0.95,
+    "desired_edges": "",
+    "displayed_candidate_universe_sha256": "",
+    "edge_set": [
+      [
+        "00636cb8-24cf-4db2-826c-41a0730533ca",
+        "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_2fc310a6-88ce-4552-9aa0-1df3cee83791:2_881126c53b"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_590aa399-c7ec-49b6-a0c6-e4e7f3f9961f:2_881126c503"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+      ],
+      [
+        "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+        "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+      ],
+      [
+        "d4c0a99c-3742-4dfc-b720-89806c572532",
+        "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+      ],
+      [
+        "d4c0a99c-3742-4dfc-b720-89806c572532",
+        "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+      ],
+      [
+        "d4c0a99c-3742-4dfc-b720-89806c572532",
+        "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+      ],
+      [
+        "d4c0a99c-3742-4dfc-b720-89806c572532",
+        "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+      ],
+      [
+        "d4c0a99c-3742-4dfc-b720-89806c572532",
+        "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+      ],
+      [
+        "d4c0a99c-3742-4dfc-b720-89806c572532",
+        "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+      ],
+      [
+        "d4c0a99c-3742-4dfc-b720-89806c572532",
+        "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+      ],
+      [
+        "d4c0a99c-3742-4dfc-b720-89806c572532",
+        "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+      ],
+      [
+        "d4c0a99c-3742-4dfc-b720-89806c572532",
+        "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+      ],
+      [
+        "d4c0a99c-3742-4dfc-b720-89806c572532",
+        "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+      ],
+      [
+        "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+        "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+      ],
+      [
+        "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+        "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+      ],
+      [
+        "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+        "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+      ],
+      [
+        "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+        "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+      ],
+      [
+        "e6b45ce9-a62e-4976-8dde-593bf5823996",
+        "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+      ],
+      [
+        "e6b45ce9-a62e-4976-8dde-593bf5823996",
+        "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+      ],
+      [
+        "e6b45ce9-a62e-4976-8dde-593bf5823996",
+        "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+      ],
+      [
+        "e6b45ce9-a62e-4976-8dde-593bf5823996",
+        "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+      ],
+      [
+        "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+        "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+      ],
+      [
+        "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+        "hel_road_56018849-7f58-40fb-afb4-8b432a2c8d8a:3_881126c56b"
+      ]
+    ],
+    "error": "",
+    "evidence_delivery": "{\"asset_count\":11,\"asset_set_sha256\":\"cf895fb5fa66dc0dc45aa6dd36a7faef3479ccc4bd13e930198107c514edb0f3\",\"assets\":[{\"bytes\":53792,\"path\":\"option_A.png\",\"sha256\":\"c64f68f58823e019aa3c49b8417bb2de19316a4100bd1bc7ceb4a741fc8fc7bf\"},{\"bytes\":53468,\"path\":\"option_B.png\",\"sha256\":\"ec5c35d34bb08941d6d088277310ca97af654bfc77820a11ed5a2eafdd991871\"},{\"bytes\":53587,\"path\":\"option_C.png\",\"sha256\":\"ec0c70c449967c48cf9540fa6a06aabfd20d40fc24e58fd514589140000e08be\"},{\"bytes\":53400,\"path\":\"option_D.png\",\"sha256\":\"e6f4b18515c34576729bd86f1d1c8efd520274f46c0b84ca0b1ef178fd8ea98c\"},{\"bytes\":53423,\"path\":\"option_E.png\",\"sha256\":\"7f7af79f8d384b75192f982500ef1a8ab56a5752fba1644be2d497365024389c\"},{\"bytes\":53452,\"path\":\"option_F.png\",\"sha256\":\"b35dc476dbc677c298770c47c7a52b6c0f2459d95242730792cef88b1fad9456\"},{\"bytes\":53344,\"path\":\"option_G.png\",\"sha256\":\"6c619750eff2607e508e2072ad9217b8e84bccd66f8fdbb01395baf18236aa33\"},{\"bytes\":52759,\"path\":\"option_H.png\",\"sha256\":\"7373bb766313523c9e0e802005b668766ce4dc0a97fedfa1259c56a9835fc13e\"},{\"bytes\":53272,\"path\":\"option_I.png\",\"sha256\":\"4f9e21a8ae8eb199189827046245a532ba834f41efbce8d4c318c5a57fee8466\"},{\"bytes\":53758,\"path\":\"option_J.png\",\"sha256\":\"b1158e83b89b705bffb502851d4cc0e8d075c9ab296035854660804b40911d4e\"},{\"bytes\":50134,\"path\":\"overview.png\",\"sha256\":\"c6e61e47e1836da7e13ae5195a57ecb58d815070a1c1cbb248f1a1ac2ad6b2c2\"}],\"delivery_mode\":\"native_cli_attachment\",\"preflight_status\":\"passed\",\"schema_version\":1,\"transport\":\"opencode:-f\"}",
+    "evidence_id": "",
+    "evidence_pack_sha256": "",
+    "group_id": "c8b85bbc__p07741daa80",
+    "invocation_route": "",
+    "latency_s": 41.21,
+    "model": "meta/muse-spark-1.3-contributor",
+    "none_reason": "",
+    "option_menu_sha256": "",
+    "pack_feedback": "",
+    "panel_invocation_sha256": "",
+    "provider": "muse",
+    "raw": "{\"choice\": \"A\", \"confidence\": 0.95, \"reasoning\": \"All 40 edges are same-facility ALONG matches (Porvoonvayla/Valtatie 7 motorway corridor, class differences allowed per MI-2). Ref and target aligned fractions tile to ~1.0: R3 sum ~0.996, R4 sum 1.0, R2 sum ~0.991, R5 sum 1.0; targets split cleanly e.g. T31 0.644+0.355, T23 0.197+0.803, T20 0.277+0.723, T34 0.728+0.272, T4 0.663+0.338. Dropping e2,e11,e16,e34 creates coverage gaps and splits the tree graph (41 nodes/40 edges, all cut-edges). Low conf e11=0.738 does not override 282m same-role overlap per MI-5. Per SA-2 preserve full M:N, so exact set is all 40 edges = Option A.\", \"none_reason\": null}\n",
+    "reasoning": "All 40 edges are same-facility ALONG matches (Porvoonvayla/Valtatie 7 motorway corridor, class differences allowed per MI-2). Ref and target aligned fractions tile to ~1.0: R3 sum ~0.996, R4 sum 1.0, R2 sum ~0.991, R5 sum 1.0; targets split cleanly e.g. T31 0.644+0.355, T23 0.197+0.803, T20 0.277+0.723, T34 0.728+0.272, T4 0.663+0.338. Dropping e2,e11,e16,e34 creates coverage gaps and splits the tree graph (41 nodes/40 edges, all cut-edges). Low conf e11=0.738 does not override 282m same-role overlap per MI-5. Per SA-2 preserve full M:N, so exact set is all 40 edges = Option A.",
+    "timestamp": "2026-09-09T14:26:59.619203+00:00"
+  },
+  "dataset": "fi_helsinki_roads",
+  "evidence_id": "d9f39a8228585df09e8d540323850b83b0898b470acf8cc925eb318c48e1b427",
+  "evidence_pack_sha256": "16dfc05fa441d08fa23a873ccc58dbf608f7248a1197a500cb232bce4ad5d724",
+  "group_id": "c8b85bbc__p07741daa80",
+  "model": "meta/muse-spark-1.3-contributor",
+  "provider": "muse",
+  "status": "completed",
+  "wall_seconds": 41.6
+}

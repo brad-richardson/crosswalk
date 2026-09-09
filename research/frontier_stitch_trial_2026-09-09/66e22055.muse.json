@@ -1,0 +1,41 @@
+{
+  "ballot": {
+    "abstain_reason": "",
+    "attempt": 1,
+    "choice": "B",
+    "chosen_option_id": "",
+    "confidence": 0.78,
+    "desired_edges": "",
+    "displayed_candidate_universe_sha256": "",
+    "edge_set": [
+      [
+        "d910f21d-02b5-417c-85ae-e0b3c419f8cb",
+        "au_sydney_831180_88be0e3435"
+      ]
+    ],
+    "error": "",
+    "evidence_delivery": "{\"asset_count\":4,\"asset_set_sha256\":\"d28332b1307013a9eff261b1252667b476f5700dc17d97bb05b8431bb9be3491\",\"assets\":[{\"bytes\":45339,\"path\":\"option_A.png\",\"sha256\":\"f9854141f3c53db3d465d1e889bd5f4def6f42ed728947e95909e8b7224e00d2\"},{\"bytes\":45023,\"path\":\"option_B.png\",\"sha256\":\"33ee16e58e06711a050b796fde22d7d80dbf557f0db62772a73b0d28ae0429f7\"},{\"bytes\":45357,\"path\":\"option_C.png\",\"sha256\":\"3e3636ab943473ac124298ba860354b88f430930ef4ed5f5391051795286b4de\"},{\"bytes\":44426,\"path\":\"overview.png\",\"sha256\":\"62c933e3b6d8835cc1981a4a3880b663ff13645c41403e9469689bd8be4de312\"}],\"delivery_mode\":\"native_cli_attachment\",\"preflight_status\":\"passed\",\"schema_version\":1,\"transport\":\"opencode:-f\"}",
+    "evidence_id": "",
+    "evidence_pack_sha256": "",
+    "group_id": "66e22055",
+    "invocation_route": "",
+    "latency_s": 50.3,
+    "model": "meta/muse-spark-1.3-contributor",
+    "none_reason": "",
+    "option_menu_sha256": "",
+    "pack_feedback": "",
+    "panel_invocation_sha256": "",
+    "provider": "muse",
+    "raw": "{\"choice\": \"B\", \"confidence\": 0.78, \"reasoning\": \"R1 is surface layer-0 cycleway. T2 is CROSS CITY TUNNEL motorway tunnel with bike:no/foot:no. R physical layer 0 vs T physical tunnel is conflicting stack plus motorway vs cycleway role incompatibility per MI-1, so e1 R1->T2 is no-match; replacing bike fragment with motorway tunnel fails MI-6. T1/T2 share ~143m centerline but role/class differs (surface secondary vs tunnel motorway), so they are stacked different facilities, not legitimate M:N per SA-2; both cannot match same R1, rejecting optimizer A. For e2 R1->T1 there is no affirmative separation: T1 physical unknown, no offset, no tagged distinct-mode access, no competing cycleway representation. Per MI-4 same-pavement reading stands and painted bike lane matches road. Small ~15m overlap is evidence only per MI-5. Final set is {e2} = Option B.\", \"none_reason\": null}\n",
+    "reasoning": "R1 is surface layer-0 cycleway. T2 is CROSS CITY TUNNEL motorway tunnel with bike:no/foot:no. R physical layer 0 vs T physical tunnel is conflicting stack plus motorway vs cycleway role incompatibility per MI-1, so e1 R1->T2 is no-match; replacing bike fragment with motorway tunnel fails MI-6. T1/T2 share ~143m centerline but role/class differs (surface secondary vs tunnel motorway), so they are stacked different facilities, not legitimate M:N per SA-2; both cannot match same R1, rejecting optimizer A. For e2 R1->T1 there is no affirmative separation: T1 physical unknown, no offset, no tagged distinct-mode access, no competing cycleway representation. Per MI-4 same-pavement reading stands and painted bike lane matches road. Small ~15m overlap is evidence only per MI-5. Final set is {e2} = Option B.",
+    "timestamp": "2026-09-09T14:24:59.493608+00:00"
+  },
+  "dataset": "au_sydney_roads",
+  "evidence_id": "4e032cb6868f1f13a24c86558f5a405dc6133eed2fae789f3305ff2495481ab7",
+  "evidence_pack_sha256": "81e8d52338951ed564b2738ff59ec8421d2a5b2f4ecfe74d550c870b789774d2",
+  "group_id": "66e22055",
+  "model": "meta/muse-spark-1.3-contributor",
+  "provider": "muse",
+  "status": "completed",
+  "wall_seconds": 50.41
+}

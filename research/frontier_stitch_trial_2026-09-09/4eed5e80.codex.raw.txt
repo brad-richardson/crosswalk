@@ -1,0 +1,1 @@
+{"choice":"NONE","confidence":0.99,"reasoning":"All three edges align R1's explicitly underground tunnel portion (layer -1) with KOWLOON CITY ROAD segments explicitly at layer 0. These represent vertically separate traveled ways despite their parallel geometry. No candidate edge satisfies physical identity.","none_reason":"all_edges_no_match","desired_edges":[]}

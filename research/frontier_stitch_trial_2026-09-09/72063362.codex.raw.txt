@@ -1,0 +1,1 @@
+{"choice":"A","confidence":0.99,"reasoning":"R1 and R2 form consecutive portions of the same Everett Street alignment covered by T1. Both reference segments fully overlap the target, with substantial shared spans of 112.8m and 82.6m that together cover T1. Option A includes both valid correspondences."}

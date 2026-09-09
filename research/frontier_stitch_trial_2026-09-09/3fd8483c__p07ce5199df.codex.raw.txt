@@ -1,0 +1,1 @@
+{"choice":"A","confidence":0.99,"reasoning":"R1 and T1 follow the same traveled way and direction along Pacific Highway. The substantial aligned overlap supports identity; differing segment lengths and trunk/primary classifications do not indicate separate facilities. Accept e1, exactly represented by Option A.","none_reason":null,"desired_edges":[]}

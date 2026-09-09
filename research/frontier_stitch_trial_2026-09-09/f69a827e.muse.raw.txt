@@ -1,0 +1,1 @@
+{"choice": "A", "confidence": 0.99, "reasoning": "R1 and R2 are consecutive Chamberlain St residential pieces (north/south) and T1 CHAMBERLAIN STREET spans both: ref_aln~1.0 each, tgt_aln 0.407+0.587~1.0, overlaps 63m+91m, same corridor, high conf. Overview and Option A show full co-linear overlap; B/C each drop half the road. No sliver/borderline/mode issue."}

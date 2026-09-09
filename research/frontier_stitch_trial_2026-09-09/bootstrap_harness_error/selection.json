@@ -1,0 +1,3813 @@
+{
+  "cases": [
+    {
+      "dataset": "us_boston_streets",
+      "files": {
+        "evidence.json": "7ebac8fa5d61b3fc9af1b4395f7844f2a5e8f02f8c5239b5f8391edf7e6185fa",
+        "metadata.yaml": "5d4cc4394b7d903d5a9cf6048ae6c156e3c63b1c1c1a02bf66b57ccb2f39ddeb",
+        "option_A.png": "17f32e36d8177cc992dfd82fa5c4c0c39c5c9b24f618b13a633227cc7c59d76d",
+        "option_B.png": "6160892b7c5e3ecd01525c44e48ca58b0a85cde75a18df44778dae906d803e93",
+        "option_C.png": "1e6cfe69bd15783330489d0b11d29f47c3f62ac406b84b3bfc1f29acd1ad1310",
+        "overview.png": "3e499d4e5639cbad5a6d393cdc288c34910d6d0946982271742f83cc76673ada",
+        "prompt.txt": "dbc77c979eb89871392e44625223ffd3f29c44802b120b664b451d12b488b27c"
+      },
+      "group_id": "72063362",
+      "human_expected": {
+        "choices": [
+          "A"
+        ],
+        "edges": [
+          [
+            "a374826e-6c16-4971-99c7-6655723d85ae",
+            "us_boston_streets_432_882a3066b9"
+          ],
+          [
+            "f192a418-962e-4983-8126-151f1f5c9e0e",
+            "us_boston_streets_432_882a3066b9"
+          ]
+        ],
+        "notes": "",
+        "session_id": "a09f7e95",
+        "source_sha256": "7fdf32c4374b35ac255d77f3e451698f17ac37293f19781f12e1e9682215720a"
+      },
+      "n_images": 4,
+      "n_reference": 2,
+      "n_target": 1,
+      "options": {
+        "A": [
+          [
+            "a374826e-6c16-4971-99c7-6655723d85ae",
+            "us_boston_streets_432_882a3066b9"
+          ],
+          [
+            "f192a418-962e-4983-8126-151f1f5c9e0e",
+            "us_boston_streets_432_882a3066b9"
+          ]
+        ],
+        "B": [
+          [
+            "a374826e-6c16-4971-99c7-6655723d85ae",
+            "us_boston_streets_432_882a3066b9"
+          ]
+        ],
+        "C": [
+          [
+            "f192a418-962e-4983-8126-151f1f5c9e0e",
+            "us_boston_streets_432_882a3066b9"
+          ]
+        ]
+      },
+      "prompt_chars": 5329,
+      "source_batch": "us_boston_streets_quadcal0710",
+      "source_path": "data/agents/stitching/batches/us_boston_streets_quadcal0710/72063362",
+      "stratum": "human_exact_positive"
+    },
+    {
+      "dataset": "us_boston_streets",
+      "files": {
+        "evidence.json": "3723f11263376b5106939071b6f4deca88190f3bd044de7a749385785382de86",
+        "metadata.yaml": "9645a9f0a6847b4ff69c670ec9835510baa9fd250a7fc242e97f818ff4ab7af3",
+        "option_A.png": "1ddd9aa2d909c050798ad37e6c4b14b829e4ec26c5ee6c86d196a5cc74f3f1ff",
+        "option_B.png": "3608a1ebc263b967e1dc2f238fe7fb96b8acc09dc20af7716602fef88a9b9d9c",
+        "option_C.png": "e4f3ae87d490fd7d6eeb7ff4c3c0b2e36d581b2335160f0142f6a0db33dd18b1",
+        "overview.png": "dd3013f46ab59bb6979fc056daa8cf96c5adb813ba97b5aff91537c4d2b48dc0",
+        "prompt.txt": "43bc2436738ce8187cddad5cad6249eb4d29d6e690465f37063848c9b423c9ec"
+      },
+      "group_id": "f69a827e",
+      "human_expected": {
+        "choices": [
+          "A"
+        ],
+        "edges": [
+          [
+            "6fc832cc-1413-4c64-a1e0-12ef04935739",
+            "us_boston_streets_4483_882a3066b5"
+          ],
+          [
+            "f94a0f4c-999f-49c9-9044-cd311611978c",
+            "us_boston_streets_4483_882a3066b5"
+          ]
+        ],
+        "notes": "",
+        "session_id": "8b6a4d24",
+        "source_sha256": "7fdf32c4374b35ac255d77f3e451698f17ac37293f19781f12e1e9682215720a"
+      },
+      "n_images": 4,
+      "n_reference": 2,
+      "n_target": 1,
+      "options": {
+        "A": [
+          [
+            "6fc832cc-1413-4c64-a1e0-12ef04935739",
+            "us_boston_streets_4483_882a3066b5"
+          ],
+          [
+            "f94a0f4c-999f-49c9-9044-cd311611978c",
+            "us_boston_streets_4483_882a3066b5"
+          ]
+        ],
+        "B": [
+          [
+            "f94a0f4c-999f-49c9-9044-cd311611978c",
+            "us_boston_streets_4483_882a3066b5"
+          ]
+        ],
+        "C": [
+          [
+            "6fc832cc-1413-4c64-a1e0-12ef04935739",
+            "us_boston_streets_4483_882a3066b5"
+          ]
+        ]
+      },
+      "prompt_chars": 5352,
+      "source_batch": "us_boston_streets_quadcal0710",
+      "source_path": "data/agents/stitching/batches/us_boston_streets_quadcal0710/f69a827e",
+      "stratum": "human_exact_positive"
+    },
+    {
+      "dataset": "au_sydney_roads",
+      "files": {
+        "evidence.json": "ab24320504fc161a0a334f99a27d333474e5209c29d77e0c34aa6adaca1b99ea",
+        "metadata.yaml": "78724e73664552f3d1d049e8b3ad89e6579eaf80b81f37f083f65a2eb41fd9a8",
+        "option_A.png": "f9854141f3c53db3d465d1e889bd5f4def6f42ed728947e95909e8b7224e00d2",
+        "option_B.png": "33ee16e58e06711a050b796fde22d7d80dbf557f0db62772a73b0d28ae0429f7",
+        "option_C.png": "3e3636ab943473ac124298ba860354b88f430930ef4ed5f5391051795286b4de",
+        "overview.png": "62c933e3b6d8835cc1981a4a3880b663ff13645c41403e9469689bd8be4de312",
+        "prompt.txt": "02b2bc95f1cccf5049fd98e1349f9291554c6ddfabc9043af94f8c5b007690e0"
+      },
+      "group_id": "66e22055",
+      "human_expected": {
+        "choices": [
+          "NONE"
+        ],
+        "edges": [],
+        "notes": "R1 is separated infra from T1. T2 is underground",
+        "session_id": "deanchored_v1",
+        "source_sha256": "a222bc41d91a718a26a574ac13437c6d8a8ed868b8b6cf8d1f4d881674c72839"
+      },
+      "n_images": 4,
+      "n_reference": 1,
+      "n_target": 2,
+      "options": {
+        "A": [
+          [
+            "d910f21d-02b5-417c-85ae-e0b3c419f8cb",
+            "au_sydney_831394_88be0e3435"
+          ],
+          [
+            "d910f21d-02b5-417c-85ae-e0b3c419f8cb",
+            "au_sydney_831180_88be0e3435"
+          ]
+        ],
+        "B": [
+          [
+            "d910f21d-02b5-417c-85ae-e0b3c419f8cb",
+            "au_sydney_831180_88be0e3435"
+          ]
+        ],
+        "C": [
+          [
+            "d910f21d-02b5-417c-85ae-e0b3c419f8cb",
+            "au_sydney_831394_88be0e3435"
+          ]
+        ]
+      },
+      "prompt_chars": 12990,
+      "source_batch": "au_sydney_roads_physical_context_v9_rerun_20260717",
+      "source_path": "data/agents/stitching/batches/au_sydney_roads_physical_context_v9_rerun_20260717/66e22055",
+      "stratum": "human_exact_rejection"
+    },
+    {
+      "dataset": "de_berlin_roads",
+      "files": {
+        "evidence.json": "c20020a279aa2c2f73621f860101248e645bd2e80a4382954bb4dce68a67bf44",
+        "metadata.yaml": "6b1808fb961f8c578477bd0ac4bca01963e5745bf9b564e2793a23fba1c48f4d",
+        "option_A.png": "b750925e8ab50c244c9b880ab1d7b022481da7d92537a21218f017ec71c82bc9",
+        "option_B.png": "945f5d19a455d42f91564978850340381d0973c3112bfcbc18b95865d494d838",
+        "option_C.png": "e28870706d4d03dcf78d5a2c7adaaf09d3b80be41638f06368e71e78768eb2c0",
+        "overview.png": "4728320f78ab56a8b826fd6a2e5d0af8f164d22738d5820836cb6428ec211c55",
+        "prompt.txt": "6de34e75f4fdd59791072c6069fa086c25fe28748a5e355377d97a5347108ec3"
+      },
+      "group_id": "d4d2e782",
+      "human_expected": {
+        "choices": [
+          "NONE"
+        ],
+        "edges": [],
+        "notes": "",
+        "session_id": "deanchored_v1",
+        "source_sha256": "43c4a508eb58337a47c1a9b491f2af6888fad3b1526438fc89bed09dd1b8b892"
+      },
+      "n_images": 4,
+      "n_reference": 1,
+      "n_target": 2,
+      "options": {
+        "A": [
+          [
+            "55c6b872-cb95-4b46-bdd2-c2d37b99bbcf",
+            "de_berlin_44162_881f18b205"
+          ],
+          [
+            "55c6b872-cb95-4b46-bdd2-c2d37b99bbcf",
+            "de_berlin_44164_881f18b205"
+          ]
+        ],
+        "B": [
+          [
+            "55c6b872-cb95-4b46-bdd2-c2d37b99bbcf",
+            "de_berlin_44164_881f18b205"
+          ]
+        ],
+        "C": [
+          [
+            "55c6b872-cb95-4b46-bdd2-c2d37b99bbcf",
+            "de_berlin_44162_881f18b205"
+          ]
+        ]
+      },
+      "prompt_chars": 11095,
+      "source_batch": "de_berlin_roads_physical_context_v8_20260717",
+      "source_path": "data/agents/stitching/batches/de_berlin_roads_physical_context_v8_20260717/d4d2e782",
+      "stratum": "human_exact_rejection"
+    },
+    {
+      "dataset": "hk_hongkong_roads",
+      "files": {
+        "evidence.json": "fa998673bbbc12254b59cb47756026006957760497ffcf8a006a1705edea5f9f",
+        "metadata.yaml": "b50e444e3f0076c04ea5fa0299267978b88f6f41aa2be7780ec36efd89b992b5",
+        "option_A.png": "de49bb57b02c398129289574d08319ea4ab7551cd489c6c4e63438c460b81b99",
+        "option_B.png": "d87a9b2b7fc0b3297e7910ded6129158050ad6c8de8ad8fc0ac2fc65d3d49d0f",
+        "option_C.png": "72008e309127d2a738465b9a9752dd9332ec434d16992048f99addc037ed2e2b",
+        "option_D.png": "e6191d0f085961971a54c038119fa9f87b6946568c77b3fd30718bb34afab17d",
+        "option_E.png": "b8f45e1e40dfbae391c3ea0ebecf34f27b49d14d89e3c8df13fa54d78891c6c9",
+        "option_F.png": "4592a4ae67a777b150c109dd99ff651062238e02d34a9f09257d178cdb350e44",
+        "option_G.png": "d9da4c6f02be13f4f825fe2cff07bd41bb5ba701e7d47baf1e0ca536cf34175b",
+        "overview.png": "30d10da98b2faad90167263a69b86a00bfc6d81ff67f18ce1a98b687b42329c0",
+        "prompt.txt": "f4e18a8f420788b2f8f220c1adad2cb418562fdca195762872e8a8042de0d6e7"
+      },
+      "group_id": "4eed5e80",
+      "human_expected": {
+        "choices": [
+          "NONE"
+        ],
+        "edges": [],
+        "notes": "",
+        "session_id": "deanchored_v1",
+        "source_sha256": "4c3e73ed41147ef20abe0587f586c9724ef563628b6f4e2731ea1d89ab072b57"
+      },
+      "n_images": 8,
+      "n_reference": 1,
+      "n_target": 3,
+      "options": {
+        "A": [
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_103785_88411c86b1"
+          ],
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_144878_88411c86b1"
+          ],
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_103984_88411c86b1"
+          ]
+        ],
+        "B": [
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_103785_88411c86b1"
+          ],
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_103984_88411c86b1"
+          ]
+        ],
+        "C": [
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_103984_88411c86b1"
+          ],
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_144878_88411c86b1"
+          ]
+        ],
+        "D": [
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_103785_88411c86b1"
+          ],
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_144878_88411c86b1"
+          ]
+        ],
+        "E": [
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_103984_88411c86b1"
+          ]
+        ],
+        "F": [
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_103785_88411c86b1"
+          ]
+        ],
+        "G": [
+          [
+            "635d37a9-2b4a-4e21-87a9-087bb930110b",
+            "hk_hongkong_144878_88411c86b1"
+          ]
+        ]
+      },
+      "prompt_chars": 12184,
+      "source_batch": "hk_hongkong_roads_physical_context_v8_20260717",
+      "source_path": "data/agents/stitching/batches/hk_hongkong_roads_physical_context_v8_20260717/4eed5e80",
+      "stratum": "human_exact_rejection"
+    },
+    {
+      "dataset": "fi_helsinki_roads",
+      "files": {
+        "evidence.json": "adc2b8a43c532004d220e55bc0e4b4d97238c294640e13c4b14be0f8fb805056",
+        "metadata.yaml": "6d2ff86f34e84ef624900ac69f5ddb2034db27c0b61dcd13fd6e834a33702fb4",
+        "option_A.png": "ccf534a0b773ec7be8572d29ce7d255841830ea56839262af78bdcf8bc71af54",
+        "option_B.png": "e191d6f2d06f89a3acf3a28115773fe1df05450e2b39a9ebfb4331740f628bce",
+        "option_C.png": "b5f96b1d381564293fff46134153327884cdd734899e6045bbe9bc32f35dc975",
+        "option_D.png": "0ee369ba7eccc8991968217e14c03d7b6f8460b3af26a3d95397c08e5ecdb77d",
+        "option_E.png": "225bfce09228b1fb878ef00a91fb980210142bb439ffe2247aa29d7e0e51e9b7",
+        "option_F.png": "8a9b6bedcc20c6307c943fd6353f8c9c4e485c99f3d28cdeea8475ee6deabe18",
+        "option_G.png": "d3f19c0e2cfe6dda483ed5d57f054cb2e02218dff0d461589b31f63e71440953",
+        "option_H.png": "5dc851b21b78c537248ace37d7c766382e2d1f5856e957baac848387aebcf0a4",
+        "option_I.png": "c5bce006e0a140a7cdd0d1c6d7b4cf9ef235423d6242bcf45f5af69b1221e1bd",
+        "option_J.png": "39f5683feded07a9853f2cc4e76009d85e0088b59c109b7d977dc4d8aa9235aa",
+        "option_K.png": "6e43dafead112b679a9a0fa1d154cb392769b378f13c39a213af8bcc10f1902b",
+        "option_L.png": "52962157cf11d943189611a1d5a78c189dff39838a5ac2e6f220609407663e71",
+        "option_M.png": "8b355eb26efd47919bcfb7b2e82ed7e0c6186718e36f26a6e8668f94eee3a211",
+        "option_N.png": "f744270c71b506efd051a973ccbaf9fc7ce5856285506af2f6ba4d8d28269a3d",
+        "overview.png": "7771250f8f30264a611a3331c0d747601d190c73f5b4e49bf2d67bef69f837d5",
+        "prompt.txt": "a982b8c9a6d1feba7243c35482fc0ac9f6cc4961e4b1739caf04c60825b1cb46"
+      },
+      "group_id": "92c0997f",
+      "human_expected": null,
+      "n_images": 15,
+      "n_reference": 3,
+      "n_target": 13,
+      "options": {
+        "A": [
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ]
+        ],
+        "B": [
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ]
+        ],
+        "C": [
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ]
+        ],
+        "D": [
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ]
+        ],
+        "E": [
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ]
+        ],
+        "F": [
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ]
+        ],
+        "G": [
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ]
+        ],
+        "H": [
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ]
+        ],
+        "I": [
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ]
+        ],
+        "J": [
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ]
+        ],
+        "K": [
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ]
+        ],
+        "L": [
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ]
+        ],
+        "M": [
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cdf4ee6f-5966-4af8-bca1-de209975f33d:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_ec320545-dad0-4eac-9221-4196a495d7b4:2_880899698d"
+          ]
+        ],
+        "N": [
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "2515641c-2c0c-4c29-a115-982cc72b621e",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_7ec7d22c-ed3f-4788-b7bf-e99d66e1bad4:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_d34b844e-8662-4716-bc3b-571268638ba8:2_880899698d"
+          ],
+          [
+            "c375ea22-71fa-46b3-acf0-8caa1a1dc369",
+            "hel_road_f50647a3-6fef-4892-8f45-f3f652688bc7:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_0e385231-8517-42e7-a608-d81e36edddcf:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_2ca29510-48c3-480b-bf5c-5330ac414b01:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_53b93bd6-83fa-4789-89bb-d7524ed47456:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_5a97ee49-cf07-4cc4-982d-61da72fc16b1:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_74997e7d-15d5-491c-890a-7f49648da061:2_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cbfcbf7c-8470-4726-9cbf-87f11db35421:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_cd20e51f-5f2c-4f47-928b-2141bcb086a4:3_880899698d"
+          ],
+          [
+            "fefac05e-fe89-4ef9-95dc-7f5adf69c2f1",
+            "hel_road_e4cf3381-e803-4c92-8633-a930d07748dd:3_880899698d"
+          ]
+        ]
+      },
+      "prompt_chars": 19978,
+      "source_batch": "fi_helsinki_roads_physical_context_v9_rerun_20260717",
+      "source_path": "data/agents/stitching/batches/fi_helsinki_roads_physical_context_v9_rerun_20260717/92c0997f",
+      "stratum": "targeted_diagnostic"
+    },
+    {
+      "dataset": "fi_helsinki_roads",
+      "files": {
+        "evidence.json": "f9bb3bd7075f132e0347a020ef73648171719070d1d9632c0895d476b9263692",
+        "metadata.yaml": "6d973efc6a6d6cf540bada483ab4b7ce404b9a893527f2736633f2e821981ab7",
+        "option_A.png": "7ca76aa6992f0c54040c438ca236898d18b31a812a945f6ac3bce69167180c5e",
+        "option_B.png": "4f546a5239701e8f020a8b82e2c8bd9f5b7ddb72b3329159f4f1b4a860836f74",
+        "option_C.png": "e4e67c2a865bd53daba3881443a7311c7c1c9eddff00e9528b10cc3947e0f395",
+        "option_D.png": "c8debd75d544daf2fb0cb13546ac87eb57dc50ea8cab3a87495bc3c5e13abc7f",
+        "option_E.png": "ef6772e75e0ab1091d1c84ca0e05794e45d02685c6ccd4643841206f1fa3e223",
+        "option_F.png": "d5a055e83da6ef726bb6dccfd0ee163aa33acb3a293738f4128cfc29b0a9bf12",
+        "option_G.png": "e4f9622849fdfb0e27e2c63aeeea01df0f43ff0b4d6593b377e4d8c4e5b9a1e9",
+        "overview.png": "27a6d0f46ab96f01665176b2f895622b954a1f6e4f71eda470635376daa610c9",
+        "prompt.txt": "f9deeabc2125546d54fc4f05c45d12280654085414c781f2442a46ae33917b1d"
+      },
+      "group_id": "7175635e",
+      "human_expected": null,
+      "n_images": 8,
+      "n_reference": 1,
+      "n_target": 3,
+      "options": {
+        "A": [
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_2f86bcde-3b0c-4e9c-b54d-8a55dcaf836a:2_881126d2bb"
+          ],
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_a4191d7b-7ba5-4bce-b84c-cb972789f9ce:2_881126d2bb"
+          ],
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_df7fdd2b-6b5f-4325-9d52-9d074264cfed:2_881126d2bb"
+          ]
+        ],
+        "B": [
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_2f86bcde-3b0c-4e9c-b54d-8a55dcaf836a:2_881126d2bb"
+          ],
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_a4191d7b-7ba5-4bce-b84c-cb972789f9ce:2_881126d2bb"
+          ]
+        ],
+        "C": [
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_2f86bcde-3b0c-4e9c-b54d-8a55dcaf836a:2_881126d2bb"
+          ],
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_df7fdd2b-6b5f-4325-9d52-9d074264cfed:2_881126d2bb"
+          ]
+        ],
+        "D": [
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_a4191d7b-7ba5-4bce-b84c-cb972789f9ce:2_881126d2bb"
+          ],
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_df7fdd2b-6b5f-4325-9d52-9d074264cfed:2_881126d2bb"
+          ]
+        ],
+        "E": [
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_2f86bcde-3b0c-4e9c-b54d-8a55dcaf836a:2_881126d2bb"
+          ]
+        ],
+        "F": [
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_a4191d7b-7ba5-4bce-b84c-cb972789f9ce:2_881126d2bb"
+          ]
+        ],
+        "G": [
+          [
+            "5ddb76a5-13ca-4917-9cbc-4a59f9cac7c2",
+            "hel_road_df7fdd2b-6b5f-4325-9d52-9d074264cfed:2_881126d2bb"
+          ]
+        ]
+      },
+      "prompt_chars": 13758,
+      "source_batch": "fi_helsinki_roads_physical_context_v9_rerun_20260717",
+      "source_path": "data/agents/stitching/batches/fi_helsinki_roads_physical_context_v9_rerun_20260717/7175635e",
+      "stratum": "targeted_diagnostic"
+    },
+    {
+      "dataset": "ch_grand_geneva_cycle_schema",
+      "files": {
+        "evidence.json": "47c393f36b8e7b50e683b733e9ec7265138d70c0ba33a9c44c49f42c7b78535f",
+        "metadata.yaml": "9f0d70ee2506808e30e4fbba70f305e741e34d6a194d02575d49b67db5486cac",
+        "option_A.png": "69aa42757590556e887e86dc0257f4cb3c8cd6070bfb65c9430f99bf9068c7b2",
+        "option_B.png": "cff05c52bd15184ee506c4c678d2cbbbf430686bfc7e055807860da93f582ee1",
+        "option_C.png": "b63514cdb037799c6c78c75a23ee58e6775dce93d0c8f7ddb75636e2b628a086",
+        "option_D.png": "fab9319d43c198f264eece8263b38b472a37be175b8ad725b96d69fdff43c8be",
+        "option_E.png": "45849d9a9a9f4788c0f503394db2320751d0bc38beafc3a97c9729d9760f3520",
+        "option_F.png": "af392edb4ff180a1e7add8c51485106fe78a89db790f554e79fd55a47ef91408",
+        "option_G.png": "e591eaf1522beb86576cca18d3a6c8b7bdd064434bceec63a51537a6da213722",
+        "option_H.png": "b8c2fe7499337afcc06dd82b1399ce5a3ab2d0e5da0fd82cd22efb00bbb59d1f",
+        "option_I.png": "0fee06a1bcf473ff941879849a6fcd8896a48903c35d52d1257dca854382a827",
+        "option_J.png": "623f135d72daa6612f8cdd9ac81d7698685e3e6733be3411bbda11a811b116a9",
+        "option_K.png": "e466487491761e4a38da1e9ee2b905ff9b26af94714317784051ca3cfa7f0ece",
+        "option_L.png": "471001edc3e790d0e755ba5a20d7d218e134487979e4f051ef24a9966dd1e195",
+        "option_M.png": "a4245904e98126887d1a2093a80b64732b26e52897a8ba6aa2187d59f8055de5",
+        "option_N.png": "11d61b4a8c0ca41a87599e4586d46d73d0193c5dde388c6ab2ed37cdeb653efb",
+        "option_O.png": "0853820f8ceebcd18c79b66022888fb8cd924f814086b9aa75f5895cf6c93a53",
+        "option_P.png": "8d245d872e978cc0154869923b97eba69911049db58412f2905550f160a9bbe2",
+        "overview.png": "0035cf2109daa9862054ca9c72c241447a7e04e0a8544051e86d8311c4b31c91",
+        "prompt.txt": "44e7d5c9868a306419b0a34747efec1047197c7fc05949071725797652677641"
+      },
+      "group_id": "a451bf05",
+      "human_expected": null,
+      "n_images": 17,
+      "n_reference": 11,
+      "n_target": 4,
+      "options": {
+        "A": [
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "1486effa-370f-4a88-9f11-c3610e0888d0",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_23_881f91a9e9"
+          ]
+        ],
+        "B": [
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ]
+        ],
+        "C": [
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ]
+        ],
+        "D": [
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ]
+        ],
+        "E": [
+          [
+            "1486effa-370f-4a88-9f11-c3610e0888d0",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ]
+        ],
+        "F": [
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ]
+        ],
+        "G": [
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ]
+        ],
+        "H": [
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ]
+        ],
+        "I": [
+          [
+            "1486effa-370f-4a88-9f11-c3610e0888d0",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ]
+        ],
+        "J": [
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "1486effa-370f-4a88-9f11-c3610e0888d0",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ]
+        ],
+        "K": [
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "1486effa-370f-4a88-9f11-c3610e0888d0",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ]
+        ],
+        "L": [
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "1486effa-370f-4a88-9f11-c3610e0888d0",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ]
+        ],
+        "M": [
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "1486effa-370f-4a88-9f11-c3610e0888d0",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ]
+        ],
+        "N": [
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "1486effa-370f-4a88-9f11-c3610e0888d0",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "e7dcec28-bff9-4ffb-b2c7-07f14fb2207f",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ]
+        ],
+        "O": [
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "1486effa-370f-4a88-9f11-c3610e0888d0",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ]
+        ],
+        "P": [
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "039b9d72-4266-4d72-a14a-f7299dc811db",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "1486effa-370f-4a88-9f11-c3610e0888d0",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "3fe44338-148c-4172-91f9-a2105efd79df",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "487ea64c-5ee5-4e0d-bb81-193916b25d7b",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "5f4c52d6-4981-4a3a-8eea-05b985d2ca2d",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "61238a79-6a1e-4a98-96c7-3a096231020e",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "8092c205-28bf-45f8-92c8-418d0f83dc69",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_1600_881f91a9eb"
+          ],
+          [
+            "b29d50cc-ea3d-4627-b445-1cfb41a44538",
+            "ch_geneva_bike_23_881f91a9e9"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1589_881f91a9eb"
+          ],
+          [
+            "b3fdf974-6ea4-47c1-8411-2bab3541f78c",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ],
+          [
+            "f26c8385-b782-4a0f-90f4-f024493ac644",
+            "ch_geneva_bike_1597_881f91a9eb"
+          ]
+        ]
+      },
+      "prompt_chars": 20717,
+      "source_batch": "ch_grand_geneva_cycle_schema_physical_context_v9_seeded_20260718",
+      "source_path": "data/agents/stitching/batches/ch_grand_geneva_cycle_schema_physical_context_v9_seeded_20260718/a451bf05",
+      "stratum": "targeted_diagnostic"
+    },
+    {
+      "dataset": "au_sydney_roads",
+      "files": {
+        "evidence.json": "fcaca933f977da857948ef195aa86a407352b5db767b09209bb1f742a991eed7",
+        "metadata.yaml": "4924c14e7bb3fbe12742115d1db3c37d51dedf54b5e1dd07446d6850d9710006",
+        "option_A.png": "4951d49b8d6a13bacc5c8e5e2476fbd179d5ce0247e1011b079eab2a7279a093",
+        "overview.png": "75e8b4ae02ef237cc0d9d481d497a943c3bcf8ca2633ed54d0eb4f7533b99bcc",
+        "prompt.txt": "553f05ca7765bf91c4912ac2f9f2f0b68cb12c6944cfc6c980da73bcefd5f6da"
+      },
+      "group_id": "3fd8483c__p07ce5199df",
+      "human_expected": null,
+      "n_images": 2,
+      "n_reference": 1,
+      "n_target": 1,
+      "options": {
+        "A": [
+          [
+            "0740b48f-939a-439b-a934-aa1ec0004cd7",
+            "au_sydney_823158_88be0e274b"
+          ]
+        ]
+      },
+      "prompt_chars": 11226,
+      "source_batch": "au_sydney_roads_bulk_v7_20260718",
+      "source_path": "data/agents/stitching/batches/au_sydney_roads_bulk_v7_20260718/3fd8483c__p07ce5199df",
+      "stratum": "accepted_child_failed_parent"
+    },
+    {
+      "dataset": "fi_helsinki_roads",
+      "files": {
+        "evidence.json": "bc3f5a2ed2566c2dacd921fd419617b75d6ff6b704315f9591083a56ca8008ba",
+        "metadata.yaml": "5cf8109746581704fd269b61cfbb13bec41104373896d76529af805a911236be",
+        "option_A.png": "c64f68f58823e019aa3c49b8417bb2de19316a4100bd1bc7ceb4a741fc8fc7bf",
+        "option_B.png": "ec5c35d34bb08941d6d088277310ca97af654bfc77820a11ed5a2eafdd991871",
+        "option_C.png": "ec0c70c449967c48cf9540fa6a06aabfd20d40fc24e58fd514589140000e08be",
+        "option_D.png": "e6f4b18515c34576729bd86f1d1c8efd520274f46c0b84ca0b1ef178fd8ea98c",
+        "option_E.png": "7f7af79f8d384b75192f982500ef1a8ab56a5752fba1644be2d497365024389c",
+        "option_F.png": "b35dc476dbc677c298770c47c7a52b6c0f2459d95242730792cef88b1fad9456",
+        "option_G.png": "6c619750eff2607e508e2072ad9217b8e84bccd66f8fdbb01395baf18236aa33",
+        "option_H.png": "7373bb766313523c9e0e802005b668766ce4dc0a97fedfa1259c56a9835fc13e",
+        "option_I.png": "4f9e21a8ae8eb199189827046245a532ba834f41efbce8d4c318c5a57fee8466",
+        "option_J.png": "b1158e83b89b705bffb502851d4cc0e8d075c9ab296035854660804b40911d4e",
+        "overview.png": "c6e61e47e1836da7e13ae5195a57ecb58d815070a1c1cbb248f1a1ac2ad6b2c2",
+        "prompt.txt": "8bf2468c518c290c3bc9aba42a1776d7c308d27b4e474b7cd80e383ceb5ceeb6"
+      },
+      "group_id": "c8b85bbc__p07741daa80",
+      "human_expected": null,
+      "n_images": 11,
+      "n_reference": 6,
+      "n_target": 35,
+      "options": {
+        "A": [
+          [
+            "00636cb8-24cf-4db2-826c-41a0730533ca",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_590aa399-c7ec-49b6-a0c6-e4e7f3f9961f:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_2fc310a6-88ce-4552-9aa0-1df3cee83791:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_56018849-7f58-40fb-afb4-8b432a2c8d8a:3_881126c56b"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ]
+        ],
+        "B": [
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_2fc310a6-88ce-4552-9aa0-1df3cee83791:2_881126c53b"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_56018849-7f58-40fb-afb4-8b432a2c8d8a:3_881126c56b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_590aa399-c7ec-49b6-a0c6-e4e7f3f9961f:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+          ],
+          [
+            "00636cb8-24cf-4db2-826c-41a0730533ca",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+          ]
+        ],
+        "C": [
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_2fc310a6-88ce-4552-9aa0-1df3cee83791:2_881126c53b"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_56018849-7f58-40fb-afb4-8b432a2c8d8a:3_881126c56b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_590aa399-c7ec-49b6-a0c6-e4e7f3f9961f:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+          ],
+          [
+            "00636cb8-24cf-4db2-826c-41a0730533ca",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+          ]
+        ],
+        "D": [
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_2fc310a6-88ce-4552-9aa0-1df3cee83791:2_881126c53b"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_56018849-7f58-40fb-afb4-8b432a2c8d8a:3_881126c56b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_590aa399-c7ec-49b6-a0c6-e4e7f3f9961f:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+          ],
+          [
+            "00636cb8-24cf-4db2-826c-41a0730533ca",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+          ]
+        ],
+        "E": [
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_2fc310a6-88ce-4552-9aa0-1df3cee83791:2_881126c53b"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_56018849-7f58-40fb-afb4-8b432a2c8d8a:3_881126c56b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_590aa399-c7ec-49b6-a0c6-e4e7f3f9961f:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+          ],
+          [
+            "00636cb8-24cf-4db2-826c-41a0730533ca",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+          ]
+        ],
+        "F": [
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_2fc310a6-88ce-4552-9aa0-1df3cee83791:2_881126c53b"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_56018849-7f58-40fb-afb4-8b432a2c8d8a:3_881126c56b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_590aa399-c7ec-49b6-a0c6-e4e7f3f9961f:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+          ],
+          [
+            "00636cb8-24cf-4db2-826c-41a0730533ca",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+          ]
+        ],
+        "G": [
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_56018849-7f58-40fb-afb4-8b432a2c8d8a:3_881126c56b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_590aa399-c7ec-49b6-a0c6-e4e7f3f9961f:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+          ],
+          [
+            "00636cb8-24cf-4db2-826c-41a0730533ca",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+          ]
+        ],
+        "H": [
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_2fc310a6-88ce-4552-9aa0-1df3cee83791:2_881126c53b"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_590aa399-c7ec-49b6-a0c6-e4e7f3f9961f:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+          ],
+          [
+            "00636cb8-24cf-4db2-826c-41a0730533ca",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+          ]
+        ],
+        "I": [
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_2fc310a6-88ce-4552-9aa0-1df3cee83791:2_881126c53b"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_56018849-7f58-40fb-afb4-8b432a2c8d8a:3_881126c56b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+          ],
+          [
+            "00636cb8-24cf-4db2-826c-41a0730533ca",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+          ]
+        ],
+        "J": [
+          [
+            "00636cb8-24cf-4db2-826c-41a0730533ca",
+            "hel_road_d7047963-09ec-451a-b31f-4851ecf5a9ef:1_8811261b49"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_01b56503-f10f-4664-9f27-0c4be765eee9:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_04567672-c19e-4c88-872d-95ed3b3d898c:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_1a0bbdd9-a622-4942-9e71-0d01b2f20f02:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_2fc310a6-88ce-4552-9aa0-1df3cee83791:2_881126c53b"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_392d8b03-4833-4c36-9682-c0c3a6961e93:3_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_40296257-3144-4058-8b4a-d6d9c0083898:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_56f70523-0dc4-4227-b726-be5f3343ca70:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_590aa399-c7ec-49b6-a0c6-e4e7f3f9961f:2_881126c503"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5a62834f-b9e9-4546-90e3-a114cd245d6c:2_881126c515"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5cd46ef5-b36d-41f7-92f4-11f4b68da97e:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_5e208201-7086-4361-94c7-2c5554223eec:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_68ca0d6c-a5e4-4b91-bd0c-1ecc475bcb54:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_bd91d10c-0315-4060-9184-1e554de66265:2_881126c539"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_befc0c1b-416f-44c8-a332-e835169434b1:2_881126c5e5"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e69a6aec-1a6e-4c2f-bd1e-52dbdfe76d78:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_e8c9e0e6-80d7-4fc6-907d-b85d51a122b5:2_881126c5ed"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "8b2f3707-cfc6-41e9-9bbd-a17868523462",
+            "hel_road_f49bda90-902c-449d-b591-ac8fe492ce43:3_881126c501"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_35287c59-eca4-454c-9797-3b2436b7ab15:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_460fa76b-8db2-4bf3-9639-cfeed9e0b745:3_881126c5a7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_650c54f3-e2be-4d3c-895c-31fdfa68d133:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_7a35ffa6-1ecc-4ae1-987c-7d72019c3c6f:3_881126c5a3"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_83e547ef-28e5-428f-ba9f-4f6a3502a095:3_881126c5a3"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_9f5a1e85-40db-4f00-b64c-602ec4f033b0:3_881126c5a1"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_b5636102-39b5-4d90-8ff3-140edd2c9464:3_881126c5ad"
+          ],
+          [
+            "d4c0a99c-3742-4dfc-b720-89806c572532",
+            "hel_road_bb5771c6-4507-4f92-986f-426d96ca5f1f:3_881126c5a3"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_787a5ac5-edeb-40e4-8114-20decbe74032:3_881126c5e7"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_81be10fa-7e25-46d0-83c1-6aff5fb35745:3_881126c5e7"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_9897ccbb-7077-4706-8caa-f4bd3fa3ed2c:3_881126c5e7"
+          ],
+          [
+            "da53b8ba-8d7f-4043-a1a0-9e1b84f18b54",
+            "hel_road_f3d334ac-d19a-4249-a316-24dc7179ea41:3_881126c5e7"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_00c74142-110c-4d83-a546-5f6ad2537ef2:3_881126c50d"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_4adc93a7-d796-4314-84ec-28601c6608a1:3_881126c50d"
+          ],
+          [
+            "e6b45ce9-a62e-4976-8dde-593bf5823996",
+            "hel_road_75d5c0ad-64dc-4970-bd8a-3127c8da4ca9:1_881126c501"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_100e0dd6-d31e-48c6-9e36-5a4ac803ff21:3_881126c50d"
+          ],
+          [
+            "fd34ffcf-3b02-4538-9fa9-46844ee87e27",
+            "hel_road_56018849-7f58-40fb-afb4-8b432a2c8d8a:3_881126c56b"
+          ]
+        ]
+      },
+      "prompt_chars": 21846,
+      "source_batch": "fi_helsinki_roads_bulk_v7_20260718",
+      "source_path": "data/agents/stitching/batches/fi_helsinki_roads_bulk_v7_20260718/c8b85bbc__p07741daa80",
+      "stratum": "accepted_child_failed_parent"
+    }
+  ],
+  "harness_sha256": "59d2700f624f97ba8a8f33e70306d7fc998bb0689997d326549fa59e480a1076",
+  "opencode_override": {
+    "$schema": "https://opencode.ai/config.json",
+    "agent": {
+      "vote": {
+        "description": "Tool-less stitch-panel voter: answer ONLY from the attached evidence pack, never call tools.",
+        "mode": "primary",
+        "tools": {
+          "bash": false,
+          "edit": false,
+          "glob": false,
+          "grep": false,
+          "list": false,
+          "patch": false,
+          "read": false,
+          "task": false,
+          "todoread": false,
+          "todowrite": false,
+          "webfetch": false,
+          "write": false
+        }
+      }
+    },
+    "provider": {
+      "meta": {
+        "models": {
+          "muse-spark-1.3-contributor": {
+            "limit": {
+              "context": 1048576,
+              "output": 131072
+            },
+            "modalities": {
+              "input": [
+                "text",
+                "image",
+                "pdf",
+                "video"
+              ],
+              "output": [
+                "text"
+              ]
+            },
+            "name": "Muse Spark 1.3 Contributor",
+            "options": {
+              "include": [
+                "reasoning.encrypted_content"
+              ],
+              "reasoningEffort": "high",
+              "reasoningSummary": "auto"
+            },
+            "reasoning": true
+          }
+        },
+        "name": "Meta (Muse)",
+        "npm": "@ai-sdk/openai",
+        "options": {
+          "apiKey": "{env:META_API_KEY}",
+          "baseURL": "https://api.meta.ai/v1"
+        }
+      },
+      "openrouter": {
+        "models": {
+          "google/gemini-3.5-flash": {
+            "options": {
+              "provider": {
+                "allow_fallbacks": false,
+                "only": [
+                  "google-ai-studio/flex"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "panel": [
+    {
+      "effort": "high",
+      "model": "claude-fable-5-1",
+      "name": "claude",
+      "opencode_agent": null,
+      "routes": [],
+      "timeout": 480
+    },
+    {
+      "effort": "high",
+      "model": "gpt-6-astra",
+      "name": "codex",
+      "opencode_agent": null,
+      "routes": [],
+      "timeout": 480
+    },
+    {
+      "effort": "high",
+      "model": "meta/muse-spark-1.3-contributor",
+      "name": "muse",
+      "opencode_agent": "vote",
+      "routes": [],
+      "timeout": 480
+    }
+  ],
+  "purpose": "Purposive ten-pack smoke/diagnostic comparison, not a population accuracy estimate.",
+  "runner_sha256": "f4862c35899cf2560c3e9dc8aca168a60078c470f28c2043922186e0b2ac15c2",
+  "source_commit": "d13a93d75dd668028c2438c62ca4106f597b6de5",
+  "transport_note": "Existing invokers; Codex runs from a neutral temporary directory. Muse receives an explicit config override. Claude uses Read; the others receive native images."
+}

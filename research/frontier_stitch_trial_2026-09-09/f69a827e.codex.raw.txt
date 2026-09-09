@@ -1,0 +1,1 @@
+{"choice":"A","confidence":0.999,"reasoning":"R1 and R2 are consecutive portions of the same residential road, both closely overlapping T1. Their shared spans of 63.2 m and 91.2 m together cover nearly all of T1, so both correspondences are correct."}

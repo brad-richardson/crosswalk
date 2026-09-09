@@ -1,0 +1,9 @@
+{
+  "dataset": "us_boston_streets",
+  "error": "ProviderInvocationError: muse on group 72063362: invocation error: [Errno 2] No such file or directory: '/tmp/stitch_pack_yjb9lqzq/metadata.yaml' (errno 2=ENOENT, not retryable) \u2014 halting the run.",
+  "group_id": "72063362",
+  "model": "meta/muse-spark-1.3-contributor",
+  "provider": "muse",
+  "status": "error",
+  "wall_seconds": 22.47
+}

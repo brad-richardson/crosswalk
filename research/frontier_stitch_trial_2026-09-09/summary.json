@@ -1,0 +1,815 @@
+{
+  "abstain_ballots": 0,
+  "against_five_stored_human_rows": {
+    "claude": 4,
+    "codex": 4,
+    "muse": 4
+  },
+  "against_four_after_excluding_disputed_sydney_row": {
+    "claude": 4,
+    "codex": 4,
+    "muse": 4
+  },
+  "bootstrap_note": "Three earlier CLI calls returned but their answers were lost to a local capture bug. Error records and their selection manifest are retained in bootstrap_harness_error; they are not scored. Total provider calls: 33, retained ballots: 30.",
+  "cases": [
+    {
+      "choice_counts": {
+        "A": 3
+      },
+      "current": [
+        {
+          "choice": "A",
+          "confidence": 0.97,
+          "desired_edges": "",
+          "error": "",
+          "model": "claude-fable-5-1",
+          "none_reason": "",
+          "provider": "claude",
+          "reasoning": "R1 and R2 are two consecutive pieces of Everett Street that together span exactly the single target T1 (ref_aln=1.0 on both; tgt_aln 0.577+0.423=1.0; overlaps 112.8m and 82.6m, neither a sliver). The overview shows blue R1/R2 lying directly on red T1 along the same straight residential street with matching names. This is a classic N:1 split where both edges are true; Options B and C each drop a fully-overlapping real correspondence."
+        },
+        {
+          "choice": "A",
+          "confidence": 0.99,
+          "desired_edges": "",
+          "error": "",
+          "model": "gpt-6-astra",
+          "none_reason": "",
+          "provider": "codex",
+          "reasoning": "R1 and R2 form consecutive portions of the same Everett Street alignment covered by T1. Both reference segments fully overlap the target, with substantial shared spans of 112.8m and 82.6m that together cover T1. Option A includes both valid correspondences."
+        },
+        {
+          "choice": "A",
+          "confidence": 0.99,
+          "desired_edges": "",
+          "error": "",
+          "model": "meta/muse-spark-1.3-contributor",
+          "none_reason": "",
+          "provider": "muse",
+          "reasoning": "R1 and R2 are consecutive Everett Street residential segments that tile the long T1 EVERETT STREET (tgt_aln 0.577+0.423=1.0, ref_aln 1.0 both, overlaps 112.8m/82.6m). Same name/class/corridor, straight colinear overlap in all images. B leaves SE half uncovered, C leaves NW half uncovered. N:1 requires both edges."
+        }
+      ],
+      "dataset": "us_boston_streets",
+      "disputed_human_label": false,
+      "group_id": "72063362",
+      "historical_hash_matches": 0,
+      "historical_same_batch": [],
+      "human_expected": {
+        "choices": [
+          "A"
+        ],
+        "edges": [
+          [
+            "a374826e-6c16-4971-99c7-6655723d85ae",
+            "us_boston_streets_432_882a3066b9"
+          ],
+          [
+            "f192a418-962e-4983-8126-151f1f5c9e0e",
+            "us_boston_streets_432_882a3066b9"
+          ]
+        ],
+        "notes": "",
+        "session_id": "a09f7e95",
+        "source_sha256": "7fdf32c4374b35ac255d77f3e451698f17ac37293f19781f12e1e9682215720a"
+      },
+      "majority_choice": "A",
+      "n_agree_choice": 3,
+      "n_agree_semantics": 3,
+      "n_valid": 3,
+      "stratum": "human_exact_positive"
+    },
+    {
+      "choice_counts": {
+        "A": 3
+      },
+      "current": [
+        {
+          "choice": "A",
+          "confidence": 0.97,
+          "desired_edges": "",
+          "error": "",
+          "model": "claude-fable-5-1",
+          "none_reason": "",
+          "provider": "claude",
+          "reasoning": "T1 is one long target segment covering all of Chamberlain Street; R1 and R2 are two consecutive reference pieces of the same street that together span T1 (R2 north half, R1 south half). Both edges have ~1.0 ref alignment and substantial overlap (63m and 91m), same name and class, one corridor. This is a classic N:1 split, so both e1 and e2 are correct and only Option A includes both. B and C each drop a valid half."
+        },
+        {
+          "choice": "A",
+          "confidence": 0.999,
+          "desired_edges": "",
+          "error": "",
+          "model": "gpt-6-astra",
+          "none_reason": "",
+          "provider": "codex",
+          "reasoning": "R1 and R2 are consecutive portions of the same residential road, both closely overlapping T1. Their shared spans of 63.2 m and 91.2 m together cover nearly all of T1, so both correspondences are correct."
+        },
+        {
+          "choice": "A",
+          "confidence": 0.99,
+          "desired_edges": "",
+          "error": "",
+          "model": "meta/muse-spark-1.3-contributor",
+          "none_reason": "",
+          "provider": "muse",
+          "reasoning": "R1 and R2 are consecutive Chamberlain St residential pieces (north/south) and T1 CHAMBERLAIN STREET spans both: ref_aln~1.0 each, tgt_aln 0.407+0.587~1.0, overlaps 63m+91m, same corridor, high conf. Overview and Option A show full co-linear overlap; B/C each drop half the road. No sliver/borderline/mode issue."
+        }
+      ],
+      "dataset": "us_boston_streets",
+      "disputed_human_label": false,
+      "group_id": "f69a827e",
+      "historical_hash_matches": 0,
+      "historical_same_batch": [],
+      "human_expected": {
+        "choices": [
+          "A"
+        ],
+        "edges": [
+          [
+            "6fc832cc-1413-4c64-a1e0-12ef04935739",
+            "us_boston_streets_4483_882a3066b5"
+          ],
+          [
+            "f94a0f4c-999f-49c9-9044-cd311611978c",
+            "us_boston_streets_4483_882a3066b5"
+          ]
+        ],
+        "notes": "",
+        "session_id": "8b6a4d24",
+        "source_sha256": "7fdf32c4374b35ac255d77f3e451698f17ac37293f19781f12e1e9682215720a"
+      },
+      "majority_choice": "A",
+      "n_agree_choice": 3,
+      "n_agree_semantics": 3,
+      "n_valid": 3,
+      "stratum": "human_exact_positive"
+    },
+    {
+      "choice_counts": {
+        "B": 3
+      },
+      "current": [
+        {
+          "choice": "B",
+          "confidence": 0.6,
+          "desired_edges": "",
+          "error": "",
+          "model": "claude-fable-5-1",
+          "none_reason": "",
+          "provider": "claude",
+          "reasoning": "R1 is a short (~15m) cycleway segment lying directly on the William Street centerline at layer 0. e1 (R1->T2) pairs it with the Cross City Tunnel motorway, which is a tunnel (physical stack conflict), bike:no, and a different facility/role than a surface cycleway; under MI-1/MI-4 it is a no-match regardless of geometric coincidence. e2 (R1->T1) pairs the cycleway with the surface secondary road William Street: it is fully aligned (ref_aln 0.96), coincident with the road centerline, deg 2 continuation, and there is no affirmative sign of lateral separation, so per MI-4 the same-pavement reading stands and the edge is accepted. Option B contains exactly e2."
+        },
+        {
+          "choice": "B",
+          "confidence": 0.94,
+          "desired_edges": "",
+          "error": "",
+          "model": "gpt-6-astra",
+          "none_reason": "",
+          "provider": "codex",
+          "reasoning": "Accept e2: R1 aligns with T1 on the surface corridor, with no affirmative evidence of a physically separated cycle facility; the cycleway/secondary class difference alone does not defeat identity. Reject e1: T2 represents the Cross City Tunnel, a distinct underground facility conflicting with R1's layer-0 alignment. Option B contains exactly the accepted edge."
+        },
+        {
+          "choice": "B",
+          "confidence": 0.78,
+          "desired_edges": "",
+          "error": "",
+          "model": "meta/muse-spark-1.3-contributor",
+          "none_reason": "",
+          "provider": "muse",
+          "reasoning": "R1 is surface layer-0 cycleway. T2 is CROSS CITY TUNNEL motorway tunnel with bike:no/foot:no. R physical layer 0 vs T physical tunnel is conflicting stack plus motorway vs cycleway role incompatibility per MI-1, so e1 R1->T2 is no-match; replacing bike fragment with motorway tunnel fails MI-6. T1/T2 share ~143m centerline but role/class differs (surface secondary vs tunnel motorway), so they are stacked different facilities, not legitimate M:N per SA-2; both cannot match same R1, rejecting optimizer A. For e2 R1->T1 there is no affirmative separation: T1 physical unknown, no offset, no tagged distinct-mode access, no competing cycleway representation. Per MI-4 same-pavement reading stands and painted bike lane matches road. Small ~15m overlap is evidence only per MI-5. Final set is {e2} = Option B."
+        }
+      ],
+      "dataset": "au_sydney_roads",
+      "disputed_human_label": true,
+      "group_id": "66e22055",
+      "historical_hash_matches": 3,
+      "historical_same_batch": [
+        {
+          "choice": "B",
+          "confidence": "0.82",
+          "evidence_pack_sha256": "81e8d52338951ed564b2738ff59ec8421d2a5b2f4ecfe74d550c870b789774d2",
+          "model": "claude-opus-4-8",
+          "none_reason": "",
+          "provider": "claude"
+        },
+        {
+          "choice": "B",
+          "confidence": "0.94",
+          "evidence_pack_sha256": "81e8d52338951ed564b2738ff59ec8421d2a5b2f4ecfe74d550c870b789774d2",
+          "model": "gpt-5.6-sol",
+          "none_reason": "",
+          "provider": "codex"
+        },
+        {
+          "choice": "B",
+          "confidence": "0.92",
+          "evidence_pack_sha256": "81e8d52338951ed564b2738ff59ec8421d2a5b2f4ecfe74d550c870b789774d2",
+          "model": "meta/muse-spark-1.1",
+          "none_reason": "",
+          "provider": "muse"
+        }
+      ],
+      "human_expected": {
+        "choices": [
+          "NONE"
+        ],
+        "edges": [],
+        "notes": "R1 is separated infra from T1. T2 is underground",
+        "session_id": "deanchored_v1",
+        "source_sha256": "a222bc41d91a718a26a574ac13437c6d8a8ed868b8b6cf8d1f4d881674c72839"
+      },
+      "majority_choice": "B",
+      "n_agree_choice": 3,
+      "n_agree_semantics": 3,
+      "n_valid": 3,
+      "stratum": "human_exact_rejection"
+    },
+    {
+      "choice_counts": {
+        "NONE": 3
+      },
+      "current": [
+        {
+          "choice": "NONE",
+          "confidence": 0.9,
+          "desired_edges": "",
+          "error": "",
+          "model": "claude-fable-5-1",
+          "none_reason": "all_edges_no_match",
+          "provider": "claude",
+          "reasoning": "R1 is an unnamed footway with physical evidence layer -1, tunnel, indoor: an underground pedestrian passage beneath the Alt-Tempelhof junction. T1 and T2 are the surface tertiary road Alt-Tempelhof at layer 0. Under MI-1 a facility passing under another is not the same traveled way, and under MI-4/MI-6 a pedestrian tunnel is a separate feature from the roadway above it; replacing one with the other would change movement intent. Both e1 and e2 therefore fail the identity gate regardless of their overlap or confidence, so no option is correct."
+        },
+        {
+          "choice": "NONE",
+          "confidence": 0.99,
+          "desired_edges": "",
+          "error": "",
+          "model": "gpt-6-astra",
+          "none_reason": "all_edges_no_match",
+          "provider": "codex",
+          "reasoning": "Both edges pair an underground indoor footway at layer -1 with the surface Alt-Tempelhof roadway at layer 0. These are physically separate traveled ways; their projected overlaps do not establish identity. Neither e1 nor e2 is a match."
+        },
+        {
+          "choice": "NONE",
+          "confidence": 0.92,
+          "desired_edges": "",
+          "error": "",
+          "model": "meta/muse-spark-1.3-contributor",
+          "none_reason": "all_edges_no_match",
+          "provider": "muse",
+          "reasoning": "R1 is footway layer -1 tunnel indoor vs T1/T2 tertiary layer 0 surface road Alt-Tempelhof. Different physical traveled way and network role (pedestrian transverse/underpass vs ALONG tertiary). Replacement of aligned subline would change ALONG to ACROSS. Vertical layer separation confirms different facilities. Both e1 R1-T1 and e2 R1-T2 fail MI-1/MI-6; no identity-compatible edge remains."
+        }
+      ],
+      "dataset": "de_berlin_roads",
+      "disputed_human_label": false,
+      "group_id": "d4d2e782",
+      "historical_hash_matches": 3,
+      "historical_same_batch": [
+        {
+          "choice": "NONE",
+          "confidence": "0.82",
+          "evidence_pack_sha256": "ae4dcc0dca4062aac4062c1394a63804a77073457a0e3f1ad27b38fb9eed36be",
+          "model": "claude-opus-4-8",
+          "none_reason": "all_edges_no_match",
+          "provider": "claude"
+        },
+        {
+          "choice": "NONE",
+          "confidence": "0.99",
+          "evidence_pack_sha256": "ae4dcc0dca4062aac4062c1394a63804a77073457a0e3f1ad27b38fb9eed36be",
+          "model": "gpt-5.6-sol",
+          "none_reason": "all_edges_no_match",
+          "provider": "codex"
+        },
+        {
+          "choice": "NONE",
+          "confidence": "0.98",
+          "evidence_pack_sha256": "ae4dcc0dca4062aac4062c1394a63804a77073457a0e3f1ad27b38fb9eed36be",
+          "model": "meta/muse-spark-1.1",
+          "none_reason": "all_edges_no_match",
+          "provider": "muse"
+        }
+      ],
+      "human_expected": {
+        "choices": [
+          "NONE"
+        ],
+        "edges": [],
+        "notes": "",
+        "session_id": "deanchored_v1",
+        "source_sha256": "43c4a508eb58337a47c1a9b491f2af6888fad3b1526438fc89bed09dd1b8b892"
+      },
+      "majority_choice": "NONE",
+      "n_agree_choice": 3,
+      "n_agree_semantics": 3,
+      "n_valid": 3,
+      "stratum": "human_exact_rejection"
+    },
+    {
+      "choice_counts": {
+        "NONE": 3
+      },
+      "current": [
+        {
+          "choice": "NONE",
+          "confidence": 0.9,
+          "desired_edges": "",
+          "error": "",
+          "model": "claude-fable-5-1",
+          "none_reason": "all_edges_no_match",
+          "provider": "claude",
+          "reasoning": "R1 is \u555f\u5fb7\u96a7\u9053 Kai Tak Tunnel (trunk), and the aligned portion of every candidate edge is tagged layer -1 tunnel, while T1/T2/T3 are Kowloon City Road at layer 0, a surface street. The tunnel runs beneath Kowloon City Road along this stretch; the geometry coincides in plan only because one passes under the other. Per MI-1 a through facility that passes over or under another facility is not a match, and per MI-6 swapping a trunk tunnel subline for a surface local road changes movement intent. Different physical traveled way, different layer, different role, different name. All displayed edges are no-match, so no option (each includes at least one edge) is acceptable."
+        },
+        {
+          "choice": "NONE",
+          "confidence": 0.99,
+          "desired_edges": "",
+          "error": "",
+          "model": "gpt-6-astra",
+          "none_reason": "all_edges_no_match",
+          "provider": "codex",
+          "reasoning": "All three edges align R1's explicitly underground tunnel portion (layer -1) with KOWLOON CITY ROAD segments explicitly at layer 0. These represent vertically separate traveled ways despite their parallel geometry. No candidate edge satisfies physical identity."
+        },
+        {
+          "choice": "NONE",
+          "confidence": 0.85,
+          "desired_edges": "",
+          "error": "",
+          "model": "meta/muse-spark-1.3-contributor",
+          "none_reason": "all_edges_no_match",
+          "provider": "muse",
+          "reasoning": "R1 is Kai Tak Tunnel trunk with aligned fractions layer -1 tunnel; T1/T2/T3 are all KOWLOON CITY ROAD layer 0 ground with full target coverage on same 2D projection. Coincident 2D geometry is vertical stacking, not same physical traveled way. Different name, different level/tunnel flag, different network role fails MI-1/MI-6 replacement (tunnel trunk vs surface road). All three edges are no-match."
+        }
+      ],
+      "dataset": "hk_hongkong_roads",
+      "disputed_human_label": false,
+      "group_id": "4eed5e80",
+      "historical_hash_matches": 3,
+      "historical_same_batch": [
+        {
+          "choice": "NONE",
+          "confidence": "0.76",
+          "evidence_pack_sha256": "5c09b3cf4c7005af46667aa5600a49a027cfd08614ff56b32edd7f2c87da059e",
+          "model": "claude-opus-4-8",
+          "none_reason": "all_edges_no_match",
+          "provider": "claude"
+        },
+        {
+          "choice": "NONE",
+          "confidence": "0.99",
+          "evidence_pack_sha256": "5c09b3cf4c7005af46667aa5600a49a027cfd08614ff56b32edd7f2c87da059e",
+          "model": "gpt-5.6-sol",
+          "none_reason": "all_edges_no_match",
+          "provider": "codex"
+        },
+        {
+          "choice": "NONE",
+          "confidence": "0.9",
+          "evidence_pack_sha256": "5c09b3cf4c7005af46667aa5600a49a027cfd08614ff56b32edd7f2c87da059e",
+          "model": "meta/muse-spark-1.1",
+          "none_reason": "all_edges_no_match",
+          "provider": "muse"
+        }
+      ],
+      "human_expected": {
+        "choices": [
+          "NONE"
+        ],
+        "edges": [],
+        "notes": "",
+        "session_id": "deanchored_v1",
+        "source_sha256": "4c3e73ed41147ef20abe0587f586c9724ef563628b6f4e2731ea1d89ab072b57"
+      },
+      "majority_choice": "NONE",
+      "n_agree_choice": 3,
+      "n_agree_semantics": 3,
+      "n_valid": 3,
+      "stratum": "human_exact_rejection"
+    },
+    {
+      "choice_counts": {
+        "A": 1,
+        "NONE": 2
+      },
+      "current": [
+        {
+          "choice": "NONE",
+          "confidence": 0.55,
+          "desired_edges": "[[\"R1\", \"T10\"], [\"R1\", \"T13\"], [\"R1\", \"T4\"], [\"R1\", \"T6\"], [\"R2\", \"T10\"], [\"R2\", \"T13\"], [\"R2\", \"T4\"], [\"R2\", \"T6\"], [\"R3\", \"T1\"], [\"R3\", \"T2\"], [\"R3\", \"T3\"], [\"R3\", \"T4\"], [\"R3\", \"T5\"]]",
+          "error": "",
+          "model": "claude-fable-5-1",
+          "none_reason": "no_exact_option",
+          "provider": "claude",
+          "reasoning": "West end: R1 and R2 are the two split carriageways of It\u00e4tuulenkuja and the target draws one centerline (T6->T13->T10->T4) between them that tiles each ref (R1 sums to ~0.99, R2 to ~0.95), so all eight R1/R2 edges (e1-e8) are legitimate M:N per MI-2, and T4 also straddles the merge into R3 (e14, same way, junction anchor). Along R3 the target carries two stacked representations on the same centerline: a tertiary tunnel chain T3/T5 (layer -11) and a surface service chain T7/T11/T9/T8 (layer 0) that coincides with it for ~86m+ (same-side coincidence). R3 is tagged layer -1/tunnel over exactly the T3+T5 spans and continues as the tertiary mainline T4->T3->T5->T1->T2, so by road role and network continuity R3 is the tunnel roadway; the deck-level service road above it is a physically separate traveled way (conflicting layer stack over the aligned span, MI-1/MI-4), so e15, e16, e17, e18 are not matches. T12 is an unnamed service road laterally offset north of T2 over the same span of R3 (T2 sits on the ref line), i.e. a parallel service road, so e12 is rejected. Accepted set: e1-e8, e14, e13, e11, e9, e10. Every offered option includes the stacked service-road edges (e15, e16, e18), so no option matches exactly."
+        },
+        {
+          "choice": "NONE",
+          "confidence": 0.91,
+          "desired_edges": "",
+          "error": "",
+          "model": "gpt-6-astra",
+          "none_reason": "insufficient_evidence",
+          "provider": "codex",
+          "reasoning": "Every option includes R1\u2013T10 despite conflicting explicit layers (0 versus \u22121). R3 also overlaps both surface service roads and tunnel targets, with mixed physical evidence over its aligned spans. The images and supplied transition summaries do not establish which portions represent the same traveled way, particularly for coincident T3/T7. An exact accepted edge set cannot be determined from geometry and naming alone."
+        },
+        {
+          "choice": "A",
+          "confidence": 0.88,
+          "desired_edges": "",
+          "error": "",
+          "model": "meta/muse-spark-1.3-contributor",
+          "none_reason": "",
+          "provider": "muse",
+          "reasoning": "All 18 edges are ALONG same facility It\u00e4tuulenkuja with overlapping colinear geometry. Class tertiary/service vs residential and layer -11/-1 vs 0 and restricted vs class-default access are representation differences per MI-2/MI-5, not role changes; no lateral separation, no ALONG->ACROSS replacement (MI-1/MI-6). Short overlaps e14 6.8m, e1/e2/e4/e5/e6/e8 ~8m, e17 10m full-T9 are same-direction junction anchors per MI-3, not endpoint touches. T3/T7 same-side coincidence shares name and corridor continuity, both kept in every option; R1/R2 are split carriageways both matching same T centerlines as M:N per MI-2. No identity-incompatible edge, so SA-2 requires keeping all mutually consistent edges. Option A contains all and only e1-e18."
+        }
+      ],
+      "dataset": "fi_helsinki_roads",
+      "disputed_human_label": false,
+      "group_id": "92c0997f",
+      "historical_hash_matches": 3,
+      "historical_same_batch": [
+        {
+          "choice": "NONE",
+          "confidence": "0.44",
+          "evidence_pack_sha256": "9627122f2e6dbb01889a41520d55ac9ad96578556916369a547501fd279d9449",
+          "model": "claude-opus-4-8",
+          "none_reason": "insufficient_evidence",
+          "provider": "claude"
+        },
+        {
+          "choice": "NONE",
+          "confidence": "0.93",
+          "evidence_pack_sha256": "9627122f2e6dbb01889a41520d55ac9ad96578556916369a547501fd279d9449",
+          "model": "gpt-5.6-sol",
+          "none_reason": "insufficient_evidence",
+          "provider": "codex"
+        },
+        {
+          "choice": "A",
+          "confidence": "0.76",
+          "evidence_pack_sha256": "9627122f2e6dbb01889a41520d55ac9ad96578556916369a547501fd279d9449",
+          "model": "meta/muse-spark-1.1",
+          "none_reason": "",
+          "provider": "muse"
+        }
+      ],
+      "human_expected": null,
+      "majority_choice": "NONE",
+      "n_agree_choice": 2,
+      "n_agree_semantics": 1,
+      "n_valid": 3,
+      "stratum": "targeted_diagnostic"
+    },
+    {
+      "choice_counts": {
+        "A": 2,
+        "D": 1
+      },
+      "current": [
+        {
+          "choice": "A",
+          "confidence": 0.8,
+          "desired_edges": "",
+          "error": "",
+          "model": "claude-fable-5-1",
+          "none_reason": "",
+          "provider": "claude",
+          "reasoning": "R1 is a single cycleway segment (bike/foot designated, motor access unknown) whose geometry lies directly on the chain T2 -> T1 -> T3 (three end-to-end service segments). The three aligned reference fractions (0.235 + 0.48 + 0.29) tile R1 to ~1.0, T1 and T2 are fully covered, and T3 is partially covered only because it continues NE beyond R1's end \u2014 a clean coverage partition from different segmentation (MI-2). All three are same-direction ALONG on the same traveled way with no lateral offset visible, so per MI-4 the shared-pavement reading stands and all three are identity matches; no conflicts exist among them. The only caution is a partial bridge / layer 0->1 on R1 within the T1 span while T1 is tagged layer 0, but the exact coverage tiling, endpoint topology and coincident geometry resolve that as a tagging difference rather than a separate structure. Option A contains exactly e1, e2, e3."
+        },
+        {
+          "choice": "D",
+          "confidence": 0.9,
+          "desired_edges": "",
+          "error": "",
+          "model": "gpt-6-astra",
+          "none_reason": "",
+          "provider": "codex",
+          "reasoning": "Accept e2 and e3: their aligned portions follow the same corridor at layer 0, consistent with segmentation differences and shared-pavement cycleway representation. Reject e1 because R1 transitions onto a layer-1 bridge within its overlap with T1, while T1 remains explicitly layer 0; the coincident geometry therefore does not establish the same physical traveled way."
+        },
+        {
+          "choice": "A",
+          "confidence": 0.9,
+          "desired_edges": "",
+          "error": "",
+          "model": "meta/muse-spark-1.3-contributor",
+          "none_reason": "",
+          "provider": "muse",
+          "reasoning": "R1 cycleway vs T1/T2/T3 service triggers MI-4 same-pavement vs separate-track test. No visible lateral offset in overview/options; geometries are coincident. Clean coverage partition: ref_aln 0.235+0.48+0.29=1.005 tiles R1 (~134m) with west-to-east order T2-T1-T3, T1/T2 fully contained (tgt_aln 1.0). Per MI-4 this structural tiling supports same-pavement match. Class mismatch cycleway/service is representation difference per MI-2/MI-5, not a verdict. R bridge partial on e1 vs T layer 0 is not a resolved conflict because absent bridge flag is unknown, not ground, and tiling plus coincidence resolves it. Tagged bike/foot access describes role, not separation per MI-4. All three edges pass MI-1/MI-3/MI-6 as same ALONG facility, are mutually consistent partitioning R1, so SA-2 preserves full 1:3 set = Option A."
+        }
+      ],
+      "dataset": "fi_helsinki_roads",
+      "disputed_human_label": false,
+      "group_id": "7175635e",
+      "historical_hash_matches": 3,
+      "historical_same_batch": [
+        {
+          "choice": "D",
+          "confidence": "0.58",
+          "evidence_pack_sha256": "305715880ab0ce0145e114ed7c90c3ceae0815d822b2377b7f867cc5da28cb10",
+          "model": "claude-opus-4-8",
+          "none_reason": "",
+          "provider": "claude"
+        },
+        {
+          "choice": "A",
+          "confidence": "0.91",
+          "evidence_pack_sha256": "305715880ab0ce0145e114ed7c90c3ceae0815d822b2377b7f867cc5da28cb10",
+          "model": "gpt-5.6-sol",
+          "none_reason": "",
+          "provider": "codex"
+        },
+        {
+          "choice": "A",
+          "confidence": "0.88",
+          "evidence_pack_sha256": "305715880ab0ce0145e114ed7c90c3ceae0815d822b2377b7f867cc5da28cb10",
+          "model": "meta/muse-spark-1.1",
+          "none_reason": "",
+          "provider": "muse"
+        }
+      ],
+      "human_expected": null,
+      "majority_choice": "A",
+      "n_agree_choice": 2,
+      "n_agree_semantics": 2,
+      "n_valid": 3,
+      "stratum": "targeted_diagnostic"
+    },
+    {
+      "choice_counts": {
+        "P": 3
+      },
+      "current": [
+        {
+          "choice": "P",
+          "confidence": 0.5,
+          "desired_edges": "",
+          "error": "",
+          "model": "claude-fable-5-1",
+          "none_reason": "",
+          "provider": "claude",
+          "reasoning": "Targets are the 'Chancy-Bellegarde' signed route over Route de la Douane (T4, T3 bridge span, T2 junction piece) and Route de Bellegarde (T1). Identity first: all secondary-road references (R1-R9, R11) are the same traveled way as the route and are ALONG/ALONG. R10 is a separately mapped footway (class footway, foot=designated, bike=yes) with its own bridge and a consistent lateral offset (2.4m from T3 where R8 sits at 0.2m, 2.1m from T4, 1.6m from T2); T3's geometry lies on the road R8, so the route follows the road and R10 is a parallel facility per MI-4. Reject e13, e16, e17, which removes A, D, G, H, J-N. Among the rest, T1 is tiled by R3 (0.766), R2 (0.167), R6/R7 (0.044 each, parallel pair with coincident tie points) so e3, e4, e7, e8 are all accepted, leaving only O and P. The remaining difference is the short segmentation-offset sublines: e9 (R8's last 3.6m onto T2, off 0.4m, completes R8 to 0.986 and T2 to 0.973 with R1||R9 + R11) and e1/e15 (R1 and R9 each continue ~6m around the corner onto T1, giving R1 a 1.000 partition and T1 0.997). These are same-direction, same-role, corridor-supported sublines created by node offsets between datasets, not different continuations, and SA-2 says not to drop them for simplicity. Option P is exactly all edges minus the three R10 footway edges. Main residual doubt is whether a curator would treat the 3.6-6.7m corner pieces as endpoint clips (which would make O correct)."
+        },
+        {
+          "choice": "P",
+          "confidence": 0.91,
+          "desired_edges": "",
+          "error": "",
+          "model": "gpt-6-astra",
+          "none_reason": "",
+          "provider": "codex",
+          "reasoning": "Accept e1\u2013e12, e14, and e15 as same-road itinerary matches, preserving segmentation and carriageway representation differences. The short R1\u2013T1, R8\u2013T2, and R9\u2013T1 overlaps are consistent with corridor continuity and coverage partitioning. The itinerary's layer metadata does not establish a separate ground-level facility beneath R8's bridge. Exclude e13, e16, and e17: R10 represents the adjacent footway, while the itinerary follows the roadway represented by R8. Option P contains exactly these accepted edges."
+        },
+        {
+          "choice": "P",
+          "confidence": 0.88,
+          "desired_edges": "",
+          "error": "",
+          "model": "meta/muse-spark-1.3-contributor",
+          "none_reason": "",
+          "provider": "muse",
+          "reasoning": "Targets are signed Chancy-Bellegarde routes, so route-follows-road matches road per NOTE/MI-4. Core high-quality edges R3-T1 225m off0.7, R8-T3 89m off0.2, R8-T4 117m off1.0, R4-T4,R5-T4 must stay. R10 footway competes for same T2/T3/T4 spans with worse offsets (2.4m vs 0.2m for T3, 2.1m vs 1.0m for T4, 1.6m vs 0.4-1.3m for T2), lower confs 0.515/0.325/0.731 vs 0.989/0.989, and no-name vs Route de la Douane continuity with R4/R5, so exclude e13,e16,e17 as separate parallel facility. Remaining road edges form clean tilings with dual-carriageway pairs: R1+R9 share T2 10.6m spans plus 5.8/6.7m T1 tips, R6+R7 share T1 ~13m, R4+R5 share T4 ~32m, R2+R3+R6/R7 tile T1 to ~100%, R1/R9+R11+R8-tip tile T2 to ~97%, R8 tiles T3 96.8% and splits T3/T4. Excluding e1,e15,e9 as in O leaves 35% R1/R9 gaps and 21% T2 gap at internal route boundaries where splits expected. Keep tiny junction anchors e1,e9,e15 per MI-3/SA-3. Exact set is all except R10 = Option P."
+        }
+      ],
+      "dataset": "ch_grand_geneva_cycle_schema",
+      "disputed_human_label": false,
+      "group_id": "a451bf05",
+      "historical_hash_matches": 3,
+      "historical_same_batch": [
+        {
+          "choice": "O",
+          "confidence": "0.68",
+          "evidence_pack_sha256": "eed32c1225f2a5f02e4846191f28fc22452d82af0946cdfe6b871305ae6cb67e",
+          "model": "claude-opus-4-8",
+          "none_reason": "",
+          "provider": "claude"
+        },
+        {
+          "choice": "P",
+          "confidence": "0.96",
+          "evidence_pack_sha256": "eed32c1225f2a5f02e4846191f28fc22452d82af0946cdfe6b871305ae6cb67e",
+          "model": "gpt-5.6-sol",
+          "none_reason": "",
+          "provider": "codex"
+        },
+        {
+          "choice": "P",
+          "confidence": "0.78",
+          "evidence_pack_sha256": "eed32c1225f2a5f02e4846191f28fc22452d82af0946cdfe6b871305ae6cb67e",
+          "model": "meta/muse-spark-1.1",
+          "none_reason": "",
+          "provider": "muse"
+        }
+      ],
+      "human_expected": null,
+      "majority_choice": "P",
+      "n_agree_choice": 3,
+      "n_agree_semantics": 3,
+      "n_valid": 3,
+      "stratum": "targeted_diagnostic"
+    },
+    {
+      "choice_counts": {
+        "A": 3
+      },
+      "current": [
+        {
+          "choice": "A",
+          "confidence": 0.95,
+          "desired_edges": "",
+          "error": "",
+          "model": "claude-fable-5-1",
+          "none_reason": "",
+          "provider": "claude",
+          "reasoning": "R1 (Pacific Highway, trunk) sits directly on the northeast portion of T1 (PACIFIC, primary), collinear and same direction on the same traveled way. Coverage is ref 0.915 / tgt 0.502 with ~29m overlap, which is a straightforward segmentation-length difference, not a different feature. Names match; the trunk/primary class difference is a representation difference (MI-2/MI-5). No parallel carriageway, crossing, or role change is involved, so e1 is an ALONG-ALONG identity match and Option A contains exactly that edge."
+        },
+        {
+          "choice": "A",
+          "confidence": 0.99,
+          "desired_edges": "",
+          "error": "",
+          "model": "gpt-6-astra",
+          "none_reason": "",
+          "provider": "codex",
+          "reasoning": "R1 and T1 follow the same traveled way and direction along Pacific Highway. The substantial aligned overlap supports identity; differing segment lengths and trunk/primary classifications do not indicate separate facilities. Accept e1, exactly represented by Option A."
+        },
+        {
+          "choice": "A",
+          "confidence": 0.95,
+          "desired_edges": "",
+          "error": "",
+          "model": "meta/muse-spark-1.3-contributor",
+          "none_reason": "",
+          "provider": "muse",
+          "reasoning": "R1 'Pacific Highway' trunk and T1 'PACIFIC' primary share name and compatible high-level role, with substantial aligned overlap (ref_aln 0.915, tgt_aln 0.502, ~29.4m) and conf 1.0. Option image shows co-linear along overlap, not parallel carriageways or crossing. Passes MI-1/MI-3, no SLIVER/BORDERLINE. Single-edge 1:1 group, so final set is e1 = R1-T1 which is exactly Option A."
+        }
+      ],
+      "dataset": "au_sydney_roads",
+      "disputed_human_label": false,
+      "group_id": "3fd8483c__p07ce5199df",
+      "historical_hash_matches": 3,
+      "historical_same_batch": [
+        {
+          "choice": "A",
+          "confidence": "0.97",
+          "evidence_pack_sha256": "e40d63feb3523661a6778b1b433e29548fa7507f1b1c9ce6bfc810e9b7527ac9",
+          "model": "claude-opus-4-8",
+          "none_reason": "",
+          "provider": "claude"
+        },
+        {
+          "choice": "A",
+          "confidence": "0.99",
+          "evidence_pack_sha256": "e40d63feb3523661a6778b1b433e29548fa7507f1b1c9ce6bfc810e9b7527ac9",
+          "model": "gpt-5.6-sol",
+          "none_reason": "",
+          "provider": "codex"
+        },
+        {
+          "choice": "A",
+          "confidence": "0.98",
+          "evidence_pack_sha256": "e40d63feb3523661a6778b1b433e29548fa7507f1b1c9ce6bfc810e9b7527ac9",
+          "model": "meta/muse-spark-1.1",
+          "none_reason": "",
+          "provider": "muse"
+        }
+      ],
+      "human_expected": null,
+      "majority_choice": "A",
+      "n_agree_choice": 3,
+      "n_agree_semantics": 3,
+      "n_valid": 3,
+      "stratum": "accepted_child_failed_parent"
+    },
+    {
+      "choice_counts": {
+        "A": 3
+      },
+      "current": [
+        {
+          "choice": "A",
+          "confidence": 0.82,
+          "desired_edges": "",
+          "error": "",
+          "model": "claude-fable-5-1",
+          "none_reason": "",
+          "provider": "claude",
+          "reasoning": "Single along-corridor M:N on the same motorway. Every candidate is a same-direction, same-role subline of the same traveled way; no ramps, crossings, or parallel carriageways appear among the labeled segments. The disputed edges are all targets that straddle a reference split point and partition cleanly: T4 (R5 0.663 + R6 0.338), T20 (R5 0.723 + R2 0.277), T23 (R4 0.803 + R3 0.197), T34 (R4 0.728 + R2 0.272), and T31 (R1 0.644 + R3 0.355). Reference coverage also tiles to ~1.0 only when these are kept (R2 0.991, R3 0.996, R4 1.0, R5 1.0, R1 0.993); dropping e11 would leave an unexplained ~280 m gap at the NE end of R3. T31's 'primary' class and blank name are tag differences at the motorway-to-primary transition, not a different feature, and the crop shows it continuing the same corridor line with no lateral offset. Per SA-2 the full mutually consistent set is correct, which is Option A; J omits e11 and the others drop further legitimate split-spanning edges."
+        },
+        {
+          "choice": "A",
+          "confidence": 0.97,
+          "desired_edges": "",
+          "error": "",
+          "model": "gpt-6-astra",
+          "none_reason": "",
+          "provider": "codex",
+          "reasoning": "All 40 edges represent aligned portions of the same continuous traveled way. The shared targets T4, T20, T23, T34, and T31 partition across adjacent reference segments, supporting legitimate M:N matches. In particular, R1\u2013T31 and R3\u2013T31 cover complementary fractions of T31 (0.644 and 0.355); the primary/motorway class difference alone does not defeat the visible corridor identity. The short target segments also retain same-way identity. Only A preserves all these edges."
+        },
+        {
+          "choice": "A",
+          "confidence": 0.95,
+          "desired_edges": "",
+          "error": "",
+          "model": "meta/muse-spark-1.3-contributor",
+          "none_reason": "",
+          "provider": "muse",
+          "reasoning": "All 40 edges are same-facility ALONG matches (Porvoonvayla/Valtatie 7 motorway corridor, class differences allowed per MI-2). Ref and target aligned fractions tile to ~1.0: R3 sum ~0.996, R4 sum 1.0, R2 sum ~0.991, R5 sum 1.0; targets split cleanly e.g. T31 0.644+0.355, T23 0.197+0.803, T20 0.277+0.723, T34 0.728+0.272, T4 0.663+0.338. Dropping e2,e11,e16,e34 creates coverage gaps and splits the tree graph (41 nodes/40 edges, all cut-edges). Low conf e11=0.738 does not override 282m same-role overlap per MI-5. Per SA-2 preserve full M:N, so exact set is all 40 edges = Option A."
+        }
+      ],
+      "dataset": "fi_helsinki_roads",
+      "disputed_human_label": false,
+      "group_id": "c8b85bbc__p07741daa80",
+      "historical_hash_matches": 3,
+      "historical_same_batch": [
+        {
+          "choice": "A",
+          "confidence": "0.78",
+          "evidence_pack_sha256": "16dfc05fa441d08fa23a873ccc58dbf608f7248a1197a500cb232bce4ad5d724",
+          "model": "claude-opus-4-8",
+          "none_reason": "",
+          "provider": "claude"
+        },
+        {
+          "choice": "A",
+          "confidence": "0.999",
+          "evidence_pack_sha256": "16dfc05fa441d08fa23a873ccc58dbf608f7248a1197a500cb232bce4ad5d724",
+          "model": "gpt-5.6-sol",
+          "none_reason": "",
+          "provider": "codex"
+        },
+        {
+          "choice": "A",
+          "confidence": "0.9",
+          "evidence_pack_sha256": "16dfc05fa441d08fa23a873ccc58dbf608f7248a1197a500cb232bce4ad5d724",
+          "model": "meta/muse-spark-1.1",
+          "none_reason": "",
+          "provider": "muse"
+        }
+      ],
+      "human_expected": null,
+      "majority_choice": "A",
+      "n_agree_choice": 3,
+      "n_agree_semantics": 3,
+      "n_valid": 3,
+      "stratum": "accepted_child_failed_parent"
+    }
+  ],
+  "completed_valid_ballots": 30,
+  "cost": "Actual billed cost and token usage were not captured; no dollar estimate is asserted.",
+  "datasets": 6,
+  "existing_policy_routing": {
+    "auto_accept": 4,
+    "human_review": 6
+  },
+  "latency_seconds_per_ballot_including_cli_overhead": {
+    "claude": {
+      "max": 426.55,
+      "median": 24.88,
+      "min": 13.81,
+      "sum": 884.38
+    },
+    "codex": {
+      "max": 24.07,
+      "median": 8.64,
+      "min": 6.59,
+      "sum": 121.56
+    },
+    "muse": {
+      "max": 351.04,
+      "median": 41.29,
+      "min": 12.29,
+      "sum": 703.4
+    }
+  },
+  "models_requested": [
+    {
+      "effort": "high",
+      "model": "claude-fable-5-1",
+      "name": "claude",
+      "opencode_agent": null,
+      "routes": [],
+      "timeout": 480
+    },
+    {
+      "effort": "high",
+      "model": "gpt-6-astra",
+      "name": "codex",
+      "opencode_agent": null,
+      "routes": [],
+      "timeout": 480
+    },
+    {
+      "effort": "high",
+      "model": "meta/muse-spark-1.3-contributor",
+      "name": "muse",
+      "opencode_agent": "vote",
+      "routes": [],
+      "timeout": 480
+    }
+  ],
+  "packs": 10,
+  "packs_with_incomplete_quorum": 0,
+  "purpose": "Descriptive diagnostic; purposive small sample, shared historical prompts, no fresh human adjudication.",
+  "two_one_choice_packs": 2,
+  "unanimous_choice_packs": 8,
+  "unanimous_semantics_packs": 8
+}
